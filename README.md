@@ -37,6 +37,42 @@ Lifecycle commands update task frontmatter, append an `## Agent sessions` trace,
 
 Recent Codex sessions used `oaw` for a few recurring jobs that are hard to do reliably with plain text search.
 
+User prompts that should trigger `oaw` resolution include direct task IDs, `obs:` references, and project-scoped aliases:
+
+```text
+clarify in AGT-TSK-obsidian-task-ids that the pmx helper is here: ...
+```
+
+```bash
+oaw resolve AGT-TSK-obsidian-task-ids
+```
+
+```text
+read AGT-TSK-obsidian-task-ids, brainstorm with me to lock the decisions before we start a goal session...
+```
+
+```bash
+oaw resolve AGT-TSK-obsidian-task-ids
+```
+
+```text
+is cc-multi-cli mentioned anywhere else in obs:CDX?
+```
+
+```bash
+oaw resolve obs:CDX     # currently reports a missing short project alias
+oaw resolve --path CDX-index
+```
+
+```text
+Read obs:FAB-index and obs:FAB-REF-next-session-packet.
+```
+
+```bash
+oaw resolve obs:FAB-index
+oaw resolve obs:FAB-REF-next-session-packet
+```
+
 Resolve an Obsidian reference before editing or searching around it. In one session, a short project reference like `obs:CDX` was misread as a literal folder; the follow-up OAW task now resolves by frontmatter ID instead:
 
 ```bash
