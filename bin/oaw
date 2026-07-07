@@ -1,0 +1,437 @@
+#!/usr/bin/env python3
+"""Resolve Obsidian IDs and update project task lifecycle state."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import json
+import os
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+DEFAULT_VAULT = Path("/path/to/vault")
+SESSION_ENV = [
+    ("Codex", "CODEX_THREAD_ID"),
+    ("Claude Code", "CLAUDE_SESSION_ID"),
+    ("Claude Code", "CLAUDE_CODE_SESSION_ID"),
+    ("OpenCode", "OPENCODE_SESSION_ID"),
+    ("Gemini", "GEMINI_SESSION_ID"),
+]
+
+
+class OawError(Exception):
+    """User-facing command error."""
+
+
+@dataclass(frozen=True)
+class NoteMatch:
+    path: Path
+    relpath: str
+    note_id: str | None
+    matched_by: str
+    title: str
+    frontmatter_text: str
+    frontmatter: dict[str, object]
+
+
+def vault_root() -> Path:
+    return Path(os.environ.get("OAW_VAULT", DEFAULT_VAULT)).expanduser().resolve()
+
+
+def strip_obs_prefix(raw_id: str) -> str:
+    value = raw_id.strip()
+    if value.startswith("obs:"):
+        value = value[4:]
+    if not value:
+        raise OawError("empty ID")
+    return value
+
+
+def unquote_scalar(value: str) -> str:
+    value = value.strip()
+    if (value.startswith("'") and value.endswith("'")) or (
+        value.startswith('"') and value.endswith('"')
+    ):
+        return value[1:-1]
+    return value
+
+
+def split_note(text: str) -> tuple[str, str, str]:
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return "", "", text
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            before = "".join(lines[: idx + 1])
+            fm = "".join(lines[1:idx])
+            body = "".join(lines[idx + 1 :])
+            return before, fm, body
+    return "", "", text
+
+
+def parse_frontmatter(fm: str) -> dict[str, object]:
+    data: dict[str, object] = {}
+    current_list: str | None = None
+    for raw in fm.splitlines():
+        line = raw.rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if current_list and re.match(r"^\s*-\s+", line):
+            data.setdefault(current_list, [])
+            item = re.sub(r"^\s*-\s+", "", line)
+            cast = data[current_list]
+            if isinstance(cast, list):
+                cast.append(unquote_scalar(item))
+            continue
+        current_list = None
+        if ":" not in line or line.startswith(" "):
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if not value:
+            data[key] = []
+            current_list = key
+            continue
+        if value.startswith("[") and value.endswith("]"):
+            inner = value[1:-1].strip()
+            data[key] = [] if not inner else [unquote_scalar(p) for p in inner.split(",")]
+        else:
+            data[key] = unquote_scalar(value)
+    return data
+
+
+def read_note(path: Path) -> tuple[str, str, str, dict[str, object]]:
+    text = path.read_text(encoding="utf-8")
+    _, fm, body = split_note(text)
+    return text, fm, body, parse_frontmatter(fm)
+
+
+def title_from_body(path: Path, body: str) -> str:
+    for line in body.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return path.stem
+
+
+def iter_markdown(root: Path):
+    skip = {".git", ".obsidian", ".trash", "node_modules", ".venv", "__pycache__"}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in skip]
+        for filename in filenames:
+            if filename.endswith(".md"):
+                yield Path(dirpath) / filename
+
+
+def note_match(path: Path, root: Path, target: str) -> NoteMatch | None:
+    try:
+        _, fm, body, data = read_note(path)
+    except UnicodeDecodeError:
+        return None
+    note_id = data.get("id")
+    aliases = data.get("aliases", [])
+    matched_by = ""
+    if isinstance(note_id, str) and note_id == target:
+        matched_by = "id"
+    elif isinstance(aliases, list) and target in aliases:
+        matched_by = "aliases"
+    else:
+        return None
+    rel = path.relative_to(root).as_posix()
+    return NoteMatch(
+        path=path,
+        relpath=rel,
+        note_id=note_id if isinstance(note_id, str) else None,
+        matched_by=matched_by,
+        title=title_from_body(path, body),
+        frontmatter_text=fm.rstrip(),
+        frontmatter=data,
+    )
+
+
+def resolve_id(raw_id: str, root: Path) -> NoteMatch:
+    target = strip_obs_prefix(raw_id)
+    matches = [m for p in iter_markdown(root) if (m := note_match(p, root, target))]
+    if not matches:
+        raise OawError(f"no note with frontmatter id or alias '{target}' under {root}")
+    if len(matches) > 1:
+        paths = "\n".join(f"  {m.relpath} ({m.matched_by})" for m in matches)
+        raise OawError(f"id '{target}' is not unique:\n{paths}")
+    return matches[0]
+
+
+def outline(path: Path) -> list[str]:
+    _, _, body, _ = read_note(path)
+    lines: list[str] = []
+    in_fence = False
+    for number, line in enumerate(body.splitlines(), start=1):
+        if line.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence and re.match(r"^#{1,6} ", line):
+            lines.append(f"{number}: {line}")
+    return lines
+
+
+def output_resolve(match: NoteMatch, args: argparse.Namespace) -> None:
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "id": match.note_id,
+                    "path": str(match.path),
+                    "relative_path": match.relpath,
+                    "title": match.title,
+                    "matched_by": match.matched_by,
+                    "frontmatter": match.frontmatter,
+                    "outline": outline(match.path),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if args.path:
+        print(match.path)
+        return
+    if args.meta:
+        print(match.frontmatter_text)
+        return
+    if args.outline:
+        print("\n".join(outline(match.path)))
+        return
+    if args.full:
+        print(match.path.read_text(encoding="utf-8"), end="")
+        return
+    print(f"ID: {match.note_id}")
+    print(f"Path: {match.path}")
+    print(f"Title: {match.title}")
+    print(f"Matched by: {match.matched_by}")
+    print()
+    print("Frontmatter:")
+    print(match.frontmatter_text)
+    print()
+    print("Outline:")
+    print("\n".join(outline(match.path)))
+
+
+def is_project_task(path: Path, root: Path) -> bool:
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return False
+    parts = rel.parts
+    return len(parts) >= 4 and parts[0] == "Projects" and parts[-2] == "Tasks"
+
+
+def project_root_for_task(path: Path, root: Path) -> Path:
+    if not is_project_task(path, root):
+        raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
+    rel = path.relative_to(root)
+    return root / rel.parts[0] / rel.parts[1]
+
+
+def set_frontmatter_scalar(text: str, key: str, value: str) -> str:
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise OawError("task note has no YAML frontmatter")
+    end = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            end = idx
+            break
+    if end is None:
+        raise OawError("task note frontmatter is not closed")
+    pattern = re.compile(rf"^{re.escape(key)}\s*:")
+    for idx in range(1, end):
+        if pattern.match(lines[idx]):
+            lines[idx] = f"{key}: {value}\n"
+            return "".join(lines)
+    lines.insert(end, f"{key}: {value}\n")
+    return "".join(lines)
+
+
+def detect_session(allow_missing: bool) -> tuple[str, str]:
+    for provider, env_name in SESSION_ENV:
+        value = os.environ.get(env_name)
+        if value:
+            return provider, f"{env_name}={value}"
+    if allow_missing:
+        return "Unknown", "session_id=unavailable"
+    raise OawError(
+        "no stable session ID found; set CODEX_THREAD_ID or pass --allow-missing-session-id"
+    )
+
+
+def append_session_entry(
+    text: str, provider: str, session_ref: str, note: str, checks: str | None
+) -> str:
+    today = _dt.date.today().isoformat()
+    detail = note.strip()
+    if checks:
+        detail = f"{detail}; checks: {checks.strip()}"
+    entry = f"- {today} - {provider} - `{session_ref}` - {detail}\n"
+    if "## Agent sessions" not in text:
+        suffix = "" if text.endswith("\n") else "\n"
+        return f"{text}{suffix}\n## Agent sessions\n\n{entry}"
+    marker = "## Agent sessions"
+    idx = text.index(marker)
+    after = text.index("\n", idx) + 1
+    if after >= len(text):
+        return f"{text}\n\n{entry}"
+    next_heading = re.search(r"\n## ", text[after:])
+    if not next_heading:
+        suffix = "" if text.endswith("\n") else "\n"
+        return f"{text}{suffix}{entry}"
+    insert_at = after + next_heading.start() + 1
+    before = text[:insert_at]
+    after_text = text[insert_at:]
+    if not before.endswith("\n"):
+        before += "\n"
+    return before + entry + after_text
+
+
+def card_line(task_path: Path, project_root: Path, title: str, note_id: str | None) -> str:
+    rel_no_ext = task_path.relative_to(project_root).with_suffix("").as_posix()
+    suffix = f" - {note_id}" if note_id else ""
+    return f"- [ ] [[{rel_no_ext}|{title}]]{suffix}"
+
+
+def move_board_card(project_root: Path, task_path: Path, title: str, note_id: str | None, status: str) -> bool:
+    board = project_root / "Board.md"
+    if not board.exists():
+        return False
+    text = board.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    target_column = {"todo": "Todo", "active": "Active", "done": "Done"}[status]
+    identifiers = {task_path.stem}
+    if note_id:
+        identifiers.add(note_id)
+    new_lines: list[str] = []
+    existing_card = ""
+    target_heading_idx: int | None = None
+    in_column: str | None = None
+    for line in lines:
+        heading = re.match(r"^##\s+(.+?)\s*$", line)
+        if heading:
+            in_column = heading.group(1)
+            if in_column == target_column:
+                target_heading_idx = len(new_lines)
+            new_lines.append(line)
+            continue
+        if line.startswith("- [ ] ") and any(token in line for token in identifiers):
+            existing_card = line
+            continue
+        new_lines.append(line)
+    card = existing_card or card_line(task_path, project_root, title, note_id)
+    if target_heading_idx is None:
+        if new_lines and new_lines[-1] != "":
+            new_lines.append("")
+        new_lines.extend([f"## {target_column}", "", card])
+    else:
+        insert_at = target_heading_idx + 1
+        while insert_at < len(new_lines) and new_lines[insert_at] == "":
+            insert_at += 1
+        new_lines.insert(insert_at, card)
+    board.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    return True
+
+
+def update_task(raw_id: str, status: str, note: str, checks: str | None, allow_missing: bool) -> None:
+    root = vault_root()
+    match = resolve_id(raw_id, root)
+    if not is_project_task(match.path, root):
+        raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
+    if status == "done" and not checks:
+        raise OawError("task complete requires --checks")
+    provider, session_ref = detect_session(allow_missing)
+    text = match.path.read_text(encoding="utf-8")
+    text = set_frontmatter_scalar(text, "status", status)
+    text = append_session_entry(text, provider, session_ref, note, checks)
+    match.path.write_text(text, encoding="utf-8")
+    refreshed = resolve_id(raw_id, root)
+    moved = move_board_card(
+        project_root_for_task(refreshed.path, root),
+        refreshed.path,
+        refreshed.title,
+        refreshed.note_id,
+        status,
+    )
+    print(f"Updated: {refreshed.relpath}")
+    print(f"Status: {status}")
+    print(f"Board: {'updated' if moved else 'not found'}")
+
+
+def list_project(project: str) -> None:
+    root = vault_root()
+    project_root = root / "Projects" / project
+    tasks = project_root / "Tasks"
+    if not tasks.exists():
+        raise OawError(f"project tasks folder not found: {tasks}")
+    rows = []
+    for path in sorted(tasks.glob("*.md")):
+        _, _, body, data = read_note(path)
+        note_id = data.get("id", "")
+        status = data.get("status", "")
+        title = title_from_body(path, body)
+        rows.append((str(note_id), str(status), title, path.relative_to(root).as_posix()))
+    for row in rows:
+        print("\t".join(row))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="oaw")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    resolve = sub.add_parser("resolve", help="resolve obs:<ID> or <ID>")
+    resolve.add_argument("id")
+    resolve.add_argument("--full", action="store_true")
+    resolve.add_argument("--path", action="store_true")
+    resolve.add_argument("--meta", action="store_true")
+    resolve.add_argument("--outline", action="store_true")
+    resolve.add_argument("--json", action="store_true")
+
+    list_cmd = sub.add_parser("list", help="list project tasks")
+    list_cmd.add_argument("--project", required=True)
+
+    task = sub.add_parser("task", help="project task lifecycle")
+    task_sub = task.add_subparsers(dest="task_command", required=True)
+    for name, status in (("start", "active"), ("complete", "done")):
+        cmd = task_sub.add_parser(name)
+        cmd.set_defaults(status=status)
+        cmd.add_argument("id")
+        cmd.add_argument("--note", required=True)
+        cmd.add_argument("--checks")
+        cmd.add_argument("--allow-missing-session-id", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "resolve":
+            output_resolve(resolve_id(args.id, vault_root()), args)
+        elif args.command == "list":
+            list_project(args.project)
+        elif args.command == "task":
+            update_task(
+                args.id,
+                args.status,
+                args.note,
+                args.checks,
+                args.allow_missing_session_id,
+            )
+        else:
+            parser.error("unknown command")
+    except OawError as exc:
+        print(f"oaw: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
