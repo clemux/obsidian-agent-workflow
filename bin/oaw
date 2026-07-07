@@ -365,19 +365,56 @@ def update_task(raw_id: str, status: str, note: str, checks: str | None, allow_m
     print(f"Board: {'updated' if moved else 'not found'}")
 
 
-def list_project(project: str) -> None:
+def note_type_matches(data: dict[str, object], note_type: str) -> bool:
+    value = data.get("type")
+    return isinstance(value, str) and value == note_type
+
+
+def note_status(data: dict[str, object]) -> str:
+    value = data.get("status", "")
+    return str(value) if value is not None else ""
+
+
+def project_note_rows(
+    project_root: Path,
+    root: Path,
+    note_type: str,
+    status: str | None,
+    include_archived: bool,
+) -> list[tuple[str, str, str, str]]:
+    rows = []
+    for path in sorted(project_root.rglob("*.md")):
+        _, _, body, data = read_note(path)
+        if not note_type_matches(data, note_type):
+            continue
+        current_status = note_status(data)
+        if status and current_status != status:
+            continue
+        if not status and current_status == "archived" and not include_archived:
+            continue
+        note_id = data.get("id", "")
+        title = title_from_body(path, body)
+        rows.append((str(note_id), current_status, title, path.relative_to(root).as_posix()))
+    return rows
+
+
+def list_project(
+    project: str,
+    note_type: str,
+    status: str | None,
+    include_archived: bool,
+) -> None:
     root = vault_root()
     project_root = root / "Projects" / project
-    tasks = project_root / "Tasks"
-    if not tasks.exists():
-        raise OawError(f"project tasks folder not found: {tasks}")
-    rows = []
-    for path in sorted(tasks.glob("*.md")):
-        _, _, body, data = read_note(path)
-        note_id = data.get("id", "")
-        status = data.get("status", "")
-        title = title_from_body(path, body)
-        rows.append((str(note_id), str(status), title, path.relative_to(root).as_posix()))
+    if not project_root.exists():
+        raise OawError(f"project not found: {project_root}")
+    if note_type == "task":
+        tasks = project_root / "Tasks"
+        if not tasks.exists():
+            raise OawError(f"project tasks folder not found: {tasks}")
+        rows = project_note_rows(tasks, root, note_type, status, True)
+    else:
+        rows = project_note_rows(project_root, root, note_type, status, include_archived)
     for row in rows:
         print("\t".join(row))
 
@@ -394,8 +431,15 @@ def build_parser() -> argparse.ArgumentParser:
     resolve.add_argument("--outline", action="store_true")
     resolve.add_argument("--json", action="store_true")
 
-    list_cmd = sub.add_parser("list", help="list project tasks")
+    list_cmd = sub.add_parser("list", help="list project notes")
     list_cmd.add_argument("--project", required=True)
+    list_cmd.add_argument("--type", default="task", help="frontmatter type to list, default: task")
+    list_cmd.add_argument("--status", help="optional frontmatter status filter")
+    list_cmd.add_argument(
+        "--include-archived",
+        action="store_true",
+        help="include status: archived notes when no --status is set",
+    )
 
     task = sub.add_parser("task", help="project task lifecycle")
     task_sub = task.add_subparsers(dest="task_command", required=True)
@@ -416,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "resolve":
             output_resolve(resolve_id(args.id, vault_root()), args)
         elif args.command == "list":
-            list_project(args.project)
+            list_project(args.project, args.type, args.status, args.include_archived)
         elif args.command == "task":
             update_task(
                 args.id,

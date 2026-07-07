@@ -12,6 +12,14 @@ oaw resolve --path OAW-TSK-cli
 oaw resolve --json SR-index
 ```
 
+It can list project notes by frontmatter type. Task listing is the default; capture listing hides `status: archived` notes unless explicitly requested:
+
+```bash
+oaw list --project Fable
+oaw list --project Fable --type capture
+oaw list --project Fable --type capture --include-archived
+```
+
 It also supports a conservative task lifecycle for project tasks under `Projects/*/Tasks`:
 
 ```bash

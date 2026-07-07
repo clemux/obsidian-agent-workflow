@@ -64,6 +64,20 @@ Build it.
 """,
         )
         write(
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md",
+            """---
+type: task
+project: obsidian-agent-workflow
+status: archived
+id: OAW-TSK-archived
+aliases:
+  - OAW-TSK-archived
+---
+
+# Archived task
+""",
+        )
+        write(
             self.vault / "Projects/Obsidian Agent Workflow/Board.md",
             """---
 kanban-plugin: board
@@ -82,6 +96,34 @@ aliases:
 
 ## Done
 
+""",
+        )
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Inbox/Active capture.md",
+            """---
+type: capture
+project: obsidian-agent-workflow
+status: active
+id: OAW-CAP-active
+aliases:
+  - OAW-CAP-active
+---
+
+# Active capture
+""",
+        )
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Inbox/Archived capture.md",
+            """---
+type: capture
+project: obsidian-agent-workflow
+status: archived
+id: OAW-CAP-archived
+aliases:
+  - OAW-CAP-archived
+---
+
+# Archived capture
 """,
         )
 
@@ -137,6 +179,12 @@ id: AGT-TSK-obsidian-task-ids
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("requires --checks", proc.stderr)
 
+    def test_list_tasks_preserves_archived_rows(self):
+        proc = self.run_oaw("list", "--project", "Obsidian Agent Workflow")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("OAW-TSK-cli", proc.stdout)
+        self.assertIn("OAW-TSK-archived", proc.stdout)
+
     def test_lifecycle_refuses_non_project_task(self):
         proc = self.run_oaw(
             "task",
@@ -147,6 +195,44 @@ id: AGT-TSK-obsidian-task-ids
         )
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("Projects/*/Tasks", proc.stderr)
+
+    def test_list_capture_hides_archived_by_default(self):
+        proc = self.run_oaw(
+            "list",
+            "--project",
+            "Obsidian Agent Workflow",
+            "--type",
+            "capture",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("OAW-CAP-active", proc.stdout)
+        self.assertNotIn("OAW-CAP-archived", proc.stdout)
+
+    def test_list_capture_can_include_or_select_archived(self):
+        proc = self.run_oaw(
+            "list",
+            "--project",
+            "Obsidian Agent Workflow",
+            "--type",
+            "capture",
+            "--include-archived",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("OAW-CAP-active", proc.stdout)
+        self.assertIn("OAW-CAP-archived", proc.stdout)
+
+        archived = self.run_oaw(
+            "list",
+            "--project",
+            "Obsidian Agent Workflow",
+            "--type",
+            "capture",
+            "--status",
+            "archived",
+        )
+        self.assertEqual(archived.returncode, 0, archived.stderr)
+        self.assertNotIn("OAW-CAP-active", archived.stdout)
+        self.assertIn("OAW-CAP-archived", archived.stdout)
 
 
 if __name__ == "__main__":

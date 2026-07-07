@@ -1,3 +1,3 @@
 display_name: OAW
-short_description: Resolve Obsidian IDs and task workflow.
-default_prompt: Use $oaw to resolve obs:<ID> links, update project task lifecycle, and record agent-session traces.
+short_description: Resolve Obsidian IDs, list project notes, and update task workflow.
+default_prompt: Use $oaw to resolve obs:<ID> links, list project tasks/captures before reading bodies, update project task lifecycle, and record agent-session traces.

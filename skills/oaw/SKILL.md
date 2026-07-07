@@ -1,6 +1,6 @@
 ---
 name: oaw
-description: This skill should be used when an `obs:`-prefixed reference appears (e.g. `obs:OAW-TSK-cli`), when a frontmatter reference ID such as `AGT-*`, `SR-*`, `CDX-*`, or `OAW-*` needs resolving to a note in clemux's Obsidian vault, when starting or completing a project task note with an agent-session trace, or when listing a project's tasks. Provides the `oaw` CLI workflow. (`PMX-*` IDs have a dedicated `pmx` skill.)
+description: This skill should be used when an `obs:`-prefixed reference appears (e.g. `obs:OAW-TSK-cli`), when a frontmatter reference ID such as `AGT-*`, `SR-*`, `CDX-*`, `FAB-*`, or `OAW-*` needs resolving to a note in clemux's Obsidian vault, when starting or completing a project task note with an agent-session trace, or when listing a project's tasks/captures. Provides the `oaw` CLI workflow. (`PMX-*` IDs have a dedicated `pmx` skill.)
 ---
 
 # oaw — Obsidian ID resolution and task lifecycle
@@ -27,7 +27,7 @@ The default view answers most questions. Use `--full` (entire note body) only af
 
 On failure `oaw` exits non-zero with a clear message: "no note with frontmatter id or alias" for a miss, or a candidate-path list when an ID is duplicated. Surface that error to the user instead of guessing a path or falling back to text search.
 
-## Listing project tasks
+## Listing project notes
 
 To survey a project's tasks, list them instead of resolving one by one:
 
@@ -35,7 +35,15 @@ To survey a project's tasks, list them instead of resolving one by one:
 oaw list --project "Obsidian Agent Workflow"   # tab-separated: id, status, title, relative path
 ```
 
-The project name is the folder name under `Projects/` in the vault.
+The project name is the folder name under `Projects/` in the vault. `task` is the default note type.
+
+Some projects also use atomic capture notes for evidence/inbox items. List captures by frontmatter instead of opening a long inbox note:
+
+```bash
+oaw list --project Fable --type capture
+```
+
+Capture listing hides `status: archived` notes by default. Use `--include-archived` only for historical/provenance work, or `--status archived` when the archived set is the explicit target. For archived captures, prefer `oaw resolve --meta` or default `oaw resolve` first; use `--full` only after confirming the archived body is needed.
 
 ## Project task lifecycle
 
