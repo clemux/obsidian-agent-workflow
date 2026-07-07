@@ -2,6 +2,10 @@
 
 Local-first tooling for resolving Obsidian reference IDs and recording agent work on project task notes.
 
+## Warning
+
+This repository is tooling tailored for my personal Obsidian and agent workflow. It is not intended as reusable software, and it probably does not make sense to install or use as-is. Some paths are hard-coded for my local machine and vault layout.
+
 ## `oaw`
 
 `oaw` resolves vault IDs from note frontmatter instead of asking agents to search broad local state:
