@@ -10,7 +10,7 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 - `skills/oaw/agents/openai.yaml` contains OpenAI skill display metadata.
 - `README.md` is the user-facing overview and install guide.
 
-Keep small workflow changes close to `bin/oaw` and mirror behavior changes in tests and docs.
+Keep small workflow changes close to `bin/oaw` and mirror behavior changes in tests and docs. For board-related changes, update the CLI, `tests/test_oaw.py`, `README.md`, and `skills/oaw/SKILL.md` together so agent-facing behavior does not drift from implementation.
 
 ## Build, Test, and Development Commands
 

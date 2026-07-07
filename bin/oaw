@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_VAULT = Path("/path/to/vault")
+NEXT_BOARD = Path("Projects/Next steps.md")
 SESSION_ENV = [
     ("Codex", "CODEX_THREAD_ID"),
     ("Claude Code", "CLAUDE_SESSION_ID"),
@@ -340,6 +341,87 @@ def move_board_card(project_root: Path, task_path: Path, title: str, note_id: st
     return True
 
 
+def board_path(root: Path) -> Path:
+    board = root / NEXT_BOARD
+    if not board.exists():
+        raise OawError(f"board not found: {board}")
+    return board
+
+
+def board_card(link: str, title: str, why: str, card_id: str) -> str:
+    clean_link = link.strip().removesuffix(".md")
+    clean_title = title.strip()
+    clean_why = why.strip()
+    clean_id = card_id.strip()
+    if not clean_link or not clean_title or not clean_why or not clean_id:
+        raise OawError("board add requires non-empty --link, --title, --why, and --id")
+    return f"- [ ] [[{clean_link}|{clean_title}]] - {clean_why} ({clean_id})"
+
+
+def find_board_column(lines: list[str], column: str) -> int | None:
+    for idx, line in enumerate(lines):
+        heading = re.match(r"^##\s+(.+?)\s*$", line)
+        if heading and heading.group(1) == column:
+            return idx
+    return None
+
+
+def remove_board_card(lines: list[str], token: str) -> tuple[list[str], str | None]:
+    kept: list[str] = []
+    found: str | None = None
+    for line in lines:
+        if re.match(r"^-\s+\[[ xX]\]\s+", line) and token in line:
+            if found is not None:
+                raise OawError(f"multiple board cards match '{token}'")
+            found = line
+            continue
+        kept.append(line)
+    return kept, found
+
+
+def insert_board_card(lines: list[str], column: str, card: str) -> list[str]:
+    target_idx = find_board_column(lines, column)
+    updated = list(lines)
+    if target_idx is None:
+        if updated and updated[-1] != "":
+            updated.append("")
+        updated.extend([f"## {column}", "", card])
+        return updated
+    insert_at = target_idx + 1
+    while insert_at < len(updated) and updated[insert_at] == "":
+        insert_at += 1
+    updated.insert(insert_at, card)
+    return updated
+
+
+def update_next_board(
+    column: str,
+    token: str | None,
+    card: str | None,
+    done: bool,
+) -> None:
+    root = vault_root()
+    path = board_path(root)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if token:
+        lines, existing = remove_board_card(lines, token)
+        if existing is None:
+            raise OawError(f"no board card matches '{token}'")
+        card = existing
+    if card is None:
+        raise OawError("missing board card")
+    if done:
+        card = re.sub(r"^-\s+\[[ xX]\]", "- [x]", card, count=1)
+    else:
+        card = re.sub(r"^-\s+\[[ xX]\]", "- [ ]", card, count=1)
+    lines = insert_board_card(lines, column, card)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Board: {NEXT_BOARD.as_posix()}")
+    print(f"Column: {column}")
+    if token:
+        print(f"Matched: {token}")
+
+
 def update_task(raw_id: str, status: str, note: str, checks: str | None, allow_missing: bool) -> None:
     root = vault_root()
     match = resolve_id(raw_id, root)
@@ -450,6 +532,23 @@ def build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--note", required=True)
         cmd.add_argument("--checks")
         cmd.add_argument("--allow-missing-session-id", action="store_true")
+
+    board = sub.add_parser("board", help="update the cross-project Next steps board")
+    board_sub = board.add_subparsers(dest="board_command", required=True)
+
+    add = board_sub.add_parser("add", help="add a linked card to Projects/Next steps.md")
+    add.add_argument("--column", required=True)
+    add.add_argument("--link", required=True, help="vault-relative note path, with or without .md")
+    add.add_argument("--title", required=True)
+    add.add_argument("--why", required=True, help="one-line reason or routing note")
+    add.add_argument("--id", required=True, help="stable reference ID shown at the end of the card")
+
+    move = board_sub.add_parser("move", help="move a matching card to another column")
+    move.add_argument("token", help="stable ID or unique text contained in the card")
+    move.add_argument("--column", required=True)
+
+    done = board_sub.add_parser("done", help="move a matching card to Done and check it")
+    done.add_argument("token", help="stable ID or unique text contained in the card")
     return parser
 
 
@@ -469,6 +568,18 @@ def main(argv: list[str] | None = None) -> int:
                 args.checks,
                 args.allow_missing_session_id,
             )
+        elif args.command == "board":
+            if args.board_command == "add":
+                update_next_board(
+                    args.column,
+                    None,
+                    board_card(args.link, args.title, args.why, args.id),
+                    False,
+                )
+            elif args.board_command == "move":
+                update_next_board(args.column, args.token, None, False)
+            elif args.board_command == "done":
+                update_next_board("Done", args.token, None, True)
         else:
             parser.error("unknown command")
     except OawError as exc:

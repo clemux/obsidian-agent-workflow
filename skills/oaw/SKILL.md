@@ -60,9 +60,37 @@ oaw task complete OAW-TSK-cli --note "Finished and verified." --checks "python -
 - The command's output (`Updated:` / `Status:` / `Board:`) confirms the write. To report resulting state, rely on that output plus `oaw resolve --meta` if needed — do not re-read the whole note with `--full`.
 - The session ID is read automatically from the harness environment; the first of `CODEX_THREAD_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `OPENCODE_SESSION_ID`, `GEMINI_SESSION_ID` that is set wins. `oaw` never invents one: with no session variable set, the command fails with a clear error (so there is no need to check the variables beforehand). Pass `--allow-missing-session-id` only when the user explicitly accepts an untraceable entry.
 
+## Cross-project Next steps board
+
+The vault-wide priority board lives at `Projects/Next steps.md` (`id: NEXT-board`). It is a hand-curated layer over project task notes, so routine card edits should use `oaw board` instead of manual kanban line surgery.
+
+Add a linked card with the board's standard card shape:
+
+```bash
+oaw board add \
+  --column "Next session(s)" \
+  --link "Projects/Obsidian Agent Workflow/Tasks/Next steps board integration" \
+  --title "Next steps board integration" \
+  --why "document conventions and wire wrap-up handling" \
+  --id OAW-TSK-next-board
+```
+
+Move or complete an existing card by a stable ID or unique text token already present in the card:
+
+```bash
+oaw board move OAW-TSK-next-board --column "Now (current session)"
+oaw board done OAW-TSK-next-board
+```
+
+- `move` and `done` require exactly one matching card; a zero-match or duplicate match is an error.
+- `move` preserves card text and keeps the card unchecked.
+- `done` moves the card to `Done` and changes the checkbox to `- [x]`.
+- The command targets `Projects/Next steps.md`; project-local boards still use `oaw task start/complete`.
+
 ## Rules
 
 - Use `oaw` before any manual vault search. Do not resolve IDs by searching agent state directories (`.codex`, `.claude`, `.agents`) or session transcripts unless the user explicitly asks for forensic work.
+- When changing `NEXT-board`, prefer `oaw board add/move/done`; edit the markdown directly only for convention text, bulk cleanup, or cases the command cannot express.
 - Keep durable written links as path links with the ID as display text, e.g. `[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]` — the link target is the vault-relative path without the `.md` extension. Reuse the path from resolve output already in hand; run `oaw resolve --path` only when no resolve has been done yet.
 - If a needed capability is not documented here, check `oaw --help` before reaching for filesystem search.
 - For `PMX-*` IDs, prefer the dedicated `pmx` skill and CLI.

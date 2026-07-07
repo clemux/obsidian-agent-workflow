@@ -33,6 +33,22 @@ oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "python -m 
 
 Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on the project `Board.md` when one exists. They never invent a session ID; pass a real ID through a known harness env var such as `CODEX_THREAD_ID`, or use `--allow-missing-session-id` explicitly.
 
+The cross-project Next steps board is a hand-curated priority layer at `Projects/Next steps.md`. Use `oaw board` commands for routine card edits instead of manually moving kanban lines:
+
+```bash
+oaw board add \
+  --column "Next session(s)" \
+  --link "Projects/Obsidian Agent Workflow/Tasks/Next steps board integration" \
+  --title "Next steps board integration" \
+  --why "document conventions and wire wrap-up handling" \
+  --id OAW-TSK-next-board
+
+oaw board move OAW-TSK-next-board --column "Now (current session)"
+oaw board done OAW-TSK-next-board
+```
+
+`move` and `done` require the token to match exactly one card. `done` moves the card to `Done` and marks it `[x]`; other moves preserve the existing card text and keep the checkbox open.
+
 ## Examples from agent sessions
 
 Recent Codex sessions used `oaw` for a few recurring jobs that are hard to do reliably with plain text search.

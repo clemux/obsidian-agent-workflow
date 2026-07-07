@@ -99,6 +99,33 @@ aliases:
 """,
         )
         write(
+            self.vault / "Projects/Next steps.md",
+            """---
+kanban-plugin: board
+type: board
+id: NEXT-board
+aliases:
+  - NEXT-board
+---
+
+# Next steps board
+
+## Now (current session)
+
+## Next session(s)
+
+- [ ] [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|Resolver CLI]] - finish lifecycle work (OAW-TSK-cli)
+
+## Done
+
+%% kanban:settings
+```
+{"kanban-plugin":"board"}
+```
+%%
+""",
+        )
+        write(
             self.vault / "Projects/Obsidian Agent Workflow/Inbox/Active capture.md",
             """---
 type: capture
@@ -233,6 +260,63 @@ id: AGT-TSK-obsidian-task-ids
         self.assertEqual(archived.returncode, 0, archived.stderr)
         self.assertNotIn("OAW-CAP-active", archived.stdout)
         self.assertIn("OAW-CAP-archived", archived.stdout)
+
+    def test_board_add_writes_linked_card_to_column(self):
+        proc = self.run_oaw(
+            "board",
+            "add",
+            "--column",
+            "Queued",
+            "--link",
+            "Projects/Obsidian Agent Workflow/Tasks/Archived task.md",
+            "--title",
+            "Archived task",
+            "--why",
+            "review later",
+            "--id",
+            "OAW-TSK-archived",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        board = (self.vault / "Projects/Next steps.md").read_text()
+        self.assertIn("## Queued", board)
+        self.assertIn(
+            "- [ ] [[Projects/Obsidian Agent Workflow/Tasks/Archived task|Archived task]] - review later (OAW-TSK-archived)",
+            board,
+        )
+        self.assertIn("%% kanban:settings", board)
+
+    def test_board_move_preserves_card_text_and_removes_original(self):
+        proc = self.run_oaw(
+            "board",
+            "move",
+            "OAW-TSK-cli",
+            "--column",
+            "Now (current session)",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        board = (self.vault / "Projects/Next steps.md").read_text()
+        card = "- [ ] [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|Resolver CLI]] - finish lifecycle work (OAW-TSK-cli)"
+        self.assertEqual(board.count(card), 1)
+        self.assertLess(board.index(card), board.index("## Next session(s)"))
+
+    def test_board_done_moves_to_done_and_checks_card(self):
+        proc = self.run_oaw("board", "done", "OAW-TSK-cli")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        board = (self.vault / "Projects/Next steps.md").read_text()
+        card = "- [x] [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|Resolver CLI]] - finish lifecycle work (OAW-TSK-cli)"
+        self.assertIn(card, board)
+        self.assertGreater(board.index(card), board.index("## Done"))
+
+    def test_board_move_fails_on_ambiguous_match(self):
+        path = self.vault / "Projects/Next steps.md"
+        path.write_text(
+            path.read_text()
+            + "- [ ] [[Other|Other]] - duplicate reminder (OAW-TSK-cli)\n",
+            encoding="utf-8",
+        )
+        proc = self.run_oaw("board", "move", "OAW-TSK-cli", "--column", "Queued")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("multiple board cards match", proc.stderr)
 
 
 if __name__ == "__main__":
