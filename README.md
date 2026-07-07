@@ -184,3 +184,10 @@ ln -s /home/clemux/dev/obsidian-agent-workflow/bin/oaw ~/.local/bin/oaw
 ```
 
 The vault defaults to `/path/to/vault`. Override with `OAW_VAULT`.
+
+## Development worktrees
+
+This repo keeps `git gtr` worktrees under `.worktrees/` via `.gtrconfig`.
+That path is ignored by Git and stays inside the repository checkout, so
+sandboxed agents can use isolated worktrees without creating a sibling checkout
+outside the repo writable root.
