@@ -5,15 +5,18 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_VAULT = Path("/path/to/vault")
 NEXT_BOARD = Path("Projects/Next steps.md")
+RETRO_ATTACHMENTS = Path("Agents/Retrospectives/attachments")
 SESSION_ENV = [
     ("Codex", "CODEX_THREAD_ID"),
     ("Claude Code", "CLAUDE_SESSION_ID"),
@@ -36,6 +39,14 @@ class NoteMatch:
     title: str
     frontmatter_text: str
     frontmatter: dict[str, object]
+
+
+@dataclass(frozen=True)
+class SnapshotCopy:
+    source: Path
+    destination: Path
+    category: str
+    completeness: str = "complete"
 
 
 def vault_root() -> Path:
@@ -501,6 +512,318 @@ def list_project(
         print("\t".join(row))
 
 
+def default_claude_projects_root() -> Path:
+    return Path("~/.claude/projects").expanduser()
+
+
+def default_codex_sessions_root() -> Path:
+    return Path("~/.codex/sessions").expanduser()
+
+
+def default_plugin_data_root() -> Path:
+    return Path("~/.claude/plugins/data").expanduser()
+
+
+def slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "session"
+
+
+def iter_files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
+    if not root.exists():
+        return []
+    return sorted(p for p in root.rglob("*") if p.is_file() and p.suffix in suffixes)
+
+
+def read_text_lossy(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def first_timestamp_date(path: Path) -> str | None:
+    timestamp = re.compile(r'"timestamp"\s*:\s*"(\d{4}-\d{2}-\d{2})T')
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                if match := timestamp.search(line):
+                    return match.group(1)
+    except OSError:
+        return None
+    return None
+
+
+def find_claude_parent(session_id: str, claude_root: Path) -> Path:
+    if not claude_root.exists():
+        raise OawError(f"Claude projects root not found: {claude_root}")
+    matches = sorted(claude_root.rglob(f"{session_id}.jsonl"))
+    if not matches:
+        raise OawError(f"Claude parent transcript not found for session {session_id}")
+    if len(matches) > 1:
+        paths = "\n".join(f"  {path}" for path in matches)
+        raise OawError(f"session {session_id} is not unique under {claude_root}:\n{paths}")
+    return matches[0]
+
+
+def snapshot_date(parent: Path, override: str | None) -> str:
+    if override:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", override):
+            raise OawError("--date must use YYYY-MM-DD")
+        return override
+    return first_timestamp_date(parent) or _dt.date.today().isoformat()
+
+
+def detect_parent_completeness(session_id: str, args: argparse.Namespace) -> str:
+    if args.partial:
+        return "partial"
+    if args.complete:
+        return "complete"
+    env_values = {value for _, env_name in SESSION_ENV if (value := os.environ.get(env_name))}
+    return "partial" if session_id in env_values else "complete"
+
+
+def transcript_text(paths: list[Path]) -> str:
+    chunks: list[str] = []
+    for path in paths:
+        try:
+            chunks.append(read_text_lossy(path))
+        except OSError:
+            continue
+    return "\n".join(chunks)
+
+
+def referenced_codex_threads(text: str, explicit: list[str]) -> set[str]:
+    thread_ref = re.compile(
+        r"\b(?:CODEX_THREAD_ID|codex[_ -]?thread|codex[_ -]?session)"
+        r'["`:\s=]+'
+        r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b",
+        re.IGNORECASE,
+    )
+    threads = {thread.strip() for thread in explicit if thread.strip()}
+    for match in thread_ref.finditer(text):
+        threads.add(match.group(1))
+    return threads
+
+
+def find_codex_rollouts(
+    codex_root: Path,
+    transcript: str,
+    explicit_threads: list[str],
+    explicit_rollouts: list[str],
+    grep_patterns: list[str],
+) -> list[Path]:
+    if not codex_root.exists():
+        return []
+    matches: set[Path] = set()
+    for rollout in explicit_rollouts:
+        value = rollout.strip()
+        if not value:
+            continue
+        candidate = Path(value).expanduser()
+        rollout_matches = [candidate] if candidate.is_file() else sorted(codex_root.rglob(value))
+        if not rollout_matches:
+            raise OawError(f"Codex rollout not found: {value}")
+        if len(rollout_matches) > 1:
+            paths = "\n".join(f"  {path}" for path in rollout_matches)
+            raise OawError(f"Codex rollout '{value}' is not unique:\n{paths}")
+        matches.add(rollout_matches[0])
+    for thread_id in referenced_codex_threads(transcript, explicit_threads):
+        matches.update(codex_root.rglob(f"*{thread_id}*.jsonl"))
+    for pattern in grep_patterns:
+        if not pattern:
+            continue
+        pattern_matches: list[Path] = []
+        for path in iter_files(codex_root, (".jsonl",)):
+            try:
+                if pattern in read_text_lossy(path):
+                    pattern_matches.append(path)
+            except OSError:
+                continue
+        if len(pattern_matches) > 1:
+            paths = "\n".join(f"  {path}" for path in pattern_matches)
+            raise OawError(
+                f"--grep {pattern!r} matched multiple Codex rollouts; "
+                f"rerun with --codex-thread or an exact rollout filename:\n{paths}"
+            )
+        matches.update(pattern_matches)
+    return sorted(matches)
+
+
+def referenced_plugin_jobs(text: str) -> set[str]:
+    return set(re.findall(r"\btask-[a-z0-9]+-[a-z0-9]+\b", text))
+
+
+def find_plugin_job_files(plugin_root: Path, transcript: str) -> list[Path]:
+    if not plugin_root.exists():
+        return []
+    jobs = referenced_plugin_jobs(transcript)
+    if not jobs:
+        return []
+    matches: set[Path] = set()
+    for path in iter_files(plugin_root, (".json", ".log")):
+        if path.stem in jobs:
+            matches.add(path)
+    return sorted(matches)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def copy_snapshot_files(dest_root: Path, copies: list[SnapshotCopy]) -> list[dict[str, object]]:
+    copied_at = _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat()
+    entries: list[dict[str, object]] = []
+    for item in copies:
+        destination = dest_root / item.destination
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(item.source, destination)
+        entries.append(
+            {
+                "category": item.category,
+                "source": str(item.source),
+                "destination": item.destination.as_posix(),
+                "copied_at": copied_at,
+                "completeness": item.completeness,
+                "size_bytes": destination.stat().st_size,
+                "sha256": sha256_file(destination),
+            }
+        )
+    return entries
+
+
+def remove_stale_snapshot_files(dest_root: Path, current_entries: list[dict[str, object]]) -> None:
+    manifest_path = dest_root / "manifest.json"
+    if not manifest_path.exists():
+        return
+    try:
+        previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    current = {
+        entry["destination"]
+        for entry in current_entries
+        if isinstance(entry.get("destination"), str)
+    }
+    for entry in previous.get("files", []):
+        destination = entry.get("destination") if isinstance(entry, dict) else None
+        if not isinstance(destination, str) or destination in current:
+            continue
+        stale_path = (dest_root / destination).resolve()
+        try:
+            stale_path.relative_to(dest_root.resolve())
+        except ValueError:
+            continue
+        if stale_path.is_file():
+            stale_path.unlink()
+
+
+def write_snapshot_manifest(
+    dest_root: Path,
+    session_id: str,
+    parent: Path,
+    date: str,
+    slug: str,
+    parent_completeness: str,
+    files: list[dict[str, object]],
+) -> Path:
+    manifest = {
+        "schema": "oaw-session-snapshot-v1",
+        "session_id": session_id,
+        "generated_at": _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat(),
+        "snapshot": {
+            "date": date,
+            "slug": slug,
+            "path": str(dest_root),
+            "parent_transcript": str(parent),
+            "parent_completeness": parent_completeness,
+        },
+        "files": files,
+    }
+    path = dest_root / "manifest.json"
+    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def session_snapshot(args: argparse.Namespace) -> None:
+    session_id = args.session_id.strip()
+    if not session_id:
+        raise OawError("empty session ID")
+    parent = find_claude_parent(session_id, args.claude_root.expanduser())
+    date = snapshot_date(parent, args.date)
+    slug = slugify(args.slug or session_id[:8])
+    output_root = (
+        args.output_root.expanduser()
+        if args.output_root
+        else vault_root() / RETRO_ATTACHMENTS
+    )
+    destination_root = output_root / f"{date}-{slug}"
+    destination_root.mkdir(parents=True, exist_ok=True)
+
+    session_dir = parent.with_suffix("")
+    subagents_dir = session_dir / "subagents"
+    subagents = iter_files(subagents_dir, (".jsonl",))
+    scan_paths = [parent, *subagents]
+    text = transcript_text(scan_paths)
+    parent_completeness = detect_parent_completeness(session_id, args)
+
+    parent_name = f"parent-{session_id[:8]}"
+    if parent_completeness == "partial":
+        parent_name += "-PARTIAL"
+    copies = [
+        SnapshotCopy(
+            parent,
+            Path("claude") / f"{parent_name}.jsonl",
+            "claude-parent",
+            parent_completeness,
+        )
+    ]
+    copies.extend(
+        SnapshotCopy(path, Path("claude") / path.name, "claude-subagent")
+        for path in subagents
+    )
+    copies.extend(
+        SnapshotCopy(path, Path("codex") / path.name, "codex-rollout")
+        for path in find_codex_rollouts(
+            args.codex_root.expanduser(),
+            text,
+            args.codex_thread or [],
+            args.codex_rollout or [],
+            args.grep or [],
+        )
+    )
+    copies.extend(
+        SnapshotCopy(path, Path("plugin-logs") / path.name, "plugin-job")
+        for path in find_plugin_job_files(args.plugin_data_root.expanduser(), text)
+    )
+
+    seen_destinations: set[Path] = set()
+    unique_copies: list[SnapshotCopy] = []
+    for item in copies:
+        if item.destination in seen_destinations:
+            continue
+        seen_destinations.add(item.destination)
+        unique_copies.append(item)
+
+    entries = copy_snapshot_files(destination_root, unique_copies)
+    remove_stale_snapshot_files(destination_root, entries)
+    manifest_path = write_snapshot_manifest(
+        destination_root,
+        session_id,
+        parent,
+        date,
+        slug,
+        parent_completeness,
+        entries,
+    )
+
+    print(f"Snapshot: {destination_root}")
+    print(f"Manifest: {manifest_path}")
+    print(f"Copied: {len(entries)}")
+    print(f"Parent: {parent_completeness}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="oaw")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -549,6 +872,57 @@ def build_parser() -> argparse.ArgumentParser:
 
     done = board_sub.add_parser("done", help="move a matching card to Done and check it")
     done.add_argument("token", help="stable ID or unique text contained in the card")
+
+    session = sub.add_parser("session", help="session artifact utilities")
+    session_sub = session.add_subparsers(dest="session_command", required=True)
+    snapshot = session_sub.add_parser("snapshot", help="copy session artifacts for retrospectives")
+    snapshot.add_argument("session_id")
+    snapshot.add_argument("--slug", help="snapshot folder suffix, default: session ID prefix")
+    snapshot.add_argument("--date", help="snapshot date prefix, default: first transcript date")
+    snapshot.add_argument(
+        "--partial",
+        action="store_true",
+        help="mark the parent transcript as partial even if it is not the current session",
+    )
+    snapshot.add_argument(
+        "--complete",
+        action="store_true",
+        help="mark the parent transcript as complete even if it is the current session",
+    )
+    snapshot.add_argument(
+        "--codex-thread",
+        action="append",
+        help="Codex thread ID to copy from ~/.codex/sessions; may be repeated",
+    )
+    snapshot.add_argument(
+        "--codex-rollout",
+        action="append",
+        help="exact Codex rollout filename or path to copy; may be repeated",
+    )
+    snapshot.add_argument(
+        "--grep",
+        action="append",
+        help="literal text to search in Codex rollouts when thread IDs are unavailable",
+    )
+    snapshot.add_argument("--output-root", type=Path, help="override attachments output root")
+    snapshot.add_argument(
+        "--claude-root",
+        type=Path,
+        default=default_claude_projects_root(),
+        help="override Claude projects root",
+    )
+    snapshot.add_argument(
+        "--codex-root",
+        type=Path,
+        default=default_codex_sessions_root(),
+        help="override Codex sessions root",
+    )
+    snapshot.add_argument(
+        "--plugin-data-root",
+        type=Path,
+        default=default_plugin_data_root(),
+        help="override Claude plugin data root",
+    )
     return parser
 
 
@@ -580,6 +954,13 @@ def main(argv: list[str] | None = None) -> int:
                 update_next_board(args.column, args.token, None, False)
             elif args.board_command == "done":
                 update_next_board("Done", args.token, None, True)
+        elif args.command == "session":
+            if args.session_command == "snapshot":
+                if args.partial and args.complete:
+                    raise OawError("--partial and --complete are mutually exclusive")
+                session_snapshot(args)
+            else:
+                parser.error("unknown session command")
         else:
             parser.error("unknown command")
     except OawError as exc:

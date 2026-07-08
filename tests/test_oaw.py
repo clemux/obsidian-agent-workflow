@@ -318,6 +318,179 @@ id: AGT-TSK-obsidian-task-ids
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("multiple board cards match", proc.stderr)
 
+    def test_session_snapshot_copies_artifacts_and_writes_manifest(self):
+        session_id = "73550790-5af5-4efc-828c-72e6e1053d8f"
+        codex_thread = "019f3e73-029f-7ea2-9772-fdfa1e25fb8f"
+        claude_root = self.vault / "harness/claude/projects"
+        codex_root = self.vault / "harness/codex/sessions"
+        plugin_root = self.vault / "harness/claude/plugins/data"
+        output_root = self.vault / "Agents/Retrospectives/attachments"
+
+        parent = claude_root / "-tmp-project" / f"{session_id}.jsonl"
+        write(
+            parent,
+            f'{{"timestamp":"2026-07-07T21:18:45.572Z","sessionId":"{session_id}",'
+            f'"content":"Codex thread CODEX_THREAD_ID={codex_thread}; '
+            'plugin job task-mrb5j4y9-7k3yjy"}}\n',
+        )
+        write(
+            claude_root
+            / "-tmp-project"
+            / session_id
+            / "subagents/agent-a8fbf333b1df5e1e9.jsonl",
+            '{"timestamp":"2026-07-07T21:19:00.413Z","content":"delegated"}\n',
+        )
+        matching_rollout = (
+            codex_root
+            / "2026/07/07"
+            / f"rollout-2026-07-07T23-19-12-{codex_thread}.jsonl"
+        )
+        write(matching_rollout, '{"event":"turn_aborted"}\n')
+        grep_rollout = (
+            codex_root
+            / "2026/07/07"
+            / "rollout-2026-07-07T23-48-09-019f3e8d-8307-7052-b367-57e78f3316ae.jsonl"
+        )
+        write(grep_rollout, '{"content":"session-inspection-claude-codex"}\n')
+        write(
+            plugin_root
+            / "codex-openai-codex/state/example/jobs/task-mrb5j4y9-7k3yjy.log",
+            "running\n",
+        )
+
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            session_id,
+            "--slug",
+            "SR dogfood zombie Codex",
+            "--partial",
+            "--grep",
+            "session-inspection-claude-codex",
+            "--output-root",
+            str(output_root),
+            "--claude-root",
+            str(claude_root),
+            "--codex-root",
+            str(codex_root),
+            "--plugin-data-root",
+            str(plugin_root),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        snapshot = output_root / "2026-07-07-sr-dogfood-zombie-codex"
+        manifest_path = snapshot / "manifest.json"
+        self.assertTrue((snapshot / "claude/parent-73550790-PARTIAL.jsonl").exists())
+        self.assertTrue((snapshot / "claude/agent-a8fbf333b1df5e1e9.jsonl").exists())
+        self.assertTrue((snapshot / "codex" / matching_rollout.name).exists())
+        self.assertTrue((snapshot / "codex" / grep_rollout.name).exists())
+        self.assertTrue((snapshot / "plugin-logs/task-mrb5j4y9-7k3yjy.log").exists())
+        self.assertIn(f"Manifest: {manifest_path}", proc.stdout)
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["schema"], "oaw-session-snapshot-v1")
+        self.assertEqual(manifest["session_id"], session_id)
+        self.assertEqual(manifest["snapshot"]["parent_completeness"], "partial")
+        sources = {entry["source"] for entry in manifest["files"]}
+        self.assertIn(str(parent), sources)
+        self.assertIn(str(matching_rollout), sources)
+        self.assertTrue(all(entry["sha256"] for entry in manifest["files"]))
+
+    def test_session_snapshot_refresh_updates_parent_and_adds_subagents(self):
+        session_id = "019f3ed8-245c-79f3-8ec6-c1ba30e3646d"
+        claude_root = self.vault / "harness/claude/projects"
+        output_root = self.vault / "attachments"
+        parent = claude_root / "-tmp-project" / f"{session_id}.jsonl"
+        write(
+            parent,
+            f'{{"timestamp":"2026-07-08T01:00:00.000Z","sessionId":"{session_id}",'
+            '"content":"first"}}\n',
+        )
+
+        base_args = (
+            "session",
+            "snapshot",
+            session_id,
+            "--slug",
+            "refresh test",
+            "--partial",
+            "--output-root",
+            str(output_root),
+            "--claude-root",
+            str(claude_root),
+            "--codex-root",
+            str(self.vault / "missing-codex"),
+            "--plugin-data-root",
+            str(self.vault / "missing-plugin"),
+        )
+        first = self.run_oaw(*base_args)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        snapshot = output_root / "2026-07-08-refresh-test"
+        stale = snapshot / "codex/stale-rollout.jsonl"
+        write(stale, "{}\n")
+        manifest_path = snapshot / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["files"].append(
+            {
+                "category": "codex-rollout",
+                "source": "/tmp/stale-rollout.jsonl",
+                "destination": "codex/stale-rollout.jsonl",
+                "copied_at": "2026-07-08T01:00:00+00:00",
+                "completeness": "complete",
+                "size_bytes": 3,
+                "sha256": "stale",
+            }
+        )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        write(
+            parent,
+            f'{{"timestamp":"2026-07-08T01:00:00.000Z","sessionId":"{session_id}",'
+            '"content":"second"}}\n',
+        )
+        write(
+            claude_root / "-tmp-project" / session_id / "subagents/agent-new.jsonl",
+            '{"content":"new subagent"}\n',
+        )
+        second = self.run_oaw(*base_args)
+        self.assertEqual(second.returncode, 0, second.stderr)
+
+        parent_copy = snapshot / "claude/parent-019f3ed8-PARTIAL.jsonl"
+        self.assertIn("second", parent_copy.read_text(encoding="utf-8"))
+        self.assertTrue((snapshot / "claude/agent-new.jsonl").exists())
+        self.assertFalse(stale.exists())
+        manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
+        destinations = {entry["destination"] for entry in manifest["files"]}
+        self.assertIn("claude/agent-new.jsonl", destinations)
+
+    def test_session_snapshot_grep_fails_on_ambiguous_rollouts(self):
+        session_id = "019f3ed8-245c-79f3-8ec6-c1ba30e3646d"
+        claude_root = self.vault / "harness/claude/projects"
+        codex_root = self.vault / "harness/codex/sessions"
+        write(
+            claude_root / "-tmp-project" / f"{session_id}.jsonl",
+            f'{{"timestamp":"2026-07-08T01:00:00.000Z","sessionId":"{session_id}"}}\n',
+        )
+        write(codex_root / "2026/07/08/rollout-a.jsonl", "shared marker\n")
+        write(codex_root / "2026/07/08/rollout-b.jsonl", "shared marker\n")
+
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            session_id,
+            "--grep",
+            "shared marker",
+            "--output-root",
+            str(self.vault / "attachments"),
+            "--claude-root",
+            str(claude_root),
+            "--codex-root",
+            str(codex_root),
+            "--plugin-data-root",
+            str(self.vault / "missing-plugin"),
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("matched multiple Codex rollouts", proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

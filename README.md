@@ -49,6 +49,18 @@ oaw board done OAW-TSK-next-board
 
 `move` and `done` require the token to match exactly one card. `done` moves the card to `Done` and marks it `[x]`; other moves preserve the existing card text and keep the checkbox open.
 
+Session snapshots copy transient harness artifacts into the vault's retrospective attachments folder:
+
+```bash
+oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
+  --slug sr-dogfood-zombie-codex \
+  --partial \
+  --codex-thread 019f3e73-029f-7ea2-9772-fdfa1e25fb8f \
+  --codex-thread 019f3e8d-8307-7052-b367-57e78f3316ae
+```
+
+The command finds the Claude parent transcript plus `subagents/*.jsonl`, copies discoverable Codex rollouts by referenced or explicit thread ID, includes referenced plugin job logs, and writes `manifest.json` with source paths, copy time, file hashes, and parent completeness. Use `--codex-rollout` for an exact rollout filename or path. Use `--grep` only for a literal that identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags. Re-run the same command to refresh a partial parent transcript, pick up new subagents, and remove stale files listed in the previous manifest.
+
 ## Examples from agent sessions
 
 Recent Codex sessions used `oaw` for a few recurring jobs that are hard to do reliably with plain text search.

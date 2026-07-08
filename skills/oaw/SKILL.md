@@ -87,6 +87,24 @@ oaw board done OAW-TSK-next-board
 - `done` moves the card to `Done` and changes the checkbox to `- [x]`.
 - The command targets `Projects/Next steps.md`; project-local boards still use `oaw task start/complete`.
 
+## Session artifact snapshots
+
+When a session should be preserved for retrospectives, snapshot its transient harness artifacts into the vault attachments folder:
+
+```bash
+oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
+  --slug sr-dogfood-zombie-codex \
+  --partial \
+  --codex-thread 019f3e73-029f-7ea2-9772-fdfa1e25fb8f \
+  --codex-thread 019f3e8d-8307-7052-b367-57e78f3316ae
+```
+
+- The command writes to `Agents/Retrospectives/attachments/<date>-<slug>/` by default.
+- It copies the Claude parent transcript, Claude `subagents/*.jsonl`, discoverable Codex rollouts, and referenced plugin job logs.
+- Codex rollouts are discovered by referenced thread IDs or explicit `--codex-thread <id>` flags. Use `--codex-rollout <filename-or-path>` for an exact rollout. Use `--grep <literal>` only when the literal identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags.
+- It writes `manifest.json` with each source path, destination path, copy time, size, hash, category, and completeness. Use the manifest instead of hand-writing provenance.
+- Use `--partial` while the parent session is still live. Re-run the same command later to refresh the parent transcript, pick up new subagents, and remove stale files listed in the previous manifest.
+
 ## Rules
 
 - Use `oaw` before any manual vault search. Do not resolve IDs by searching agent state directories (`.codex`, `.claude`, `.agents`) or session transcripts unless the user explicitly asks for forensic work.
