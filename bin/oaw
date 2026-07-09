@@ -997,6 +997,9 @@ def cwd_from_record(record: object) -> str | None:
 def user_message_from_record(record: object) -> str | None:
     if not isinstance(record, dict):
         return None
+    payload = record.get("payload")
+    if isinstance(payload, dict) and (text := user_message_from_record(payload)):
+        return text
     role = str(record.get("role", "")).lower()
     record_type = str(record.get("type", "")).lower()
     if role != "user" and "user" not in record_type:
@@ -1012,6 +1015,10 @@ def user_message_from_record(record: object) -> str | None:
     if not text:
         return None
     first_line = " ".join(text.split())
+    if first_line.startswith("# AGENTS.md instructions") or first_line.startswith(
+        "<environment_context>"
+    ):
+        return None
     return first_line[:240]
 
 

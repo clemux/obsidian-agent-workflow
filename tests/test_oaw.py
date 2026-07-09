@@ -977,7 +977,10 @@ lookup-duplicate-session
         write(
             rollout,
             '{"type":"session_meta","cwd":"/workspace/example"}\n'
-            '{"type":"user_message","message":"Find the owning note."}\n'
+            '{"type":"response_item","payload":{"type":"message","role":"user",'
+            '"content":[{"type":"input_text","text":"# AGENTS.md instructions for /repo"}]}}\n'
+            '{"type":"response_item","payload":{"type":"message","role":"user",'
+            '"content":[{"type":"input_text","text":"Find the owning note."}]}}\n'
             '{"type":"tool_output","content":"Read Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"}\n',
         )
         write(
