@@ -63,6 +63,13 @@ Project boards use the column convention `Backlog` -> `Todo` -> `Active` -> `Don
 
 Use `oaw board ensure-backlog --project "Project Name"` to add the `Backlog` column to an existing project board before `Todo` without rewriting cards.
 
+It can also look up a session/thread ID across vault notes and session artifacts:
+
+```bash
+oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc
+oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc --codex-root /tmp/example-codex-sessions --claude-root /tmp/example-claude-projects
+```
+
 Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It uses the same session-id handling as `start` and `complete`, accepts optional `--checks`, and works on task notes regardless of current status.
 
 For non-project notes, append the same session trace or a dated observation block without hand-editing headings:
@@ -115,6 +122,14 @@ oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
 The command finds the Claude parent transcript plus `subagents/*.jsonl`, copies discoverable Codex rollouts by referenced or explicit thread ID, includes referenced plugin job logs, and writes `manifest.json` with source paths, copy time, file hashes, and parent completeness. Use `--codex-rollout` for an exact rollout filename or path. Use `--grep` only for a literal that identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags. Re-run the same command to refresh a partial parent transcript, pick up new subagents, and remove stale files listed in the previous manifest.
 
 Use installed `oaw ...` commands for operational vault writes such as task lifecycle updates, board moves, and session snapshots. Reserve `python bin/oaw ...` for development checks against this checkout, preferably with temp vaults. This keeps approval prompts scoped to stable commands instead of broad interpreter entrypoints; see `AGT-FDBK-allow-listed-skill-scripts`.
+
+`oaw session lookup <id>` follows the same two-step resolution strategy:
+
+- First it scans the vault and prints matching note paths and frontmatter IDs for the literal ID.
+- If no vault match is found, it scans artifact roots and prints a synopsis of discovered session artifacts.
+- If no match is found anywhere, it exits `0` and prints a clear *not logged* message.
+
+Test or demo runs can override the artifact roots with `--codex-root` and `--claude-root`. Lookup and snapshot commands share the `OAW_CODEX_SESSIONS_ROOT` and `OAW_CLAUDE_PROJECTS_ROOT` environment overrides; their fallback roots are `~/.codex/sessions` and `~/.claude/projects`.
 
 ## Examples from agent sessions
 

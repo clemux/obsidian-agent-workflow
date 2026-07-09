@@ -1,6 +1,6 @@
 ---
 name: oaw
-description: This skill should be used when an `obs:`-prefixed reference appears (e.g. `obs:OAW-TSK-cli`), when a frontmatter reference ID such as `AGT-*`, `SR-*`, `CDX-*`, `FAB-*`, or `OAW-*` needs resolving to a note in the user's Obsidian vault, when starting or completing a project task note with an agent-session trace, or when listing a project's tasks/captures. Provides the `oaw` CLI workflow. (`PMX-*` IDs have a dedicated `pmx` skill.)
+description: This skill should be used when an `obs:`-prefixed reference appears (e.g. `obs:OAW-TSK-cli`), when a frontmatter reference ID such as `AGT-*`, `SR-*`, `CDX-*`, `FAB-*`, or `OAW-*` needs resolving to a note in the user's Obsidian vault, when tracing a session/thread id through vault notes and session artifacts, when starting or completing a project task note with an agent-session trace, or when listing a project's tasks/captures. Provides the `oaw` CLI workflow. (`PMX-*` IDs have a dedicated `pmx` skill.)
 ---
 
 # oaw — Obsidian ID resolution and task lifecycle
@@ -29,6 +29,21 @@ The default view answers most questions. Use `--full` (entire note body) only af
 Short uppercase project aliases such as `obs:CDX` or `obs:OAW` resolve only through matching notes at `Projects/<Project>/Index.md` (`CDX-index`, `OAW-index`) and only when there is no exact frontmatter `id` or `aliases` match. Ambiguous project aliases are errors with candidate paths; do not treat a failed `obs:<project alias>` as a literal vault folder.
 
 On failure `oaw` exits non-zero with a clear message: "no note with frontmatter id or alias" for a miss, or a candidate-path list when an ID is duplicated. Surface that error to the user instead of guessing a path or falling back to text search.
+
+## Session lookup
+
+Use `oaw session lookup <id>` when you need to trace a literal session/thread id quickly:
+
+- Searches the vault first and reports matching note paths plus frontmatter ids.
+- If nothing matches, searches harness artifacts and prints a session synopsis.
+- If still missing, exits `0` with a clear not-logged message.
+
+```bash
+oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc
+oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc --codex-root /tmp/example-codex-sessions --claude-root /tmp/example-claude-projects
+```
+
+Override the harness roots for demo and tests with flags or the shared `OAW_CODEX_SESSIONS_ROOT` and `OAW_CLAUDE_PROJECTS_ROOT` environment variables; fallback roots are `~/.codex/sessions` and `~/.claude/projects`.
 
 ## Listing project notes
 

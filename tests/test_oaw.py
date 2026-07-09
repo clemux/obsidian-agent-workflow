@@ -897,6 +897,151 @@ export-scope: personal
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("-> Imports/Handoff/safe-2.md; dry-run", proc.stdout)
 
+    def test_session_lookup_reports_vault_note_hit(self):
+        task = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task.write_text(
+            task.read_text(encoding="utf-8")
+            + "- 2026-07-09 - Codex - `CODEX_THREAD_ID=lookup-thread` - Logged.\n",
+            encoding="utf-8",
+        )
+
+        proc = self.run_oaw(
+            "session",
+            "lookup",
+            "lookup-thread",
+            "--codex-root",
+            str(self.vault / "missing-codex"),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Session: lookup-thread", proc.stdout)
+        self.assertIn("Vault matches:", proc.stdout)
+        self.assertIn(
+            "- Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md | id: OAW-TSK-cli",
+            proc.stdout,
+        )
+        self.assertNotIn("Harness artifacts:", proc.stdout)
+
+    def test_session_lookup_reports_duplicate_note_ids_without_failing(self):
+        task = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task.write_text(
+            task.read_text(encoding="utf-8") + "\nlookup-duplicate-session\n",
+            encoding="utf-8",
+        )
+        write(
+            self.vault / "Projects/Other/Tasks/Duplicate CLI.md",
+            """---
+type: task
+id: OAW-TSK-cli
+---
+
+# Duplicate CLI
+
+lookup-duplicate-session
+""",
+        )
+
+        proc = self.run_oaw(
+            "session",
+            "lookup",
+            "lookup-duplicate-session",
+            "--codex-root",
+            str(self.vault / "missing-codex"),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md", proc.stdout)
+        self.assertIn("Projects/Other/Tasks/Duplicate CLI.md", proc.stdout)
+        self.assertEqual(proc.stdout.count("id: OAW-TSK-cli"), 2)
+
+    def test_session_lookup_summarizes_harness_artifacts(self):
+        session_id = "019f43c9-e93a-7052-bac7-1789a6de1df7"
+        codex_root = self.vault / "harness/codex/sessions"
+        claude_root = self.vault / "harness/claude/projects"
+        rollout = (
+            codex_root
+            / "2026/07/09"
+            / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
+        )
+        parent = claude_root / "-tmp-project" / f"{session_id}.jsonl"
+        subagent = (
+            claude_root
+            / "-tmp-project"
+            / "parent-session/subagents"
+            / f"agent-{session_id}.jsonl"
+        )
+        write(
+            rollout,
+            '{"type":"session_meta","cwd":"/workspace/example"}\n'
+            '{"type":"user_message","message":"Find the owning note."}\n'
+            '{"type":"tool_output","content":"Read Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"}\n',
+        )
+        write(
+            parent,
+            '{"message":{"role":"user","content":"Parent transcript request."}}\n',
+        )
+        write(subagent, '{"content":"subagent output"}\n')
+
+        proc = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--codex-root",
+            str(codex_root),
+            "--claude-root",
+            str(claude_root),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Harness artifacts:", proc.stdout)
+        self.assertIn(f"- codex-rollout: {rollout}", proc.stdout)
+        self.assertIn(f"- claude-transcript: {parent}", proc.stdout)
+        self.assertIn(f"- claude-subagent: {subagent}", proc.stdout)
+        self.assertIn("cwd: /workspace/example", proc.stdout)
+        self.assertIn("first user: Find the owning note.", proc.stdout)
+        self.assertIn(
+            "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md",
+            proc.stdout,
+        )
+
+    def test_session_lookup_unknown_exits_successfully(self):
+        proc = self.run_oaw(
+            "session",
+            "lookup",
+            "not-logged-session",
+            "--codex-root",
+            str(self.vault / "missing-codex"),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Session: not-logged-session", proc.stdout)
+        self.assertIn("Status: not logged", proc.stdout)
+
+    def test_session_lookup_treats_glob_metacharacters_literally(self):
+        session_id = "abc[1]"
+        codex_root = self.vault / "harness/codex/sessions"
+        rollout = codex_root / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
+        write(rollout, '{"type":"session_meta","cwd":"/workspace/example"}\n')
+
+        proc = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--codex-root",
+            str(codex_root),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"- codex-rollout: {rollout}", proc.stdout)
+
     def test_session_snapshot_copies_artifacts_and_writes_manifest(self):
         session_id = "73550790-5af5-4efc-828c-72e6e1053d8f"
         codex_thread = "019f3e73-029f-7ea2-9772-fdfa1e25fb8f"

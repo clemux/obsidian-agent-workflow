@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import glob
 import hashlib
 import json
 import os
@@ -64,6 +65,12 @@ class ExportCandidate:
     marker: str
     reason: str
     destination: Path | None = None
+
+
+@dataclass(frozen=True)
+class SessionArtifact:
+    kind: str
+    path: Path
 
 
 def vault_root() -> Path:
@@ -896,12 +903,204 @@ def safe_export_ingest(args: argparse.Namespace) -> None:
     print(f"Rejected: {len(rejected)}")
 
 
+def notes_containing_literal(root: Path, literal: str) -> list[NoteMatch]:
+    matches: list[NoteMatch] = []
+    for path in iter_markdown(root):
+        try:
+            text, fm, body, data = read_note(path)
+        except UnicodeDecodeError:
+            continue
+        if literal not in text:
+            continue
+        note_id = data.get("id")
+        rel = path.relative_to(root).as_posix()
+        matches.append(
+            NoteMatch(
+                path=path,
+                relpath=rel,
+                note_id=note_id if isinstance(note_id, str) else None,
+                matched_by="content",
+                title=title_from_body(path, body),
+                frontmatter_text=fm.rstrip(),
+                frontmatter=data,
+            )
+        )
+    return sorted(matches, key=lambda item: item.relpath)
+
+
+def find_session_artifacts(
+    session_id: str,
+    codex_root: Path,
+    claude_root: Path,
+) -> list[SessionArtifact]:
+    artifacts: list[SessionArtifact] = []
+    escaped_id = glob.escape(session_id)
+    if codex_root.exists():
+        for path in sorted(codex_root.rglob(f"rollout-*-{escaped_id}.jsonl")):
+            if path.is_file():
+                artifacts.append(SessionArtifact("codex-rollout", path))
+    if claude_root.exists():
+        for path in sorted(claude_root.rglob(f"{escaped_id}.jsonl")):
+            if path.is_file():
+                artifacts.append(SessionArtifact("claude-transcript", path))
+        for path in sorted(claude_root.rglob(f"subagents/agent-{escaped_id}.jsonl")):
+            if path.is_file():
+                artifacts.append(SessionArtifact("claude-subagent", path))
+    return artifacts
+
+
+def text_from_json(value: object) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, list):
+        parts = [part for item in value if (part := text_from_json(item))]
+        return "\n".join(parts) if parts else None
+    if isinstance(value, dict):
+        if isinstance(value.get("text"), str):
+            return value["text"].strip() or None
+        if isinstance(value.get("content"), str):
+            return value["content"].strip() or None
+        if isinstance(value.get("message"), str):
+            return value["message"].strip() or None
+        for key in ("content", "message", "messages", "parts"):
+            if key in value and (text := text_from_json(value[key])):
+                return text
+    return None
+
+
+def iter_json_values(value: object):
+    yield value
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from iter_json_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from iter_json_values(item)
+
+
+def cwd_from_record(record: object) -> str | None:
+    for value in iter_json_values(record):
+        if isinstance(value, dict) and isinstance(value.get("cwd"), str):
+            return value["cwd"]
+    return None
+
+
+def user_message_from_record(record: object) -> str | None:
+    if not isinstance(record, dict):
+        return None
+    role = str(record.get("role", "")).lower()
+    record_type = str(record.get("type", "")).lower()
+    if role != "user" and "user" not in record_type:
+        nested_message = record.get("message")
+        if (
+            not isinstance(nested_message, dict)
+            or str(nested_message.get("role", "")).lower() != "user"
+        ):
+            return None
+        text = text_from_json(nested_message)
+    else:
+        text = text_from_json(record)
+    if not text:
+        return None
+    first_line = " ".join(text.split())
+    return first_line[:240]
+
+
+def vault_paths_from_text(text: str) -> list[str]:
+    pattern = re.compile(
+        r"\b(?:Projects|Agents|References|Captures|Research)/"
+        r"[^\n\r\t`\"'<>|]+?\.md\b"
+    )
+    seen: set[str] = set()
+    paths: list[str] = []
+    for match in pattern.finditer(text):
+        path = match.group(0).strip()
+        if path in seen:
+            continue
+        seen.add(path)
+        paths.append(path)
+        if len(paths) >= 10:
+            break
+    return paths
+
+
+def summarize_artifact(path: Path) -> tuple[str | None, str | None, list[str]]:
+    cwd: str | None = None
+    first_user: str | None = None
+    raw_text_parts: list[str] = []
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                raw_text_parts.append(line)
+                if cwd and first_user:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if cwd is None:
+                    cwd = cwd_from_record(record)
+                if first_user is None:
+                    first_user = user_message_from_record(record)
+    except OSError:
+        return None, None, []
+    return cwd, first_user, vault_paths_from_text("".join(raw_text_parts))
+
+
+def session_lookup(args: argparse.Namespace) -> None:
+    session_id = args.session_id.strip()
+    if not session_id:
+        raise OawError("empty session ID")
+    root = vault_root()
+    note_hits = notes_containing_literal(root, session_id)
+    if note_hits:
+        print(f"Session: {session_id}")
+        print("Vault matches:")
+        for hit in note_hits:
+            note_id = hit.note_id or "(no id)"
+            print(f"- {hit.relpath} | id: {note_id}")
+        return
+
+    artifacts = find_session_artifacts(
+        session_id,
+        args.codex_root.expanduser(),
+        args.claude_root.expanduser(),
+    )
+    if not artifacts:
+        print(f"Session: {session_id}")
+        print("Status: not logged")
+        print("No vault note or harness artifact found.")
+        return
+
+    print(f"Session: {session_id}")
+    print("Harness artifacts:")
+    for artifact in artifacts:
+        cwd, first_user, vault_paths = summarize_artifact(artifact.path)
+        print(f"- {artifact.kind}: {artifact.path}")
+        print(f"  cwd: {cwd or '(unknown)'}")
+        print(f"  first user: {first_user or '(unknown)'}")
+        if vault_paths:
+            print("  vault paths:")
+            for vault_path in vault_paths:
+                print(f"    - {vault_path}")
+        else:
+            print("  vault paths: (none)")
+
+
 def default_claude_projects_root() -> Path:
-    return Path("~/.claude/projects").expanduser()
+    return Path(os.environ.get("OAW_CLAUDE_PROJECTS_ROOT", "~/.claude/projects")).expanduser()
 
 
 def default_codex_sessions_root() -> Path:
-    return Path("~/.codex/sessions").expanduser()
+    return Path(os.environ.get("OAW_CODEX_SESSIONS_ROOT", "~/.codex/sessions")).expanduser()
+
+
+def session_lookup_codex_root() -> Path:
+    return default_codex_sessions_root()
+
+
+def session_lookup_claude_root() -> Path:
+    return default_claude_projects_root()
 
 
 def default_plugin_data_root() -> Path:
@@ -1404,6 +1603,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     session = sub.add_parser("session", help="session artifact utilities")
     session_sub = session.add_subparsers(dest="session_command", required=True)
+    lookup = session_sub.add_parser("lookup", help="find notes or artifacts for a session ID")
+    lookup.add_argument("session_id")
+    lookup.add_argument(
+        "--codex-root",
+        type=Path,
+        default=session_lookup_codex_root(),
+        help="override Codex sessions root",
+    )
+    lookup.add_argument(
+        "--claude-root",
+        type=Path,
+        default=session_lookup_claude_root(),
+        help="override Claude projects root",
+    )
     snapshot = session_sub.add_parser("snapshot", help="copy session artifacts for retrospectives")
     snapshot.add_argument("session_id")
     snapshot.add_argument("--slug", help="snapshot folder suffix, default: session ID prefix")
@@ -1521,7 +1734,9 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 parser.error("unknown ingest command")
         elif args.command == "session":
-            if args.session_command == "snapshot":
+            if args.session_command == "lookup":
+                session_lookup(args)
+            elif args.session_command == "snapshot":
                 if args.partial and args.complete:
                     raise OawError("--partial and --complete are mutually exclusive")
                 session_snapshot(args)
