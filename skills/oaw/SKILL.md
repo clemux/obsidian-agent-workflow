@@ -48,6 +48,33 @@ oaw list --project Fable --type capture
 
 Capture listing hides `status: archived` notes by default. Use `--include-archived` only for historical/provenance work, or `--status archived` when the archived set is the explicit target. For archived captures, prefer `oaw resolve --meta` or default `oaw resolve` first; use `--full` only after confirming the archived body is needed.
 
+## Safe export ingestion
+
+Use `oaw ingest safe-export` to move approved handoff notes into the vault:
+
+```bash
+OAW_INGESTION_ROOT=/path/to/ingestion-root \
+  oaw ingest safe-export
+OAW_INGESTION_ROOT=/path/to/ingestion-root \
+  oaw ingest safe-export --write
+```
+
+- Scans markdown files in the handoff folder:
+  - default: `OAW_INGESTION_ROOT`
+  - fallback: `~/obsidian-ingestion`
+- Reads frontmatter only; no body text is used for acceptance.
+- Accepted markers (frontmatter):
+  - `export-scope: personal` (preferred)
+  - `export-approved: personal`
+  - `safe-export-personal: true`
+  - `safe-export-personal` tag
+- Dry-run by default: it reports what would be ingested or rejected without writing.
+- `--write` performs the actual move:
+  - accepted notes go to the vault-relative `Imports/Safe export`
+  - rejected notes go to `.rejected/` in the handoff path
+
+Safety is explicit by design: only frontmatter-marked files are ingested.
+
 ## Project task lifecycle
 
 Lifecycle writes apply only to task notes under `Projects/*/Tasks` (the CLI enforces this):

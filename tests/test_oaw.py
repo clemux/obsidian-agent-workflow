@@ -509,6 +509,227 @@ id: AGT-TSK-obsidian-task-ids
         board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
         self.assertEqual(board.count("## Backlog"), 1)
 
+    def test_safe_export_ingest_dry_run_reads_markers_and_leaves_files(self):
+        ingestion = self.vault / "handoff"
+        safe = ingestion / "safe.md"
+        legacy = ingestion / "legacy.md"
+        unsafe = ingestion / "unsafe.md"
+        write(
+            safe,
+            """---
+export-scope: personal
+---
+
+# Safe
+
+Body.
+""",
+        )
+        write(
+            legacy,
+            """---
+tags:
+  - safe-export-personal
+---
+
+# Legacy
+""",
+        )
+        write(
+            unsafe,
+            """---
+project: private
+---
+
+# Unsafe
+""",
+        )
+
+        proc = self.run_oaw(
+            "ingest",
+            "safe-export",
+            "--ingestion-root",
+            str(ingestion),
+            "--destination",
+            "Imports/Handoff",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Mode: dry-run", proc.stdout)
+        self.assertIn("ACCEPT safe.md [export-scope: personal] -> Imports/Handoff/safe.md; dry-run", proc.stdout)
+        self.assertIn("ACCEPT legacy.md [tag: safe-export-personal] -> Imports/Handoff/legacy.md; dry-run", proc.stdout)
+        self.assertIn("REJECT unsafe.md [missing safe export marker] -> quarantine; dry-run", proc.stdout)
+        self.assertTrue(safe.exists())
+        self.assertTrue(legacy.exists())
+        self.assertTrue(unsafe.exists())
+        self.assertFalse((self.vault / "Imports/Handoff/safe.md").exists())
+        self.assertFalse((ingestion / ".rejected/unsafe.md").exists())
+
+    def test_safe_export_ingest_write_ingests_safe_and_quarantines_rejected(self):
+        ingestion = self.vault / "handoff"
+        safe = ingestion / "nested/safe.md"
+        unsafe = ingestion / "unsafe.md"
+        existing = self.vault / "Imports/Handoff/nested/safe.md"
+        write(
+            safe,
+            """---
+export-approved: personal
+---
+
+# Safe
+""",
+        )
+        write(
+            unsafe,
+            """---
+export-scope: work
+---
+
+# Unsafe
+""",
+        )
+        write(existing, "existing\n")
+
+        proc = self.run_oaw(
+            "ingest",
+            "safe-export",
+            "--ingestion-root",
+            str(ingestion),
+            "--destination",
+            "Imports/Handoff",
+            "--write",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(
+            "ACCEPT nested/safe.md [export-approved: personal] -> Imports/Handoff/nested/safe-2.md; removed source",
+            proc.stdout,
+        )
+        self.assertIn(
+            "REJECT unsafe.md [missing safe export marker] -> quarantine .rejected/unsafe.md",
+            proc.stdout,
+        )
+        self.assertFalse(safe.exists())
+        self.assertFalse(unsafe.exists())
+        self.assertEqual(existing.read_text(encoding="utf-8"), "existing\n")
+        self.assertTrue((self.vault / "Imports/Handoff/nested/safe-2.md").exists())
+        self.assertTrue((ingestion / ".rejected/unsafe.md").exists())
+
+    def test_safe_export_ingest_rejects_unclosed_frontmatter(self):
+        ingestion = self.vault / "handoff"
+        broken = ingestion / "broken.md"
+        write(
+            broken,
+            """---
+export-scope: personal
+# no closing fence
+Body that should not be trusted.
+""",
+        )
+
+        proc = self.run_oaw(
+            "ingest",
+            "safe-export",
+            "--ingestion-root",
+            str(ingestion),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("REJECT broken.md [frontmatter is not closed:", proc.stdout)
+
+    def test_safe_export_ingest_refuses_absolute_destination(self):
+        ingestion = self.vault / "handoff"
+        write(
+            ingestion / "safe.md",
+            """---
+export-scope: personal
+---
+
+# Safe
+""",
+        )
+
+        proc = self.run_oaw(
+            "ingest",
+            "safe-export",
+            "--ingestion-root",
+            str(ingestion),
+            "--destination",
+            str(self.vault / "absolute"),
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("--destination must be vault-relative", proc.stderr)
+
+    def test_safe_export_ingest_refuses_conflicting_modes(self):
+        proc = self.run_oaw(
+            "ingest",
+            "safe-export",
+            "--dry-run",
+            "--write",
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("not allowed with argument", proc.stderr)
+
+    def test_safe_export_ingest_refuses_root_that_contains_vault(self):
+        ingestion = self.vault / "misconfigured"
+        nested_vault = ingestion / "vault"
+        note = nested_vault / "Projects/Demo/Tasks/Unsafe.md"
+        write(note, "---\nid: DEMO-TSK-unsafe\n---\n\n# Unsafe\n")
+
+        proc = self.run_oaw(
+            "ingest",
+            "safe-export",
+            "--ingestion-root",
+            str(ingestion),
+            "--write",
+            env={"OAW_VAULT": str(nested_vault)},
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("ingestion root must not be or contain the vault", proc.stderr)
+        self.assertTrue(note.exists())
+
+    def test_safe_export_ingest_refuses_destination_inside_ingestion_root(self):
+        ingestion = self.vault / "handoff"
+        write(
+            ingestion / "safe.md",
+            "---\nexport-scope: personal\n---\n\n# Safe\n",
+        )
+
+        proc = self.run_oaw(
+            "ingest",
+            "safe-export",
+            "--ingestion-root",
+            str(ingestion),
+            "--destination",
+            "handoff/imported",
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("destination must not be inside the ingestion root", proc.stderr)
+
+    def test_safe_export_ingest_dry_run_previews_collision_destination(self):
+        ingestion = self.vault / "handoff"
+        write(
+            ingestion / "safe.md",
+            "---\nexport-scope: personal\n---\n\n# Safe\n",
+        )
+        write(self.vault / "Imports/Handoff/safe.md", "existing\n")
+
+        proc = self.run_oaw(
+            "ingest",
+            "safe-export",
+            "--ingestion-root",
+            str(ingestion),
+            "--destination",
+            "Imports/Handoff",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("-> Imports/Handoff/safe-2.md; dry-run", proc.stdout)
+
     def test_session_snapshot_copies_artifacts_and_writes_manifest(self):
         session_id = "73550790-5af5-4efc-828c-72e6e1053d8f"
         codex_thread = "019f3e73-029f-7ea2-9772-fdfa1e25fb8f"

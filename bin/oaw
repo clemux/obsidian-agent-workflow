@@ -18,6 +18,11 @@ DEFAULT_VAULT = Path("/path/to/vault")
 NEXT_BOARD = Path("Projects/Next steps.md")
 RETRO_ATTACHMENTS = Path("Agents/Retrospectives/attachments")
 BOARD_COLUMN_ORDER = ["Backlog", "Todo", "Active", "Done"]
+SAFE_EXPORT_DESTINATION = Path("Imports/Safe export")
+SAFE_EXPORT_QUARANTINE = Path(".rejected")
+SAFE_EXPORT_TAG = "safe-export-personal"
+SAFE_EXPORT_SCOPE = "personal"
+FRONTMATTER_READ_LIMIT = 64 * 1024
 SESSION_ENV = [
     ("Codex", "CODEX_THREAD_ID"),
     ("Claude Code", "CLAUDE_SESSION_ID"),
@@ -48,6 +53,16 @@ class SnapshotCopy:
     destination: Path
     category: str
     completeness: str = "complete"
+
+
+@dataclass(frozen=True)
+class ExportCandidate:
+    source: Path
+    relative_source: Path
+    safe: bool
+    marker: str
+    reason: str
+    destination: Path | None = None
 
 
 def vault_root() -> Path:
@@ -121,6 +136,23 @@ def read_note(path: Path) -> tuple[str, str, str, dict[str, object]]:
     text = path.read_text(encoding="utf-8")
     _, fm, body = split_note(text)
     return text, fm, body, parse_frontmatter(fm)
+
+
+def read_frontmatter_only(path: Path) -> tuple[str, dict[str, object]]:
+    with path.open("r", encoding="utf-8") as handle:
+        first = handle.readline()
+        if first.strip() != "---":
+            return "", {}
+        total = len(first.encode("utf-8"))
+        lines: list[str] = []
+        for line in handle:
+            total += len(line.encode("utf-8"))
+            if total > FRONTMATTER_READ_LIMIT:
+                raise OawError(f"frontmatter too large or not closed before safety limit: {path}")
+            if line.strip() == "---":
+                return "".join(lines), parse_frontmatter("".join(lines))
+            lines.append(line)
+    raise OawError(f"frontmatter is not closed: {path}")
 
 
 def title_from_body(path: Path, body: str) -> str:
@@ -593,6 +625,161 @@ def list_project(
         print("\t".join(row))
 
 
+def default_ingestion_root() -> Path:
+    return Path(os.environ.get("OAW_INGESTION_ROOT", "~/obsidian-ingestion")).expanduser()
+
+
+def safe_export_destination(args: argparse.Namespace) -> Path:
+    raw = Path(args.destination)
+    if raw.is_absolute():
+        raise OawError("--destination must be vault-relative")
+    if ".." in raw.parts:
+        raise OawError("--destination must not contain '..'")
+    return raw
+
+
+def frontmatter_tags(data: dict[str, object]) -> set[str]:
+    value = data.get("tags", [])
+    tags: set[str] = set()
+    if isinstance(value, list):
+        tags.update(str(item).lstrip("#") for item in value)
+    elif isinstance(value, str):
+        tags.update(part.strip().lstrip("#") for part in re.split(r"[,\s]+", value) if part.strip())
+    return tags
+
+
+def trueish(value: object) -> bool:
+    return str(value).strip().lower() in {"true", "yes", "1", "personal"}
+
+
+def safe_export_marker(data: dict[str, object]) -> tuple[bool, str, str]:
+    scope = data.get("export-scope")
+    if isinstance(scope, str) and scope.strip().lower() == SAFE_EXPORT_SCOPE:
+        return True, "export-scope: personal", "accepted"
+    approved = data.get("export-approved")
+    if isinstance(approved, str) and approved.strip().lower() == SAFE_EXPORT_SCOPE:
+        return True, "export-approved: personal", "accepted"
+    legacy_property = data.get(SAFE_EXPORT_TAG)
+    if legacy_property is not None and trueish(legacy_property):
+        return True, f"{SAFE_EXPORT_TAG}: true", "accepted compatibility property"
+    if SAFE_EXPORT_TAG in frontmatter_tags(data):
+        return True, f"tag: {SAFE_EXPORT_TAG}", "accepted compatibility tag"
+    return False, "", "missing safe export marker"
+
+
+def unique_destination(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    for index in range(2, 1000):
+        candidate = path.with_name(f"{stem}-{index}{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise OawError(f"could not find unique destination for {path}")
+
+
+def iter_ingestion_markdown(root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    quarantine = root / SAFE_EXPORT_QUARANTINE
+    paths: list[Path] = []
+    for path in sorted(root.rglob("*.md")):
+        try:
+            path.relative_to(quarantine)
+            continue
+        except ValueError:
+            pass
+        if path.is_file():
+            paths.append(path)
+    return paths
+
+
+def classify_export_candidate(path: Path, ingestion_root: Path, destination_root: Path) -> ExportCandidate:
+    relative = path.relative_to(ingestion_root)
+    try:
+        _, data = read_frontmatter_only(path)
+    except UnicodeDecodeError as exc:
+        return ExportCandidate(path, relative, False, "", f"frontmatter is not UTF-8: {exc}")
+    except OawError as exc:
+        return ExportCandidate(path, relative, False, "", str(exc))
+    safe, marker, reason = safe_export_marker(data)
+    destination = destination_root / relative if safe else None
+    return ExportCandidate(path, relative, safe, marker, reason, destination)
+
+
+def classify_export_candidates(
+    ingestion_root: Path,
+    destination_root: Path,
+) -> list[ExportCandidate]:
+    return [
+        classify_export_candidate(path, ingestion_root, destination_root)
+        for path in iter_ingestion_markdown(ingestion_root)
+    ]
+
+
+def move_to_quarantine(candidate: ExportCandidate, ingestion_root: Path) -> Path:
+    quarantine = ingestion_root / SAFE_EXPORT_QUARANTINE / candidate.relative_source
+    quarantine.parent.mkdir(parents=True, exist_ok=True)
+    destination = unique_destination(quarantine)
+    shutil.move(str(candidate.source), str(destination))
+    return destination
+
+
+def ingest_candidate(candidate: ExportCandidate) -> Path:
+    if candidate.destination is None:
+        raise OawError("safe candidate is missing a destination")
+    destination = unique_destination(candidate.destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(candidate.source, destination)
+    candidate.source.unlink()
+    return destination
+
+
+def safe_export_ingest(args: argparse.Namespace) -> None:
+    ingestion_root = args.ingestion_root.expanduser().resolve()
+    root = vault_root()
+    destination_root = (root / safe_export_destination(args)).resolve()
+    if not destination_root.is_relative_to(root):
+        raise OawError("safe export destination must remain inside the vault")
+    if root.is_relative_to(ingestion_root):
+        raise OawError("ingestion root must not be or contain the vault")
+    if destination_root.is_relative_to(ingestion_root):
+        raise OawError("safe export destination must not be inside the ingestion root")
+    candidates = classify_export_candidates(ingestion_root, destination_root)
+    accepted = [candidate for candidate in candidates if candidate.safe]
+    rejected = [candidate for candidate in candidates if not candidate.safe]
+    mode = args.mode
+    print(f"Mode: {mode}")
+    print(f"Ingestion: {ingestion_root}")
+    print(f"Destination: {destination_root.relative_to(root).as_posix()}")
+    print(f"Candidates: {len(candidates)}")
+    for candidate in candidates:
+        rel = candidate.relative_source.as_posix()
+        if candidate.safe:
+            marker = candidate.marker
+            destination = candidate.destination
+            if destination is None:
+                raise OawError(f"safe candidate has no destination: {rel}")
+            if mode == "write":
+                written = ingest_candidate(candidate)
+                print(f"ACCEPT {rel} [{marker}] -> {written.relative_to(root).as_posix()}; removed source")
+            else:
+                target = unique_destination(destination).relative_to(root).as_posix()
+                print(f"ACCEPT {rel} [{marker}] -> {target}; dry-run")
+        else:
+            if mode == "write":
+                quarantined = move_to_quarantine(candidate, ingestion_root)
+                print(
+                    f"REJECT {rel} [{candidate.reason}] -> quarantine "
+                    f"{quarantined.relative_to(ingestion_root).as_posix()}"
+                )
+            else:
+                print(f"REJECT {rel} [{candidate.reason}] -> quarantine; dry-run")
+    print(f"Accepted: {len(accepted)}")
+    print(f"Rejected: {len(rejected)}")
+
+
 def default_claude_projects_root() -> Path:
     return Path("~/.claude/projects").expanduser()
 
@@ -970,6 +1157,40 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ensure_backlog.add_argument("--project", required=True)
 
+    ingest = sub.add_parser("ingest", help="ingest approved handoff files")
+    ingest_sub = ingest.add_subparsers(dest="ingest_command", required=True)
+    safe_export = ingest_sub.add_parser(
+        "safe-export",
+        help="ingest frontmatter-approved Markdown files",
+    )
+    safe_export.add_argument(
+        "--ingestion-root",
+        type=Path,
+        default=default_ingestion_root(),
+        help="handoff folder to scan, default: OAW_INGESTION_ROOT or ~/obsidian-ingestion",
+    )
+    safe_export.add_argument(
+        "--destination",
+        default=SAFE_EXPORT_DESTINATION.as_posix(),
+        help="vault-relative destination folder",
+    )
+    safe_export_mode = safe_export.add_mutually_exclusive_group()
+    safe_export_mode.add_argument(
+        "--dry-run",
+        action="store_const",
+        const="dry-run",
+        dest="mode",
+        help="preview actions without moving files",
+    )
+    safe_export_mode.add_argument(
+        "--write",
+        action="store_const",
+        const="write",
+        dest="mode",
+        help="ingest safe files and quarantine rejected files",
+    )
+    safe_export.set_defaults(mode="dry-run")
+
     session = sub.add_parser("session", help="session artifact utilities")
     session_sub = session.add_subparsers(dest="session_command", required=True)
     snapshot = session_sub.add_parser("snapshot", help="copy session artifacts for retrospectives")
@@ -1061,6 +1282,11 @@ def main(argv: list[str] | None = None) -> int:
                 update_next_board("Done", args.token, None, True)
             elif args.board_command == "ensure-backlog":
                 ensure_project_backlog_column(args.project)
+        elif args.command == "ingest":
+            if args.ingest_command == "safe-export":
+                safe_export_ingest(args)
+            else:
+                parser.error("unknown ingest command")
         elif args.command == "session":
             if args.session_command == "snapshot":
                 if args.partial and args.complete:

@@ -27,6 +27,26 @@ oaw list --project Fable --type capture
 oaw list --project Fable --type capture --include-archived
 ```
 
+### Safe export ingestion
+
+`oaw ingest safe-export` scans a handoff directory for markdown files and only accepts those marked as safe for import. It is conservative by default and performs a dry-run unless `--write` is passed.
+
+```bash
+OAW_INGESTION_ROOT=/path/to/ingestion-root oaw ingest safe-export
+OAW_INGESTION_ROOT=/path/to/ingestion-root oaw ingest safe-export --write
+```
+
+Scanned files are accepted when frontmatter indicates one of:
+
+- `export-scope: personal` (preferred)
+- `export-approved: personal` (compatibility)
+- `safe-export-personal: true` (compatibility)
+- `safe-export-personal` tag
+
+Safety evaluation reads frontmatter only. In `--write` mode, accepted files are ingested to `Imports/Safe export` (vault-relative) and rejected files are quarantined under `.rejected/`.
+
+Default handoff path is `OAW_INGESTION_ROOT` (if unset, `~/obsidian-ingestion`). Default destination is `Imports/Safe export`.
+
 It also supports a conservative task lifecycle for project tasks under `Projects/*/Tasks`:
 
 ```bash
