@@ -189,13 +189,25 @@ Board: updated
 
 ## Install
 
-Symlink the command onto `PATH`:
+Install with `uv` from the repo checkout:
 
 ```bash
-ln -s /home/clemux/dev/obsidian-agent-workflow/bin/oaw ~/.local/bin/oaw
+cd /path/to/obsidian-agent-workflow
+uv tool install .
 ```
 
-The vault defaults to `/path/to/vault`. Override with `OAW_VAULT`.
+This builds a snapshot into a uv-managed tool environment, so the installed
+`oaw` is decoupled from the checkout: switching branches or editing `bin/oaw`
+does not change the installed command. After merging changes, refresh with:
+
+```bash
+uv tool install --reinstall .
+```
+
+During development, run the checkout directly with `python bin/oaw ...`
+(preferably against a temp vault via `OAW_VAULT`).
+
+The default vault path is machine-specific legacy debt; override with `OAW_VAULT`.
 
 ## Development worktrees
 
