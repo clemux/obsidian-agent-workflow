@@ -1042,6 +1042,212 @@ lookup-duplicate-session
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn(f"- codex-rollout: {rollout}", proc.stdout)
 
+    def test_link_check_and_list_handle_escaped_pipe_in_table(self):
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Linked task.md",
+            """---
+type: task
+project: obsidian-agent-workflow
+status: todo
+id: OAW-TSK-linked
+aliases:
+  - OAW-TSK-linked
+---
+
+# Linked task
+
+| Related |
+| --- |
+| [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI\\|CLI]] |
+""",
+        )
+
+        check = self.run_oaw("link", "check", "OAW-TSK-linked", "OAW-TSK-cli")
+        self.assertEqual(check.returncode, 0, check.stderr)
+        self.assertIn("Left links right: yes", check.stdout)
+        self.assertIn("Right links left: no", check.stdout)
+
+        listed = self.run_oaw("link", "list", "OAW-TSK-linked")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertIn(
+            "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI\\|CLI]]",
+            listed.stdout,
+        )
+        self.assertIn(
+            "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md | id: OAW-TSK-cli",
+            listed.stdout,
+        )
+        self.assertIn("alias: CLI", listed.stdout)
+
+    def test_link_ensure_dry_run_and_write_append_only(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+
+        dry = self.run_oaw(
+            "link",
+            "ensure",
+            "OAW-TSK-cli",
+            "OAW-TSK-archived",
+            "--section",
+            "Related",
+            "--label",
+            "OAW-TSK-archived",
+        )
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        self.assertIn("Dry-run: would update", dry.stdout)
+        self.assertNotIn(
+            "[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]",
+            task_path.read_text(encoding="utf-8"),
+        )
+
+        written = self.run_oaw(
+            "link",
+            "ensure",
+            "OAW-TSK-cli",
+            "OAW-TSK-archived",
+            "--section",
+            "Related",
+            "--label",
+            "OAW-TSK-archived",
+            "--write",
+        )
+        self.assertEqual(written.returncode, 0, written.stderr)
+        self.assertIn("Updated: Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md", written.stdout)
+        task = task_path.read_text(encoding="utf-8")
+        self.assertIn("## Related", task)
+        self.assertEqual(
+            task.count("[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]"),
+            1,
+        )
+
+        again = self.run_oaw(
+            "link",
+            "ensure",
+            "OAW-TSK-cli",
+            "OAW-TSK-archived",
+            "--section",
+            "Related",
+            "--label",
+            "different alias",
+            "--write",
+        )
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("Link: present", again.stdout)
+        self.assertEqual(
+            task_path.read_text(encoding="utf-8").count(
+                "[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]"
+            ),
+            1,
+        )
+
+    def test_link_ensure_rejects_conflicting_dry_run_and_write(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        before = task_path.read_text(encoding="utf-8")
+
+        proc = self.run_oaw(
+            "link",
+            "ensure",
+            "OAW-TSK-cli",
+            "OAW-TSK-archived",
+            "--dry-run",
+            "--write",
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("not allowed with argument", proc.stderr)
+        self.assertEqual(before, task_path.read_text(encoding="utf-8"))
+
+    def test_link_ensure_bidirectional_writes_missing_reciprocal_links(self):
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Alpha.md",
+            """---
+type: task
+project: obsidian-agent-workflow
+status: todo
+id: OAW-TSK-alpha
+aliases:
+  - OAW-TSK-alpha
+---
+
+# Alpha
+""",
+        )
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Beta.md",
+            """---
+type: task
+project: obsidian-agent-workflow
+status: todo
+id: OAW-TSK-beta
+aliases:
+  - OAW-TSK-beta
+---
+
+# Beta
+""",
+        )
+
+        proc = self.run_oaw(
+            "link",
+            "ensure-bidirectional",
+            "OAW-TSK-alpha",
+            "OAW-TSK-beta",
+            "--write",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        alpha = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Alpha.md").read_text()
+        beta = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Beta.md").read_text()
+        self.assertIn("[[Projects/Obsidian Agent Workflow/Tasks/Beta|OAW-TSK-beta]]", alpha)
+        self.assertIn("[[Projects/Obsidian Agent Workflow/Tasks/Alpha|OAW-TSK-alpha]]", beta)
+
+    def test_link_lint_suggests_durable_opaque_id_replacements(self):
+        task = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
+        task.write_text(
+            task.read_text(encoding="utf-8")
+            + "\n## Related\n\n- [[OAW-TSK-cli]]\n- [[PMX-UNKNOWN]]\n",
+            encoding="utf-8",
+        )
+
+        proc = self.run_oaw("link", "lint")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(
+            "Archived task.md: [[OAW-TSK-cli]] -> [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]",
+            proc.stdout,
+        )
+        self.assertIn("Archived task.md: [[PMX-UNKNOWN]] -> (unresolved)", proc.stdout)
+
+    def test_link_lint_skips_non_utf8_notes(self):
+        bad = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Binary.md"
+        bad.parent.mkdir(parents=True, exist_ok=True)
+        bad.write_bytes(b"---\nid: OAW-TSK-binary\n---\n\xff\xfe")
+        task = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
+        task.write_text(
+            task.read_text(encoding="utf-8") + "\n- [[OAW-TSK-cli]]\n",
+            encoding="utf-8",
+        )
+
+        proc = self.run_oaw("link", "lint")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Archived task.md: [[OAW-TSK-cli]]", proc.stdout)
+
+    def test_link_commands_ignore_wikilinks_inside_fenced_code(self):
+        task = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
+        task.write_text(
+            task.read_text(encoding="utf-8")
+            + "\n```markdown\n[[OAW-TSK-cli]]\n```\n",
+            encoding="utf-8",
+        )
+
+        listed = self.run_oaw("link", "list", "OAW-TSK-archived")
+        linted = self.run_oaw("link", "lint")
+
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertNotIn("[[OAW-TSK-cli]]", listed.stdout)
+        self.assertEqual(linted.returncode, 0, linted.stderr)
+        self.assertNotIn("Archived task.md: [[OAW-TSK-cli]]", linted.stdout)
+
     def test_session_snapshot_copies_artifacts_and_writes_manifest(self):
         session_id = "73550790-5af5-4efc-828c-72e6e1053d8f"
         codex_thread = "019f3e73-029f-7ea2-9772-fdfa1e25fb8f"

@@ -180,6 +180,24 @@ Priority uses a vault-wide 1/2/3 scale:
 
 Cross-project usefulness can raise priority: a task that improves multiple projects, agent handoffs, or repeatable workflow safety may deserve a lower numeric priority than a similar one-project task. The Base sorts by priority rank, then effort rank (`S`, `M`, `L`), then title; missing priority or effort sorts after explicit values.
 
+## Link management
+
+Use `oaw link` for durable wikilink checks and append-only repairs:
+
+```bash
+oaw link check OAW-TSK-cli OAW-TSK-session-lookup
+oaw link list OAW-TSK-cli
+oaw link ensure OAW-TSK-cli OAW-TSK-session-lookup --section Related
+oaw link ensure-bidirectional OAW-TSK-cli OAW-TSK-session-lookup --section Related
+oaw link lint
+```
+
+- `check` reports whether each note links to the other.
+- `list` prints explicit wikilinks from a note and resolves each target when possible.
+- `ensure` and `ensure-bidirectional` default to a dry-run preview. Pass `--write` only when the user asked to apply the append-only section edit.
+- Edits use durable `[[vault/path|ID]]` links and skip duplicates when a path-form link is already present with any alias.
+- `lint` reports opaque ID links such as `[[OAW-TSK-cli]]` and suggests durable replacements when the ID resolves.
+
 ## Session artifact snapshots
 
 When a session should be preserved for retrospectives, snapshot its transient harness artifacts into the vault attachments folder:

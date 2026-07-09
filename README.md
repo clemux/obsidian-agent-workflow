@@ -109,6 +109,18 @@ oaw board done OAW-TSK-next-board
 
 The aggregate cross-project task Base lives at `Projects/Cross-project tasks.base`. Use it when choosing what to work on next across OAW and adjacent agent-tooling queues: its open-task view includes `Projects/*/Tasks` and `Agents/Tasks`, keeps `backlog`, `todo`, `active`, and legacy `open` tasks visible, and excludes terminal `done` and `superseded` work. Priority is a vault-wide 1/2/3 scale: `1` is urgent, blocking, or unusually high-leverage; `2` is normal next-session work with clear value; `3` is useful backlog work. Cross-project usefulness can raise priority, and the Base sorts by priority, then effort (`S`, `M`, `L`), then title.
 
+`oaw link` supports durable Obsidian wikilink hygiene:
+
+```bash
+oaw link check OAW-TSK-cli OAW-TSK-session-lookup
+oaw link list OAW-TSK-cli
+oaw link ensure OAW-TSK-cli OAW-TSK-session-lookup --section Related
+oaw link ensure-bidirectional OAW-TSK-cli OAW-TSK-session-lookup --section Related
+oaw link lint
+```
+
+`ensure` and `ensure-bidirectional` default to a dry-run preview and append a `[[vault/path|ID]]` link only when the target path is missing. Pass `--write` to apply the append-only section edit.
+
 Session snapshots copy transient harness artifacts into the vault's retrospective attachments folder:
 
 ```bash
