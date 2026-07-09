@@ -61,6 +61,8 @@ oaw board done OAW-TSK-next-board
 
 `move` and `done` require the token to match exactly one card. `done` moves the card to `Done` and marks it `[x]`; other moves preserve the existing card text and keep the checkbox open.
 
+The aggregate cross-project task Base lives at `Projects/Cross-project tasks.base`. Use it when choosing what to work on next across OAW and adjacent agent-tooling queues: its open-task view includes `Projects/*/Tasks` and `Agents/Tasks`, keeps `backlog`, `todo`, `active`, and legacy `open` tasks visible, and excludes terminal `done` and `superseded` work. Priority is a vault-wide 1/2/3 scale: `1` is urgent, blocking, or unusually high-leverage; `2` is normal next-session work with clear value; `3` is useful backlog work. Cross-project usefulness can raise priority, and the Base sorts by priority, then effort (`S`, `M`, `L`), then title.
+
 Session snapshots copy transient harness artifacts into the vault's retrospective attachments folder:
 
 ```bash
@@ -125,7 +127,7 @@ Example output:
 
 ```text
 ID: OAW-TSK-project-alias-resolution
-Path: /path/to/vault/Projects/Obsidian Agent Workflow/Tasks/Project alias resolution for obs references.md
+Path: Projects/Obsidian Agent Workflow/Tasks/Project alias resolution for obs references.md
 Title: Project alias resolution for obs references
 Matched by: id
 
@@ -145,7 +147,7 @@ Outline:
 `--path` prints only the resolved file:
 
 ```text
-/path/to/vault/Projects/Codex Delegation/Index.md
+Projects/Codex Delegation/Index.md
 ```
 
 Survey a project queue without opening every note body. This is useful for status checks and planning the next agent action:
@@ -195,7 +197,7 @@ CODEX_THREAD_ID=019f3e36-ee4d-7220-8e5c-c26aa5d38893 \
 Example lifecycle output:
 
 ```text
-Updated: /path/to/vault/Projects/Obsidian Agent Workflow/Tasks/Resolver and lifecycle CLI.md
+Updated: Projects/Obsidian Agent Workflow/Tasks/Resolver and lifecycle CLI.md
 Status: done
 Board: updated
 ```

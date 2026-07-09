@@ -1,15 +1,15 @@
 ---
 name: oaw
-description: This skill should be used when an `obs:`-prefixed reference appears (e.g. `obs:OAW-TSK-cli`), when a frontmatter reference ID such as `AGT-*`, `SR-*`, `CDX-*`, `FAB-*`, or `OAW-*` needs resolving to a note in clemux's Obsidian vault, when starting or completing a project task note with an agent-session trace, or when listing a project's tasks/captures. Provides the `oaw` CLI workflow. (`PMX-*` IDs have a dedicated `pmx` skill.)
+description: This skill should be used when an `obs:`-prefixed reference appears (e.g. `obs:OAW-TSK-cli`), when a frontmatter reference ID such as `AGT-*`, `SR-*`, `CDX-*`, `FAB-*`, or `OAW-*` needs resolving to a note in the user's Obsidian vault, when starting or completing a project task note with an agent-session trace, or when listing a project's tasks/captures. Provides the `oaw` CLI workflow. (`PMX-*` IDs have a dedicated `pmx` skill.)
 ---
 
 # oaw — Obsidian ID resolution and task lifecycle
 
 ## Overview
 
-The `oaw` CLI resolves reference IDs against note frontmatter (`id` and `aliases` only) in clemux's Obsidian vault, and records agent work on project task notes. Use it instead of grepping the vault or searching local agent state: body-text mentions of an ID are not the note itself, so text search finds decoys; frontmatter matching is narrow and auditable.
+The `oaw` CLI resolves reference IDs against note frontmatter (`id` and `aliases` only) in the user's Obsidian vault, and records agent work on project task notes. Use it instead of grepping the vault or searching local agent state: body-text mentions of an ID are not the note itself, so text search finds decoys; frontmatter matching is narrow and auditable.
 
-The vault defaults to `/path/to/vault`; override with the `OAW_VAULT` environment variable.
+Set `OAW_VAULT` when running against a non-default vault, tests, demos, or automation.
 
 ## Resolving IDs
 
@@ -97,6 +97,18 @@ oaw board done OAW-TSK-next-board
 - `move` preserves card text and keeps the card unchecked.
 - `done` moves the card to `Done` and changes the checkbox to `- [x]`.
 - The command targets `Projects/Next steps.md`; project-local boards still use `oaw task start/complete`.
+
+## Cross-project task Base
+
+When deciding what OAW or adjacent agent-tooling work to pick up next, consult the aggregate task Base at `Projects/Cross-project tasks.base` before relying on one project board. Its `Open cross-project tasks` view includes task notes from `Projects/*/Tasks` and `Agents/Tasks`, keeps `backlog`, `todo`, `active`, and legacy `open` tasks visible, and excludes terminal `done` and `superseded` work.
+
+Priority uses a vault-wide 1/2/3 scale:
+
+- `1`: urgent, blocking, or unusually high-leverage work.
+- `2`: normal next-session work with clear value.
+- `3`: useful backlog work that should not outrank sharper tasks.
+
+Cross-project usefulness can raise priority: a task that improves multiple projects, agent handoffs, or repeatable workflow safety may deserve a lower numeric priority than a similar one-project task. The Base sorts by priority rank, then effort rank (`S`, `M`, `L`), then title; missing priority or effort sorts after explicit values.
 
 ## Session artifact snapshots
 
