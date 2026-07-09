@@ -53,17 +53,23 @@ Capture listing hides `status: archived` notes by default. Use `--include-archiv
 Lifecycle writes apply only to task notes under `Projects/*/Tasks` (the CLI enforces this):
 
 ```bash
+oaw task backlog OAW-TSK-cli --note "Parked until the dependency is ready."
+oaw task promote OAW-TSK-cli --note "Selected for the next session."
 oaw task start OAW-TSK-cli --note "Started resolver implementation."
 oaw task complete OAW-TSK-cli --note "Finished and verified." --checks "python -m unittest"
 oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "python -m unittest"
 ```
 
-- `start` sets `status: active`; `complete` sets `status: done`.
+- `backlog` sets `status: backlog`; `promote` sets `status: todo`; `start` sets `status: active`; `complete` sets `status: done`.
 - `complete` requires `--checks` naming the verification actually run; do not fabricate checks.
 - `note` appends a dated entry under `## Agent sessions` without changing `status` or any board. Use it for delegation reviews, design notes, partial-progress records, and other trace entries on task notes in any status.
-- `start` and `complete` also move the task's card to the matching column when the project has a board (`Projects/<Project>/Board.md`) — creating the card, and the column heading, if missing. Cards keep the `- [ ]` marker in every column; the column heading, not the checkbox, reflects status.
+- `backlog`, `promote`, `start`, and `complete` append a dated entry under `## Agent sessions` and move the task's card to the matching column when the project has a board (`Projects/<Project>/Board.md`) — creating the card and column heading if missing. Cards keep the `- [ ]` marker in every column; the column heading, not the checkbox, reflects status.
 - The command's output (`Updated:` / `Status:` / `Board:`) confirms the write. To report resulting state, rely on that output plus `oaw resolve --meta` if needed — do not re-read the whole note with `--full`.
 - The session ID is read automatically from the harness environment; the first of `CODEX_THREAD_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `OPENCODE_SESSION_ID`, `GEMINI_SESSION_ID` that is set wins. `oaw` never invents one: with no session variable set, the command fails with a clear error (so there is no need to check the variables beforehand). Pass `--allow-missing-session-id` only when the user explicitly accepts an untraceable entry.
+
+Project boards should use the column order `Backlog` → `Todo` → `Active` → `Done`. Keep `Todo` for near-term chosen work. Put unscheduled known work in `Backlog`, and when a session decides what should happen next, run `oaw task promote ...` so the board reflects the decision.
+
+Use `oaw board ensure-backlog --project "Project Name"` to add a missing `Backlog` column before `Todo` on an existing project board without rewriting cards.
 
 ## Cross-project Next steps board
 

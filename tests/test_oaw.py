@@ -333,6 +333,30 @@ id: AGT-TSK-obsidian-task-ids
         task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
         self.assertIn("session_id=unavailable", task)
 
+    def test_task_backlog_updates_status_board_and_session(self):
+        proc = self.run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later.")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
+        card = "- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli"
+        self.assertIn("status: backlog", task)
+        self.assertIn("CODEX_THREAD_ID=test-thread", task)
+        self.assertIn("## Backlog", board)
+        self.assertEqual(board.count(card), 1)
+        self.assertLess(board.index(card), board.index("## Active"))
+
+    def test_task_promote_updates_status_and_moves_card_to_todo(self):
+        self.run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later.")
+        proc = self.run_oaw("task", "promote", "OAW-TSK-cli", "--note", "Selected next.")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
+        card = "- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli"
+        self.assertIn("status: todo", task)
+        self.assertEqual(board.count(card), 1)
+        self.assertGreater(board.index(card), board.index("## Todo"))
+        self.assertLess(board.index(card), board.index("## Done"))
+
     def test_list_tasks_preserves_archived_rows(self):
         proc = self.run_oaw("list", "--project", "Obsidian Agent Workflow")
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -444,6 +468,46 @@ id: AGT-TSK-obsidian-task-ids
         proc = self.run_oaw("board", "move", "OAW-TSK-cli", "--column", "Queued")
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("multiple board cards match", proc.stderr)
+
+    def test_board_ensure_backlog_adds_column_before_todo(self):
+        proc = self.run_oaw(
+            "board",
+            "ensure-backlog",
+            "--project",
+            "Obsidian Agent Workflow",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Backlog: added", proc.stdout)
+        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
+        self.assertLess(board.index("## Backlog"), board.index("## Active"))
+
+    def test_board_ensure_backlog_adds_blank_line_when_appending(self):
+        project = self.vault / "Projects/Archive Only"
+        write(project / "Board.md", "# Archive board\n\n## Archive\n")
+
+        proc = self.run_oaw(
+            "board",
+            "ensure-backlog",
+            "--project",
+            "Archive Only",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        board = (project / "Board.md").read_text(encoding="utf-8")
+        self.assertIn("## Archive\n\n## Backlog\n", board)
+
+    def test_board_ensure_backlog_is_idempotent(self):
+        self.run_oaw("board", "ensure-backlog", "--project", "Obsidian Agent Workflow")
+        proc = self.run_oaw(
+            "board",
+            "ensure-backlog",
+            "--project",
+            "Obsidian Agent Workflow",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Backlog: present", proc.stdout)
+        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
+        self.assertEqual(board.count("## Backlog"), 1)
 
     def test_session_snapshot_copies_artifacts_and_writes_manifest(self):
         session_id = "73550790-5af5-4efc-828c-72e6e1053d8f"

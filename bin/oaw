@@ -17,6 +17,7 @@ from pathlib import Path
 DEFAULT_VAULT = Path("/path/to/vault")
 NEXT_BOARD = Path("Projects/Next steps.md")
 RETRO_ATTACHMENTS = Path("Agents/Retrospectives/attachments")
+BOARD_COLUMN_ORDER = ["Backlog", "Todo", "Active", "Done"]
 SESSION_ENV = [
     ("Codex", "CODEX_THREAD_ID"),
     ("Claude Code", "CLAUDE_SESSION_ID"),
@@ -339,13 +340,28 @@ def card_line(task_path: Path, project_root: Path, title: str, note_id: str | No
     return f"- [ ] [[{rel_no_ext}|{title}]]{suffix}"
 
 
+def board_column_insert_at(lines: list[str], target_column: str) -> int:
+    target_order = BOARD_COLUMN_ORDER.index(target_column)
+    for idx, line in enumerate(lines):
+        heading = re.match(r"^##\s+(.+?)\s*$", line)
+        if heading and heading.group(1) in BOARD_COLUMN_ORDER:
+            if BOARD_COLUMN_ORDER.index(heading.group(1)) > target_order:
+                return idx
+    return len(lines)
+
+
 def move_board_card(project_root: Path, task_path: Path, title: str, note_id: str | None, status: str) -> bool:
     board = project_root / "Board.md"
     if not board.exists():
         return False
     text = board.read_text(encoding="utf-8")
     lines = text.splitlines()
-    target_column = {"todo": "Todo", "active": "Active", "done": "Done"}[status]
+    target_column = {
+        "backlog": "Backlog",
+        "todo": "Todo",
+        "active": "Active",
+        "done": "Done",
+    }[status]
     identifiers = {task_path.stem}
     if note_id:
         identifiers.add(note_id)
@@ -367,9 +383,8 @@ def move_board_card(project_root: Path, task_path: Path, title: str, note_id: st
         new_lines.append(line)
     card = existing_card or card_line(task_path, project_root, title, note_id)
     if target_heading_idx is None:
-        if new_lines and new_lines[-1] != "":
-            new_lines.append("")
-        new_lines.extend([f"## {target_column}", "", card])
+        insert_at = board_column_insert_at(new_lines, target_column)
+        new_lines[insert_at:insert_at] = [f"## {target_column}", "", card, ""]
     else:
         insert_at = target_heading_idx + 1
         while insert_at < len(new_lines) and new_lines[insert_at] == "":
@@ -430,6 +445,29 @@ def insert_board_card(lines: list[str], column: str, card: str) -> list[str]:
         insert_at += 1
     updated.insert(insert_at, card)
     return updated
+
+
+def ensure_project_backlog_column(project: str) -> None:
+    root = vault_root()
+    project_root = root / "Projects" / project
+    if not project_root.exists():
+        raise OawError(f"project not found: {project_root}")
+    path = project_root / "Board.md"
+    if not path.exists():
+        raise OawError(f"project board not found: {path}")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if find_board_column(lines, "Backlog") is not None:
+        print(f"Board: {path.relative_to(root).as_posix()}")
+        print("Backlog: present")
+        return
+    insert_at = board_column_insert_at(lines, "Backlog")
+    insertion = ["## Backlog", ""]
+    if insert_at > 0 and lines[insert_at - 1] != "":
+        insertion.insert(0, "")
+    lines[insert_at:insert_at] = insertion
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Board: {path.relative_to(root).as_posix()}")
+    print("Backlog: added")
 
 
 def update_next_board(
@@ -891,7 +929,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     task = sub.add_parser("task", help="project task lifecycle")
     task_sub = task.add_subparsers(dest="task_command", required=True)
-    for name, status in (("start", "active"), ("complete", "done")):
+    for name, status in (
+        ("backlog", "backlog"),
+        ("promote", "todo"),
+        ("start", "active"),
+        ("complete", "done"),
+    ):
         cmd = task_sub.add_parser(name)
         cmd.set_defaults(status=status)
         cmd.add_argument("id")
@@ -920,6 +963,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     done = board_sub.add_parser("done", help="move a matching card to Done and check it")
     done.add_argument("token", help="stable ID or unique text contained in the card")
+
+    ensure_backlog = board_sub.add_parser(
+        "ensure-backlog",
+        help="add a Backlog column to a project board if missing",
+    )
+    ensure_backlog.add_argument("--project", required=True)
 
     session = sub.add_parser("session", help="session artifact utilities")
     session_sub = session.add_subparsers(dest="session_command", required=True)
@@ -1010,6 +1059,8 @@ def main(argv: list[str] | None = None) -> int:
                 update_next_board(args.column, args.token, None, False)
             elif args.board_command == "done":
                 update_next_board("Done", args.token, None, True)
+            elif args.board_command == "ensure-backlog":
+                ensure_project_backlog_column(args.project)
         elif args.command == "session":
             if args.session_command == "snapshot":
                 if args.partial and args.complete:
