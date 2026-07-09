@@ -106,6 +106,7 @@ oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
 - Codex rollouts are discovered by referenced thread IDs or explicit `--codex-thread <id>` flags. Use `--codex-rollout <filename-or-path>` for an exact rollout. Use `--grep <literal>` only when the literal identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags.
 - It writes `manifest.json` with each source path, destination path, copy time, size, hash, category, and completeness. Use the manifest instead of hand-writing provenance.
 - Use `--partial` while the parent session is still live. Re-run the same command later to refresh the parent transcript, pick up new subagents, and remove stale files listed in the previous manifest.
+- For real vault snapshots, use the installed `oaw session snapshot ...` command. Reserve `python bin/oaw session snapshot ...` for repo-development checks, temp-vault fixtures, or deliberately testing the checkout copy.
 
 ## Rules
 

@@ -64,6 +64,8 @@ oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
 
 The command finds the Claude parent transcript plus `subagents/*.jsonl`, copies discoverable Codex rollouts by referenced or explicit thread ID, includes referenced plugin job logs, and writes `manifest.json` with source paths, copy time, file hashes, and parent completeness. Use `--codex-rollout` for an exact rollout filename or path. Use `--grep` only for a literal that identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags. Re-run the same command to refresh a partial parent transcript, pick up new subagents, and remove stale files listed in the previous manifest.
 
+Use the installed `oaw session snapshot ...` command for operational vault snapshots. The checkout form, `python bin/oaw session snapshot ...`, is for development runs against temp vaults or when intentionally testing the repo copy.
+
 ## Examples from agent sessions
 
 Recent Codex sessions used `oaw` for a few recurring jobs that are hard to do reliably with plain text search.
