@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import subprocess
 import sys
@@ -540,6 +541,217 @@ Later.
         self.assertTrue(path.exists())
         note = path.read_text(encoding="utf-8")
         self.assertIn("id: AGT-RETRO-2026-07-09-revision-generale", note)
+
+    def test_export_note_requires_safe_marker(self):
+        proc = self.run_oaw(
+            "export",
+            "note",
+            "OAW-TSK-cli",
+            "--output-root",
+            str(self.vault / "exports"),
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("export-scope: work", proc.stderr)
+
+    def test_export_note_writes_bundle_manifest_and_artifacts(self):
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Work export.md",
+            """---
+type: task
+project: obsidian-agent-workflow
+status: todo
+id: OAW-TSK-work-export
+aliases:
+  - OAW-TSK-work-export
+export-scope: work
+return_ingest: true
+export_artifacts:
+  - scripts/run.sh
+---
+
+# Work export
+
+Run this at work.
+""",
+        )
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/scripts/run.sh",
+            "#!/bin/sh\necho work\n",
+        )
+        output_root = self.vault / "exports"
+        proc = self.run_oaw(
+            "export",
+            "note",
+            "OAW-TSK-work-export",
+            "--output-root",
+            str(output_root),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        bundle = output_root / "OAW-TSK-work-export"
+        manifest_path = bundle / "manifest.json"
+        note_path = bundle / "note.md"
+        artifact_path = bundle / "artifacts/Projects/Obsidian Agent Workflow/Tasks/scripts/run.sh"
+        self.assertTrue(manifest_path.exists())
+        self.assertTrue(note_path.exists())
+        self.assertTrue(artifact_path.exists())
+        self.assertIn("intentionally exported", note_path.read_text(encoding="utf-8"))
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["schema"], "oaw-safe-export-v1")
+        self.assertEqual(manifest["target"], "work")
+        self.assertEqual(manifest["source"]["id"], "OAW-TSK-work-export")
+        self.assertEqual(
+            manifest["source"]["path"],
+            "Projects/Obsidian Agent Workflow/Tasks/Work export.md",
+        )
+        self.assertEqual(manifest["artifacts"][0]["path"], artifact_path.relative_to(bundle).as_posix())
+
+        valid = self.run_oaw("export", "validate", str(bundle))
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+        self.assertIn("Export: valid", valid.stdout)
+
+    def test_export_validate_rejects_tampered_marker(self):
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Work export.md",
+            """---
+type: task
+id: OAW-TSK-work-export
+aliases:
+  - OAW-TSK-work-export
+export-scope: work
+---
+
+# Work export
+""",
+        )
+        output_root = self.vault / "exports"
+        proc = self.run_oaw(
+            "export",
+            "note",
+            "OAW-TSK-work-export",
+            "--output-root",
+            str(output_root),
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        bundle = output_root / "OAW-TSK-work-export"
+        note_path = bundle / "note.md"
+        note_path.write_text(
+            note_path.read_text(encoding="utf-8").replace(
+                "export-scope: work",
+                "export-scope: personal",
+            ),
+            encoding="utf-8",
+        )
+        manifest_path = bundle / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["note"]["sha256"] = hashlib.sha256(note_path.read_bytes()).hexdigest()
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        proc = self.run_oaw("export", "validate", str(bundle))
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("export-scope: work", proc.stderr)
+
+    def test_export_note_failure_leaves_no_partial_bundle_and_retry_succeeds(self):
+        note = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Retry export.md"
+        artifact = note.parent / "missing.txt"
+        write(
+            note,
+            """---
+type: task
+id: OAW-TSK-retry-export
+export-scope: work
+export_artifacts:
+  - missing.txt
+---
+
+# Retry export
+""",
+        )
+        output_root = self.vault / "exports"
+
+        failed = self.run_oaw(
+            "export",
+            "note",
+            "OAW-TSK-retry-export",
+            "--output-root",
+            str(output_root),
+        )
+
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertFalse((output_root / "OAW-TSK-retry-export").exists())
+        self.assertEqual(list(output_root.glob(".OAW-TSK-retry-export.tmp-*")), [])
+
+        write(artifact, "ready\n")
+        retried = self.run_oaw(
+            "export",
+            "note",
+            "OAW-TSK-retry-export",
+            "--output-root",
+            str(output_root),
+        )
+        self.assertEqual(retried.returncode, 0, retried.stderr)
+        self.assertTrue((output_root / "OAW-TSK-retry-export/manifest.json").exists())
+
+    def test_export_note_sanitizes_bundle_name_from_id(self):
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Escape export.md",
+            """---
+type: task
+id: ../escape
+export-scope: work
+---
+
+# Escape export
+""",
+        )
+        output_root = self.vault / "exports"
+
+        proc = self.run_oaw(
+            "export",
+            "note",
+            "../escape",
+            "--output-root",
+            str(output_root),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue((output_root / "escape/manifest.json").exists())
+        self.assertFalse((self.vault / "escape").exists())
+
+    def test_export_validate_rejects_paths_outside_bundle(self):
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Path export.md",
+            """---
+type: task
+id: OAW-TSK-path-export
+export-scope: work
+---
+
+# Path export
+""",
+        )
+        output_root = self.vault / "exports"
+        exported = self.run_oaw(
+            "export",
+            "note",
+            "OAW-TSK-path-export",
+            "--output-root",
+            str(output_root),
+        )
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        bundle = output_root / "OAW-TSK-path-export"
+        outside = output_root / "stolen.md"
+        outside.write_text((bundle / "note.md").read_text(encoding="utf-8"), encoding="utf-8")
+        manifest_path = bundle / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["note"]["sha256"] = hashlib.sha256(outside.read_bytes()).hexdigest()
+
+        for escaped_path in ("../stolen.md", str(outside)):
+            with self.subTest(path=escaped_path):
+                manifest["note"]["path"] = escaped_path
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                proc = self.run_oaw("export", "validate", str(bundle))
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertRegex(proc.stderr, r"manifest path (escapes bundle|must be bundle-relative)")
 
     def test_list_capture_hides_archived_by_default(self):
         proc = self.run_oaw(

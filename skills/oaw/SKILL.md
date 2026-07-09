@@ -141,6 +141,34 @@ oaw retro create \
 
 `oaw note session` and `oaw retro create` require a real session ID from a supported harness environment variable unless the user explicitly accepts `--allow-missing-session-id`. `oaw note observe` does not require a session ID.
 
+## Safe outbound exports
+
+Use `oaw export note` only for notes that have explicit frontmatter approval:
+
+```yaml
+export-scope: work
+return_ingest: true
+export_artifacts:
+  - scripts/run.sh
+```
+
+Export a bundle:
+
+```bash
+oaw export note OAW-TSK-export-example --target work --output-root ~/obsidian-export
+```
+
+Validate a returned or transferred bundle before trusting it on the receiving side:
+
+```bash
+oaw export validate ~/obsidian-export/OAW-TSK-export-example --target work
+```
+
+- `note` refuses unmarked notes and notes whose `export-scope` does not match `--target`. Legacy `safe_for_export: true` plus a matching `export_target` remains accepted for existing notes.
+- The bundle contains `note.md`, optional copied artifacts from `export_artifacts`, and `manifest.json`.
+- Manifest paths are vault-relative, not absolute local paths.
+- `validate` confines manifest paths to the bundle and checks the safe marker, target, note checksum, artifact checksums, and artifact presence.
+
 ## Cross-project Next steps board
 
 The vault-wide priority board lives at `Projects/Next steps.md` (`id: NEXT-board`). It is a hand-curated layer over project task notes, so routine card edits should use `oaw board` instead of manual kanban line surgery.
