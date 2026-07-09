@@ -119,3 +119,23 @@ oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
 - When `oaw` lacks a needed capability, capture a new OAW task describing the gap, then do the minimal manual workaround and keep moving.
 - If a needed capability is not documented here, check `oaw --help` before reaching for filesystem search.
 - For `PMX-*` IDs, prefer the dedicated `pmx` skill and CLI.
+
+## Approval prefixes
+
+When a Codex approval prompt offers to persist a command prefix for OAW vault writes, prefer the narrow operational command that actually needs the permission. Good persisted prefixes are stable entrypoints such as:
+
+```text
+["oaw", "session", "snapshot"]
+["oaw", "task"]
+["oaw", "board"]
+```
+
+Do not persist broad interpreter or shell prefixes for OAW work, such as:
+
+```text
+["python"]
+["python", "bin/oaw"]
+["bash"]
+```
+
+Use repo-local `python bin/oaw ...` for development and temp-vault tests. For real vault writes, prefer installed `oaw ...` commands so the approval scope stays tied to the operation rather than to an arbitrary script runner.
