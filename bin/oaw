@@ -1647,6 +1647,19 @@ def iter_files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
     return sorted(p for p in root.rglob("*") if p.is_file() and p.suffix in suffixes)
 
 
+def iter_all_files(root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    return sorted(p for p in root.rglob("*") if p.is_file())
+
+
+def snapshot_tree_copies(root: Path, destination: Path, category: str) -> list[SnapshotCopy]:
+    copies: list[SnapshotCopy] = []
+    for path in iter_all_files(root):
+        copies.append(SnapshotCopy(path, destination / path.relative_to(root), category))
+    return copies
+
+
 def read_text_lossy(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
@@ -1713,6 +1726,48 @@ def referenced_codex_threads(text: str, explicit: list[str]) -> set[str]:
     for match in thread_ref.finditer(text):
         threads.add(match.group(1))
     return threads
+
+
+def referenced_claude_sessions(
+    text: str,
+    explicit: list[str],
+    current_session_id: str,
+) -> set[str]:
+    session_ref = re.compile(
+        r"\b(?:CLAUDE_SESSION_ID|CLAUDE_CODE_SESSION_ID|claude[_ -]?session|"
+        r"fork(?:ed)?[_ -]?(?:claude[_ -]?)?session|btw[_ -]?session)"
+        r'["`:\s=]+'
+        r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b",
+        re.IGNORECASE,
+    )
+    sessions = {session.strip() for session in explicit if session.strip()}
+    for match in session_ref.finditer(text):
+        sessions.add(match.group(1))
+    sessions.discard(current_session_id)
+    return sessions
+
+
+def find_extra_claude_parents(
+    claude_root: Path,
+    transcript: str,
+    explicit_sessions: list[str],
+    current_session_id: str,
+) -> list[Path]:
+    explicit = {session.strip() for session in explicit_sessions if session.strip()}
+    sessions = referenced_claude_sessions(transcript, list(explicit), current_session_id)
+    parents: list[Path] = []
+    seen: set[Path] = set()
+    for session_id in sorted(sessions):
+        try:
+            parent = find_claude_parent(session_id, claude_root)
+        except OawError:
+            if session_id in explicit:
+                raise
+            continue
+        if parent not in seen:
+            seen.add(parent)
+            parents.append(parent)
+    return parents
 
 
 def find_codex_rollouts(
@@ -1875,10 +1930,44 @@ def session_snapshot(args: argparse.Namespace) -> None:
 
     session_dir = parent.with_suffix("")
     subagents_dir = session_dir / "subagents"
-    subagents = iter_files(subagents_dir, (".jsonl",))
-    scan_paths = [parent, *subagents]
+    workflow_root = subagents_dir / "workflows"
+    subagents = [
+        path
+        for path in iter_files(subagents_dir, (".jsonl",))
+        if not path.is_relative_to(workflow_root)
+    ]
+    task_outputs = snapshot_tree_copies(
+        session_dir / "tasks",
+        Path("claude") / "tasks",
+        "claude-task-output",
+    )
+    workflow_artifacts = snapshot_tree_copies(
+        subagents_dir / "workflows",
+        Path("claude") / "workflows",
+        "claude-workflow-artifact",
+    )
+    workflow_scripts = snapshot_tree_copies(
+        session_dir / "workflows" / "scripts",
+        Path("claude") / "workflow-scripts",
+        "claude-workflow-script",
+    )
+    scan_paths = [
+        parent,
+        *subagents,
+        *(copy.source for copy in task_outputs),
+        *(copy.source for copy in workflow_artifacts),
+        *(copy.source for copy in workflow_scripts),
+    ]
     text = transcript_text(scan_paths)
     parent_completeness = detect_parent_completeness(session_id, args)
+    extra_claude_parents = find_extra_claude_parents(
+        args.claude_root.expanduser(),
+        text,
+        args.claude_session or [],
+        session_id,
+    )
+    if extra_claude_parents:
+        text = "\n".join([text, transcript_text(extra_claude_parents)])
 
     parent_name = f"parent-{session_id[:8]}"
     if parent_completeness == "partial":
@@ -1891,9 +1980,24 @@ def session_snapshot(args: argparse.Namespace) -> None:
             parent_completeness,
         )
     ]
+    for path in subagents:
+        relative = path.relative_to(subagents_dir)
+        destination = (
+            Path("claude") / path.name
+            if len(relative.parts) == 1
+            else Path("claude") / "subagents" / relative
+        )
+        copies.append(SnapshotCopy(path, destination, "claude-subagent"))
+    copies.extend(task_outputs)
+    copies.extend(workflow_artifacts)
+    copies.extend(workflow_scripts)
     copies.extend(
-        SnapshotCopy(path, Path("claude") / path.name, "claude-subagent")
-        for path in subagents
+        SnapshotCopy(
+            path,
+            Path("claude") / "forks" / f"parent-{path.stem[:8]}.jsonl",
+            "claude-fork-parent",
+        )
+        for path in extra_claude_parents
     )
     copies.extend(
         SnapshotCopy(path, Path("codex") / path.name, "codex-rollout")
@@ -2141,6 +2245,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--codex-rollout",
         action="append",
         help="exact Codex rollout filename or path to copy; may be repeated",
+    )
+    snapshot.add_argument(
+        "--claude-session",
+        action="append",
+        help="extra Claude session ID, such as a fork parent, to copy; may be repeated",
     )
     snapshot.add_argument(
         "--grep",

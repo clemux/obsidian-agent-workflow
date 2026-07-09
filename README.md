@@ -4,7 +4,7 @@ Local-first tooling for resolving Obsidian reference IDs and recording agent wor
 
 ## Warning
 
-This repository is tooling tailored for my personal Obsidian and agent workflow. It is not intended as reusable software, and it probably does not make sense to install or use as-is. Some paths are hard-coded for my local machine and vault layout.
+This repository is tooling tailored for a local Obsidian and agent workflow. It is not intended as reusable software, and it probably does not make sense to install or use as-is. Some paths are machine-specific legacy debt; prefer `OAW_VAULT` for any new automation.
 
 ## `oaw`
 
@@ -146,10 +146,11 @@ oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
   --slug sr-dogfood-zombie-codex \
   --partial \
   --codex-thread 019f3e73-029f-7ea2-9772-fdfa1e25fb8f \
-  --codex-thread 019f3e8d-8307-7052-b367-57e78f3316ae
+  --codex-thread 019f3e8d-8307-7052-b367-57e78f3316ae \
+  --claude-session 019f3ef0-1111-7222-8333-c26aa5d38893
 ```
 
-The command finds the Claude parent transcript plus `subagents/*.jsonl`, copies discoverable Codex rollouts by referenced or explicit thread ID, includes referenced plugin job logs, and writes `manifest.json` with source paths, copy time, file hashes, and parent completeness. Use `--codex-rollout` for an exact rollout filename or path. Use `--grep` only for a literal that identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags. Re-run the same command to refresh a partial parent transcript, pick up new subagents, and remove stale files listed in the previous manifest.
+The command finds the Claude parent transcript plus nested subagent transcripts, task outputs under `tasks/`, workflow run artifacts under `subagents/workflows/`, persisted workflow scripts under `workflows/scripts/`, discoverable Codex rollouts, referenced plugin job logs, and fork parents referenced by explicit Claude/fork markers or `--claude-session`. Bare JSON `sessionId` fields do not trigger fork discovery. It writes `manifest.json` with source paths, copy time, file hashes, category, and parent completeness. Use `--codex-rollout` for an exact rollout filename or path. Use `--grep` only for a literal that identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags. Re-run the same command to refresh a partial parent transcript, preserve nested subagents, pick up new artifacts, and remove stale files listed in the previous manifest.
 
 Use installed `oaw ...` commands for operational vault writes such as task lifecycle updates, board moves, and session snapshots. Reserve `python bin/oaw ...` for development checks against this checkout, preferably with temp vaults. This keeps approval prompts scoped to stable commands instead of broad interpreter entrypoints; see `AGT-FDBK-allow-listed-skill-scripts`.
 

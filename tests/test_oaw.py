@@ -1466,6 +1466,8 @@ aliases:
     def test_session_snapshot_copies_artifacts_and_writes_manifest(self):
         session_id = "73550790-5af5-4efc-828c-72e6e1053d8f"
         codex_thread = "019f3e73-029f-7ea2-9772-fdfa1e25fb8f"
+        task_codex_thread = "019f3e8d-8307-7052-b367-57e78f3316ae"
+        fork_session_id = "019f3ef0-1111-7222-8333-c26aa5d38893"
         claude_root = self.vault / "harness/claude/projects"
         codex_root = self.vault / "harness/codex/sessions"
         plugin_root = self.vault / "harness/claude/plugins/data"
@@ -1485,18 +1487,55 @@ aliases:
             / "subagents/agent-a8fbf333b1df5e1e9.jsonl",
             '{"timestamp":"2026-07-07T21:19:00.413Z","content":"delegated"}\n',
         )
+        write(
+            claude_root
+            / "-tmp-project"
+            / session_id
+            / "subagents/nested/agent-nested.jsonl",
+            '{"content":"nested delegated transcript"}\n',
+        )
+        write(
+            claude_root / "-tmp-project" / session_id / "tasks/background.output",
+            f"background transcript references codex_thread={task_codex_thread}\n",
+        )
+        write(
+            claude_root
+            / "-tmp-project"
+            / session_id
+            / "subagents/workflows/wf-123/run.jsonl",
+            '{"content":"workflow run journal"}\n',
+        )
+        write(
+            claude_root
+            / "-tmp-project"
+            / session_id
+            / "workflows/scripts/nightly.md",
+            "# Workflow script\n",
+        )
+        fork_parent = claude_root / "-tmp-project" / f"{fork_session_id}.jsonl"
+        write(
+            fork_parent,
+            f'{{"timestamp":"2026-07-07T22:00:00.000Z","sessionId":"{fork_session_id}",'
+            '"content":"forked context"}}\n',
+        )
         matching_rollout = (
             codex_root
             / "2026/07/07"
             / f"rollout-2026-07-07T23-19-12-{codex_thread}.jsonl"
         )
         write(matching_rollout, '{"event":"turn_aborted"}\n')
+        task_rollout = (
+            codex_root
+            / "2026/07/07"
+            / f"rollout-2026-07-07T23-30-00-{task_codex_thread}.jsonl"
+        )
+        write(task_rollout, '{"content":"referenced from task output"}\n')
         grep_rollout = (
             codex_root
             / "2026/07/07"
             / "rollout-2026-07-07T23-48-09-019f3e8d-8307-7052-b367-57e78f3316ae.jsonl"
         )
-        write(grep_rollout, '{"content":"session-inspection-claude-codex"}\n')
+        write(grep_rollout, '{"content":"session-inspection-claude-codex other"}\n')
         write(
             plugin_root
             / "codex-openai-codex/state/example/jobs/task-mrb5j4y9-7k3yjy.log",
@@ -1512,6 +1551,8 @@ aliases:
             "--partial",
             "--grep",
             "session-inspection-claude-codex",
+            "--claude-session",
+            fork_session_id,
             "--output-root",
             str(output_root),
             "--claude-root",
@@ -1526,7 +1567,13 @@ aliases:
         manifest_path = snapshot / "manifest.json"
         self.assertTrue((snapshot / "claude/parent-73550790-PARTIAL.jsonl").exists())
         self.assertTrue((snapshot / "claude/agent-a8fbf333b1df5e1e9.jsonl").exists())
+        self.assertTrue((snapshot / "claude/subagents/nested/agent-nested.jsonl").exists())
+        self.assertTrue((snapshot / "claude/tasks/background.output").exists())
+        self.assertTrue((snapshot / "claude/workflows/wf-123/run.jsonl").exists())
+        self.assertTrue((snapshot / "claude/workflow-scripts/nightly.md").exists())
+        self.assertTrue((snapshot / "claude/forks/parent-019f3ef0.jsonl").exists())
         self.assertTrue((snapshot / "codex" / matching_rollout.name).exists())
+        self.assertTrue((snapshot / "codex" / task_rollout.name).exists())
         self.assertTrue((snapshot / "codex" / grep_rollout.name).exists())
         self.assertTrue((snapshot / "plugin-logs/task-mrb5j4y9-7k3yjy.log").exists())
         self.assertIn(f"Manifest: {manifest_path}", proc.stdout)
@@ -1538,6 +1585,13 @@ aliases:
         sources = {entry["source"] for entry in manifest["files"]}
         self.assertIn(str(parent), sources)
         self.assertIn(str(matching_rollout), sources)
+        self.assertIn(str(task_rollout), sources)
+        self.assertIn(str(fork_parent), sources)
+        categories = {entry["category"] for entry in manifest["files"]}
+        self.assertIn("claude-task-output", categories)
+        self.assertIn("claude-workflow-artifact", categories)
+        self.assertIn("claude-workflow-script", categories)
+        self.assertIn("claude-fork-parent", categories)
         self.assertTrue(all(entry["sha256"] for entry in manifest["files"]))
 
     def test_session_snapshot_refresh_updates_parent_and_adds_subagents(self):
@@ -1550,6 +1604,13 @@ aliases:
             f'{{"timestamp":"2026-07-08T01:00:00.000Z","sessionId":"{session_id}",'
             '"content":"first"}}\n',
         )
+        nested_subagent = (
+            claude_root
+            / "-tmp-project"
+            / session_id
+            / "subagents/nested/agent-nested.jsonl"
+        )
+        write(nested_subagent, '{"content":"nested"}\n')
 
         base_args = (
             "session",
@@ -1570,6 +1631,8 @@ aliases:
         first = self.run_oaw(*base_args)
         self.assertEqual(first.returncode, 0, first.stderr)
         snapshot = output_root / "2026-07-08-refresh-test"
+        nested_copy = snapshot / "claude/subagents/nested/agent-nested.jsonl"
+        self.assertTrue(nested_copy.exists())
         stale = snapshot / "codex/stale-rollout.jsonl"
         write(stale, "{}\n")
         manifest_path = snapshot / "manifest.json"
@@ -1602,10 +1665,46 @@ aliases:
         parent_copy = snapshot / "claude/parent-019f3ed8-PARTIAL.jsonl"
         self.assertIn("second", parent_copy.read_text(encoding="utf-8"))
         self.assertTrue((snapshot / "claude/agent-new.jsonl").exists())
+        self.assertTrue(nested_copy.exists())
         self.assertFalse(stale.exists())
         manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
         destinations = {entry["destination"] for entry in manifest["files"]}
         self.assertIn("claude/agent-new.jsonl", destinations)
+        self.assertIn("claude/subagents/nested/agent-nested.jsonl", destinations)
+
+    def test_session_snapshot_does_not_treat_bare_session_id_as_fork_parent(self):
+        session_id = "019f3ed8-245c-79f3-8ec6-c1ba30e3646d"
+        unrelated_id = "019f9999-1111-7222-8333-c26aa5d38893"
+        claude_root = self.vault / "harness/claude/projects"
+        parent = claude_root / "-tmp-project" / f"{session_id}.jsonl"
+        write(
+            parent,
+            f'{{"timestamp":"2026-07-08T01:00:00.000Z","sessionId":"{session_id}",'
+            f'"content":"payload sessionId: {unrelated_id}"}}\n',
+        )
+        write(
+            claude_root / "-tmp-project" / f"{unrelated_id}.jsonl",
+            f'{{"timestamp":"2026-07-08T02:00:00.000Z","sessionId":"{unrelated_id}"}}\n',
+        )
+        output_root = self.vault / "attachments"
+
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            session_id,
+            "--output-root",
+            str(output_root),
+            "--claude-root",
+            str(claude_root),
+            "--codex-root",
+            str(self.vault / "missing-codex"),
+            "--plugin-data-root",
+            str(self.vault / "missing-plugin"),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        snapshot = output_root / "2026-07-08-019f3ed8"
+        self.assertFalse((snapshot / "claude/forks/parent-019f9999.jsonl").exists())
 
     def test_session_snapshot_grep_fails_on_ambiguous_rollouts(self):
         session_id = "019f3ed8-245c-79f3-8ec6-c1ba30e3646d"
