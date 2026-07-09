@@ -65,6 +65,25 @@ Use `oaw board ensure-backlog --project "Project Name"` to add the `Backlog` col
 
 Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It uses the same session-id handling as `start` and `complete`, accepts optional `--checks`, and works on task notes regardless of current status.
 
+For non-project notes, append the same session trace or a dated observation block without hand-editing headings:
+
+```bash
+oaw note session AGT-TSK-session-retrospectives --note "Reviewed retrospective habit."
+oaw note observe CDX-RES-routing-evidence \
+  --title "Wrap-up format gap" \
+  --body "The evidence note needs a mechanical append path."
+```
+
+Create retrospective drafts from a stable template:
+
+```bash
+oaw retro create \
+  --title "Resolver dogfood" \
+  --summary "Captured the resolver workflow and follow-ups."
+```
+
+`oaw note session` and `oaw retro create` require a real session ID from a supported harness environment variable unless `--allow-missing-session-id` is explicitly accepted. `oaw note observe` does not require a session ID.
+
 The cross-project Next steps board is a hand-curated priority layer at `Projects/Next steps.md`. Use `oaw board` commands for routine card edits instead of manually moving kanban lines:
 
 ```bash

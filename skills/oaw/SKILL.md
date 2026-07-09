@@ -98,6 +98,34 @@ Project boards should use the column order `Backlog` → `Todo` → `Active` →
 
 Use `oaw board ensure-backlog --project "Project Name"` to add a missing `Backlog` column before `Todo` on an existing project board without rewriting cards.
 
+## Note intake
+
+Use `oaw note` for append-safe updates on resolved notes that are not project task lifecycle changes.
+
+Append the same `## Agent sessions` entry shape to any resolved note:
+
+```bash
+oaw note session AGT-TSK-session-retrospectives --note "Reviewed retrospective habit."
+```
+
+Append a dated observation block under `## Observations` or another explicit heading:
+
+```bash
+oaw note observe CDX-RES-routing-evidence \
+  --title "Wrap-up format gap" \
+  --body "The evidence note needs a mechanical append path."
+```
+
+Create a draft retrospective note under `Agents/Retrospectives/`:
+
+```bash
+oaw retro create \
+  --title "Resolver dogfood" \
+  --summary "Captured the resolver workflow and follow-ups."
+```
+
+`oaw note session` and `oaw retro create` require a real session ID from a supported harness environment variable unless the user explicitly accepts `--allow-missing-session-id`. `oaw note observe` does not require a session ID.
+
 ## Cross-project Next steps board
 
 The vault-wide priority board lives at `Projects/Next steps.md` (`id: NEXT-board`). It is a hand-curated layer over project task notes, so routine card edits should use `oaw board` instead of manual kanban line surgery.

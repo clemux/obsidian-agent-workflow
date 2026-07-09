@@ -374,6 +374,173 @@ id: AGT-TSK-obsidian-task-ids
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("Projects/*/Tasks", proc.stderr)
 
+    def test_note_session_appends_agent_session_to_non_project_note(self):
+        proc = self.run_oaw(
+            "note",
+            "session",
+            "AGT-TSK-obsidian-task-ids",
+            "--note",
+            "Reviewed resolver policy.",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        note = (self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md").read_text()
+        self.assertIn("## Agent sessions", note)
+        self.assertIn("CODEX_THREAD_ID=test-thread", note)
+        self.assertIn("Reviewed resolver policy.", note)
+        self.assertIn("Updated: Agents/Tasks/Resolve vault-wide Obsidian task IDs.md", proc.stdout)
+
+    def test_note_observe_appends_block_under_target_section(self):
+        write(
+            self.vault / "Projects/Obsidian Agent Workflow/Research/Evidence.md",
+            """---
+type: research
+id: OAW-RES-evidence
+aliases:
+  - OAW-RES-evidence
+---
+
+# Evidence
+
+## Observations
+
+### Existing
+
+Keep.
+
+## Decisions
+
+Later.
+""",
+        )
+        proc = self.run_oaw(
+            "note",
+            "observe",
+            "OAW-RES-evidence",
+            "--title",
+            "Lint gap",
+            "--body",
+            "Provider-visible text needs a mechanical check.",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        note = (self.vault / "Projects/Obsidian Agent Workflow/Research/Evidence.md").read_text()
+        self.assertRegex(note, r"### \d{4}-\d{2}-\d{2} - Lint gap")
+        self.assertIn("Provider-visible text needs a mechanical check.", note)
+        self.assertLess(note.index("Lint gap"), note.index("## Decisions"))
+
+    def test_note_observe_ignores_headings_inside_fenced_code(self):
+        path = self.vault / "Projects/Obsidian Agent Workflow/Research/Fenced.md"
+        write(
+            path,
+            """---
+type: research
+id: OAW-RES-fenced
+---
+
+# Fenced
+
+## Observations
+
+```bash
+# run the tests
+python -m unittest
+```
+
+Keep this conclusion.
+
+## Decisions
+
+Later.
+""",
+        )
+
+        proc = self.run_oaw(
+            "note",
+            "observe",
+            "OAW-RES-fenced",
+            "--title",
+            "Fence-safe append",
+            "--body",
+            "This block belongs after the fence.",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        note = path.read_text(encoding="utf-8")
+        self.assertGreater(note.index("Fence-safe append"), note.index("Keep this conclusion."))
+        self.assertLess(note.index("Fence-safe append"), note.index("## Decisions"))
+
+    def test_retro_create_writes_dated_template(self):
+        proc = self.run_oaw(
+            "retro",
+            "create",
+            "--title",
+            "Resolver dogfood",
+            "--summary",
+            "Captured the resolver workflow and follow-ups.",
+            "--date",
+            "2026-07-09",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        path = self.vault / "Agents/Retrospectives/2026-07-09 resolver dogfood.md"
+        self.assertTrue(path.exists())
+        note = path.read_text(encoding="utf-8")
+        self.assertIn("type: retrospective", note)
+        self.assertIn("status: draft", note)
+        self.assertIn("id: AGT-RETRO-2026-07-09-resolver-dogfood", note)
+        self.assertIn("session-ids:", note)
+        self.assertIn("  - test-thread", note)
+        self.assertIn("# 2026-07-09 - Resolver dogfood", note)
+        self.assertIn("Captured the resolver workflow and follow-ups.", note)
+        self.assertIn("Created: Agents/Retrospectives/2026-07-09 resolver dogfood.md", proc.stdout)
+
+    def test_retro_create_rejects_duplicate_id(self):
+        proc = self.run_oaw(
+            "retro",
+            "create",
+            "--title",
+            "Duplicate ID",
+            "--date",
+            "2026-07-09",
+            "--id",
+            "AGT-TSK-obsidian-task-ids",
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("id 'AGT-TSK-obsidian-task-ids' is already in use", proc.stderr)
+        self.assertFalse(
+            (self.vault / "Agents/Retrospectives/2026-07-09 duplicate id.md").exists()
+        )
+
+    def test_retro_create_rejects_whitespace_only_id(self):
+        proc = self.run_oaw(
+            "retro",
+            "create",
+            "--title",
+            "Whitespace ID",
+            "--date",
+            "2026-07-09",
+            "--id",
+            "   ",
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("requires a non-empty --id", proc.stderr)
+
+    def test_retro_create_normalizes_accented_title_slug(self):
+        proc = self.run_oaw(
+            "retro",
+            "create",
+            "--title",
+            "Révision générale",
+            "--date",
+            "2026-07-09",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        path = self.vault / "Agents/Retrospectives/2026-07-09 revision generale.md"
+        self.assertTrue(path.exists())
+        note = path.read_text(encoding="utf-8")
+        self.assertIn("id: AGT-RETRO-2026-07-09-revision-generale", note)
+
     def test_list_capture_hides_archived_by_default(self):
         proc = self.run_oaw(
             "list",

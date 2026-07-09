@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -364,6 +365,121 @@ def append_session_entry(
     if not before.endswith("\n"):
         before += "\n"
     return before + entry + after_text
+
+
+def heading_level(line: str) -> int | None:
+    match = re.match(r"^(#{1,6})\s+\S", line)
+    return len(match.group(1)) if match else None
+
+
+def fence_delimiter(line: str) -> str | None:
+    match = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+    return match.group(1)[0] if match else None
+
+
+def normalize_heading(section: str) -> str:
+    value = section.strip()
+    if not value:
+        raise OawError("section heading must not be empty")
+    if value.startswith("#"):
+        if not heading_level(value):
+            raise OawError("section heading must look like a Markdown heading")
+        return value
+    return f"## {value}"
+
+
+def append_markdown_block_to_section(text: str, section: str, block: str) -> str:
+    heading = normalize_heading(section)
+    block = block.strip()
+    if not block:
+        raise OawError("block content must not be empty")
+    lines = text.splitlines()
+    target_idx: int | None = None
+    target_level = heading_level(heading)
+    if target_level is None:
+        raise OawError("section heading must look like a Markdown heading")
+    active_fence: str | None = None
+    for idx, line in enumerate(lines):
+        delimiter = fence_delimiter(line)
+        if delimiter:
+            if active_fence is None:
+                active_fence = delimiter
+            elif active_fence == delimiter:
+                active_fence = None
+            continue
+        if active_fence is None and line.strip() == heading:
+            target_idx = idx
+            break
+    if target_idx is None:
+        prefix = "" if text.endswith("\n") else "\n"
+        return f"{text}{prefix}\n{heading}\n\n{block}\n"
+
+    insert_at = len(lines)
+    active_fence = None
+    for idx in range(target_idx + 1, len(lines)):
+        delimiter = fence_delimiter(lines[idx])
+        if delimiter:
+            if active_fence is None:
+                active_fence = delimiter
+            elif active_fence == delimiter:
+                active_fence = None
+            continue
+        if active_fence is not None:
+            continue
+        level = heading_level(lines[idx])
+        if level is not None and level <= target_level:
+            insert_at = idx
+            break
+
+    before = lines[:insert_at]
+    after = lines[insert_at:]
+    while before and before[-1] == "":
+        before.pop()
+    new_lines = [*before, "", block, ""]
+    if after:
+        new_lines.extend(after)
+    return "\n".join(new_lines).rstrip() + "\n"
+
+
+def append_observation_entry(text: str, section: str, title: str, body: str) -> str:
+    clean_title = title.strip()
+    clean_body = body.strip()
+    if not clean_title:
+        raise OawError("observation title must not be empty")
+    if not clean_body:
+        raise OawError("observation body must not be empty")
+    today = _dt.date.today().isoformat()
+    return append_markdown_block_to_section(
+        text,
+        section,
+        f"### {today} - {clean_title}\n\n{clean_body}",
+    )
+
+
+def update_note_session(
+    raw_id: str,
+    note: str,
+    checks: str | None,
+    allow_missing: bool,
+) -> None:
+    root = vault_root()
+    match = resolve_id(raw_id, root)
+    provider, session_ref = detect_session(allow_missing)
+    text = match.path.read_text(encoding="utf-8")
+    text = append_session_entry(text, provider, session_ref, note, checks)
+    match.path.write_text(text, encoding="utf-8")
+    print(f"Updated: {match.relpath}")
+    print("Section: Agent sessions")
+
+
+def update_note_observation(raw_id: str, section: str, title: str, body: str) -> None:
+    root = vault_root()
+    match = resolve_id(raw_id, root)
+    text = match.path.read_text(encoding="utf-8")
+    text = append_observation_entry(text, section, title, body)
+    match.path.write_text(text, encoding="utf-8")
+    print(f"Updated: {match.relpath}")
+    print(f"Section: {normalize_heading(section)}")
 
 
 def card_line(task_path: Path, project_root: Path, title: str, note_id: str | None) -> str:
@@ -793,8 +909,88 @@ def default_plugin_data_root() -> Path:
 
 
 def slugify(value: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    folded = (
+        unicodedata.normalize("NFKD", value)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+    slug = re.sub(r"[^a-z0-9]+", "-", folded.lower()).strip("-")
     return slug or "session"
+
+
+def validate_date(value: str) -> str:
+    try:
+        _dt.date.fromisoformat(value)
+    except ValueError as exc:
+        raise OawError("date must use YYYY-MM-DD") from exc
+    return value
+
+
+def create_retrospective(args: argparse.Namespace) -> None:
+    root = vault_root()
+    title = args.title.strip()
+    if not title:
+        raise OawError("retro create requires a non-empty --title")
+    date = validate_date(args.date or _dt.date.today().isoformat())
+    provider, session_ref = detect_session(args.allow_missing_session_id)
+    session_id = session_ref.split("=", 1)[1] if "=" in session_ref else session_ref
+    slug = slugify(title)
+    note_id = args.id.strip() if args.id else f"AGT-RETRO-{date}-{slug}"
+    if not note_id:
+        raise OawError("retro create requires a non-empty --id")
+    relpath = Path("Agents/Retrospectives") / f"{date} {slug.replace('-', ' ')}.md"
+    path = root / relpath
+    conflicts = [
+        match
+        for candidate in iter_markdown(root)
+        if (match := note_match(candidate, root, note_id)) and match.path != path
+    ]
+    if conflicts:
+        paths = "\n".join(f"  {match.relpath} ({match.matched_by})" for match in conflicts)
+        raise OawError(f"id '{note_id}' is already in use:\n{paths}")
+    if path.exists() and not args.force:
+        raise OawError(f"retrospective already exists: {relpath.as_posix()}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    summary = args.summary.strip() if args.summary else ""
+    summary_block = summary or "_Draft summary._"
+    provider_value = provider.lower().replace(" ", "-")
+    text = f"""---
+type: retrospective
+status: draft
+date: {date}
+created: {date}
+provider: {provider_value}
+session-ids:
+  - {session_id}
+id: {note_id}
+aliases:
+  - {note_id}
+tags:
+  - agents
+  - retrospective
+---
+
+# {date} - {title}
+
+## Summary
+
+{summary_block}
+
+## Observations
+
+## Decisions
+
+## Follow-ups
+
+## Artifacts
+
+## Agent sessions
+
+- {date} - {provider} - `{session_ref}` - Created retrospective draft.
+"""
+    path.write_text(text, encoding="utf-8")
+    print(f"Created: {relpath.as_posix()}")
+    print(f"ID: {note_id}")
 
 
 def iter_files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
@@ -1134,6 +1330,21 @@ def build_parser() -> argparse.ArgumentParser:
     task_note.add_argument("--checks")
     task_note.add_argument("--allow-missing-session-id", action="store_true")
 
+    note = sub.add_parser("note", help="append session traces or observations to resolved notes")
+    note_sub = note.add_subparsers(dest="note_command", required=True)
+
+    note_session = note_sub.add_parser("session", help="append an Agent sessions entry")
+    note_session.add_argument("id")
+    note_session.add_argument("--note", required=True)
+    note_session.add_argument("--checks")
+    note_session.add_argument("--allow-missing-session-id", action="store_true")
+
+    observe = note_sub.add_parser("observe", help="append a dated observation block")
+    observe.add_argument("id")
+    observe.add_argument("--section", default="Observations", help="target heading, default: Observations")
+    observe.add_argument("--title", required=True)
+    observe.add_argument("--body", required=True)
+
     board = sub.add_parser("board", help="update the cross-project Next steps board")
     board_sub = board.add_subparsers(dest="board_command", required=True)
 
@@ -1241,6 +1452,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=default_plugin_data_root(),
         help="override Claude plugin data root",
     )
+
+    retro = sub.add_parser("retro", help="retrospective note utilities")
+    retro_sub = retro.add_subparsers(dest="retro_command", required=True)
+    retro_create = retro_sub.add_parser("create", help="create a dated retrospective draft")
+    retro_create.add_argument("--title", required=True)
+    retro_create.add_argument("--summary", default="")
+    retro_create.add_argument("--date", help="date prefix, default: today")
+    retro_create.add_argument("--id", help="override generated AGT-RETRO-* id")
+    retro_create.add_argument("--force", action="store_true", help="overwrite an existing note")
+    retro_create.add_argument("--allow-missing-session-id", action="store_true")
     return parser
 
 
@@ -1268,6 +1489,18 @@ def main(argv: list[str] | None = None) -> int:
                     args.checks,
                     args.allow_missing_session_id,
                 )
+        elif args.command == "note":
+            if args.note_command == "session":
+                update_note_session(
+                    args.id,
+                    args.note,
+                    args.checks,
+                    args.allow_missing_session_id,
+                )
+            elif args.note_command == "observe":
+                update_note_observation(args.id, args.section, args.title, args.body)
+            else:
+                parser.error("unknown note command")
         elif args.command == "board":
             if args.board_command == "add":
                 update_next_board(
@@ -1294,6 +1527,11 @@ def main(argv: list[str] | None = None) -> int:
                 session_snapshot(args)
             else:
                 parser.error("unknown session command")
+        elif args.command == "retro":
+            if args.retro_command == "create":
+                create_retrospective(args)
+            else:
+                parser.error("unknown retro command")
         else:
             parser.error("unknown command")
     except OawError as exc:
