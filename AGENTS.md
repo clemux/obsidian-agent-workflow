@@ -43,3 +43,13 @@ Pull requests should include a behavior summary, the test command run, and any v
 ## Security & Configuration Tips
 
 The default vault path is user-specific. Use `OAW_VAULT` for tests, demos, and automation so commands do not accidentally modify a real Obsidian vault. Lifecycle commands require a real session environment variable unless `--allow-missing-session-id` is intentionally accepted.
+
+## Privacy & Portability
+
+This project is used on multiple machines (personal and work), so hard-coded personal paths and identifiers are technical debt. Existing occurrences (the `DEFAULT_VAULT` constant, README examples) are known legacy debt; do not add new ones, and prefer removing them when touching nearby code or docs.
+
+- Never introduce new hard-coded absolute paths, usernames, hostnames, or vault names in code. Route any new machine- or user-specific value through an environment variable (like `OAW_VAULT`), a CLI flag, or a `~`-relative default expanded with `Path.expanduser()`.
+- In `README.md`, `skills/oaw/SKILL.md`, and other tracked docs, write examples with placeholders (`/path/to/vault`, `$OAW_VAULT`, `~/vaults/example`) instead of pasting real command output. Redact `/home/<user>/...` paths and real vault or project names from terminal snippets before committing them.
+- Keep personal names and usernames out of prose in tracked files; write "the user's vault" rather than naming its owner.
+- Machine-local configuration such as `.claude/settings.local.json` must stay untracked; it is listed in `.gitignore` and must not be committed even if it seems useful to share.
+- Before committing, check the diff for absolute paths under `/home/` or other personal identifiers, and flag any that are intentional.
