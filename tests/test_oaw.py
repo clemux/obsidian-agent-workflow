@@ -64,6 +64,30 @@ Build it.
 """,
         )
         write(
+            self.vault / "Projects/Obsidian Agent Workflow/Index.md",
+            """---
+type: project
+id: OAW-index
+aliases:
+  - OAW-index
+---
+
+# Obsidian Agent Workflow
+""",
+        )
+        write(
+            self.vault / "Projects/Codex Delegation/Index.md",
+            """---
+type: project
+id: CDX-index
+aliases:
+  - CDX-index
+---
+
+# Codex Delegation
+""",
+        )
+        write(
             self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md",
             """---
 type: task
@@ -177,6 +201,52 @@ aliases:
         self.assertEqual(data["id"], "AGT-TSK-obsidian-task-ids")
         self.assertEqual(data["matched_by"], "id")
         self.assertIn("Agents/Tasks", data["relative_path"])
+
+    def test_resolve_short_project_alias_to_project_index(self):
+        proc = self.run_oaw("resolve", "--json", "obs:CDX")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["id"], "CDX-index")
+        self.assertEqual(data["matched_by"], "project-alias")
+        self.assertEqual(data["relative_path"], "Projects/Codex Delegation/Index.md")
+
+    def test_resolve_exact_match_wins_over_project_alias(self):
+        write(
+            self.vault / "Projects/Codex Delegation/Tasks/Short code.md",
+            """---
+type: task
+id: CDX
+aliases:
+  - CDX
+---
+
+# Short code
+""",
+        )
+        proc = self.run_oaw("resolve", "--json", "obs:CDX")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["id"], "CDX")
+        self.assertEqual(data["matched_by"], "id")
+
+    def test_resolve_ambiguous_project_alias_fails_with_candidates(self):
+        write(
+            self.vault / "Projects/Other Codex/Index.md",
+            """---
+type: project
+id: CDX-index
+aliases:
+  - CDX-index
+---
+
+# Other Codex
+""",
+        )
+        proc = self.run_oaw("resolve", "obs:CDX")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("not unique", proc.stderr)
+        self.assertIn("Projects/Codex Delegation/Index.md (project-alias)", proc.stderr)
+        self.assertIn("Projects/Other Codex/Index.md (project-alias)", proc.stderr)
 
     def test_duplicate_ids_fail(self):
         write(

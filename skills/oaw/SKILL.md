@@ -17,6 +17,7 @@ Treat `obs:<ID>` as a lookup trigger — `oaw` strips the `obs:` prefix automati
 
 ```bash
 oaw resolve obs:OAW-TSK-cli   # default view: ID, path, title, matched-by, frontmatter, outline
+oaw resolve obs:CDX           # short project alias -> matching project index, e.g. CDX-index
 oaw resolve --path OAW-TSK-cli     # absolute path only
 oaw resolve --meta OAW-TSK-cli     # frontmatter only (status, project, priority, ...)
 oaw resolve --outline OAW-TSK-cli  # headings with line numbers
@@ -24,6 +25,8 @@ oaw resolve --json OAW-TSK-cli     # machine-readable (path, frontmatter, outlin
 ```
 
 The default view answers most questions. Use `--full` (entire note body) only after deciding the body is actually needed.
+
+Short uppercase project aliases such as `obs:CDX` or `obs:OAW` resolve to the matching project index note (`CDX-index`, `OAW-index`) only when there is no exact frontmatter `id` or `aliases` match. Ambiguous project aliases are errors with candidate paths; do not treat a failed `obs:<project alias>` as a literal vault folder.
 
 On failure `oaw` exits non-zero with a clear message: "no note with frontmatter id or alias" for a miss, or a candidate-path list when an ID is duplicated. Surface that error to the user instead of guessing a path or falling back to text search.
 

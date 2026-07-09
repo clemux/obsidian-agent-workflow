@@ -168,11 +168,38 @@ def resolve_id(raw_id: str, root: Path) -> NoteMatch:
     target = strip_obs_prefix(raw_id)
     matches = [m for p in iter_markdown(root) if (m := note_match(p, root, target))]
     if not matches:
+        matches = project_alias_matches(target, root)
+    if not matches:
         raise OawError(f"no note with frontmatter id or alias '{target}' under {root}")
     if len(matches) > 1:
         paths = "\n".join(f"  {m.relpath} ({m.matched_by})" for m in matches)
         raise OawError(f"id '{target}' is not unique:\n{paths}")
     return matches[0]
+
+
+def project_alias_matches(target: str, root: Path) -> list[NoteMatch]:
+    if not re.fullmatch(r"[A-Z][A-Z0-9]{1,7}", target):
+        return []
+    index_id = f"{target}-index"
+    matches: list[NoteMatch] = []
+    projects = root / "Projects"
+    if not projects.exists():
+        return []
+    for path in sorted(projects.glob("*/Index.md")):
+        match = note_match(path, root, index_id)
+        if match:
+            matches.append(
+                NoteMatch(
+                    path=match.path,
+                    relpath=match.relpath,
+                    note_id=match.note_id,
+                    matched_by="project-alias",
+                    title=match.title,
+                    frontmatter_text=match.frontmatter_text,
+                    frontmatter=match.frontmatter,
+                )
+            )
+    return matches
 
 
 def outline(path: Path) -> list[str]:
