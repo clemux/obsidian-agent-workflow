@@ -206,6 +206,63 @@ id: AGT-TSK-obsidian-task-ids
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("requires --checks", proc.stderr)
 
+    def test_task_note_appends_session_without_status_or_board_change(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        before_board = board_path.read_text(encoding="utf-8")
+
+        proc = self.run_oaw(
+            "task",
+            "note",
+            "OAW-TSK-archived",
+            "--note",
+            "Reviewed independently.",
+            "--checks",
+            "python -m unittest",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Updated: Projects/Obsidian Agent Workflow/Tasks/Archived task.md", proc.stdout)
+        self.assertIn("Status: archived", proc.stdout)
+        self.assertIn("Board: unchanged", proc.stdout)
+        task = task_path.read_text(encoding="utf-8")
+        self.assertIn("status: archived", task)
+        self.assertIn("CODEX_THREAD_ID=test-thread", task)
+        self.assertIn("Reviewed independently.; checks: python -m unittest", task)
+        self.assertEqual(before_board, board_path.read_text(encoding="utf-8"))
+
+    def test_task_note_requires_session_id_unless_allowed(self):
+        env = {
+            "CODEX_THREAD_ID": "",
+            "CLAUDE_SESSION_ID": "",
+            "CLAUDE_CODE_SESSION_ID": "",
+            "OPENCODE_SESSION_ID": "",
+            "GEMINI_SESSION_ID": "",
+        }
+        proc = self.run_oaw(
+            "task",
+            "note",
+            "OAW-TSK-cli",
+            "--note",
+            "No session.",
+            env=env,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("no stable session ID found", proc.stderr)
+
+        allowed = self.run_oaw(
+            "task",
+            "note",
+            "OAW-TSK-cli",
+            "--note",
+            "Accepted missing session.",
+            "--allow-missing-session-id",
+            env=env,
+        )
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+        self.assertIn("session_id=unavailable", task)
+
     def test_list_tasks_preserves_archived_rows(self):
         proc = self.run_oaw("list", "--project", "Obsidian Agent Workflow")
         self.assertEqual(proc.returncode, 0, proc.stderr)

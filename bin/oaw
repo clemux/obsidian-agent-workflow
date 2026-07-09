@@ -458,6 +458,22 @@ def update_task(raw_id: str, status: str, note: str, checks: str | None, allow_m
     print(f"Board: {'updated' if moved else 'not found'}")
 
 
+def append_task_note(raw_id: str, note: str, checks: str | None, allow_missing: bool) -> None:
+    root = vault_root()
+    match = resolve_id(raw_id, root)
+    if not is_project_task(match.path, root):
+        raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
+    provider, session_ref = detect_session(allow_missing)
+    text = match.path.read_text(encoding="utf-8")
+    text = append_session_entry(text, provider, session_ref, note, checks)
+    match.path.write_text(text, encoding="utf-8")
+    refreshed = resolve_id(raw_id, root)
+    status = refreshed.frontmatter.get("status", "")
+    print(f"Updated: {refreshed.relpath}")
+    print(f"Status: {status}")
+    print("Board: unchanged")
+
+
 def note_type_matches(data: dict[str, object], note_type: str) -> bool:
     value = data.get("type")
     return isinstance(value, str) and value == note_type
@@ -855,6 +871,11 @@ def build_parser() -> argparse.ArgumentParser:
         cmd.add_argument("--note", required=True)
         cmd.add_argument("--checks")
         cmd.add_argument("--allow-missing-session-id", action="store_true")
+    task_note = task_sub.add_parser("note", help="append an agent session note without changing status")
+    task_note.add_argument("id")
+    task_note.add_argument("--note", required=True)
+    task_note.add_argument("--checks")
+    task_note.add_argument("--allow-missing-session-id", action="store_true")
 
     board = sub.add_parser("board", help="update the cross-project Next steps board")
     board_sub = board.add_subparsers(dest="board_command", required=True)
@@ -935,13 +956,21 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "list":
             list_project(args.project, args.type, args.status, args.include_archived)
         elif args.command == "task":
-            update_task(
-                args.id,
-                args.status,
-                args.note,
-                args.checks,
-                args.allow_missing_session_id,
-            )
+            if args.task_command == "note":
+                append_task_note(
+                    args.id,
+                    args.note,
+                    args.checks,
+                    args.allow_missing_session_id,
+                )
+            else:
+                update_task(
+                    args.id,
+                    args.status,
+                    args.note,
+                    args.checks,
+                    args.allow_missing_session_id,
+                )
         elif args.command == "board":
             if args.board_command == "add":
                 update_next_board(

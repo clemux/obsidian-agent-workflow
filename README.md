@@ -29,9 +29,12 @@ It also supports a conservative task lifecycle for project tasks under `Projects
 ```bash
 oaw task start OAW-TSK-cli --note "Implemented resolver and lifecycle CLI."
 oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "python -m unittest"
+oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "python -m unittest"
 ```
 
 Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on the project `Board.md` when one exists. They never invent a session ID; pass a real ID through a known harness env var such as `CODEX_THREAD_ID`, or use `--allow-missing-session-id` explicitly.
+
+Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It uses the same session-id handling as `start` and `complete`, accepts optional `--checks`, and works on task notes regardless of current status.
 
 The cross-project Next steps board is a hand-curated priority layer at `Projects/Next steps.md`. Use `oaw board` commands for routine card edits instead of manually moving kanban lines:
 

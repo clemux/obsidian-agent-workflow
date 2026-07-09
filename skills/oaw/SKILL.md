@@ -52,11 +52,13 @@ Lifecycle writes apply only to task notes under `Projects/*/Tasks` (the CLI enfo
 ```bash
 oaw task start OAW-TSK-cli --note "Started resolver implementation."
 oaw task complete OAW-TSK-cli --note "Finished and verified." --checks "python -m unittest"
+oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "python -m unittest"
 ```
 
 - `start` sets `status: active`; `complete` sets `status: done`.
 - `complete` requires `--checks` naming the verification actually run; do not fabricate checks.
-- Both append a dated entry under `## Agent sessions` in the note. When the project has a board (`Projects/<Project>/Board.md`), they also move the task's card to the matching column — creating the card, and the column heading, if missing. Cards keep the `- [ ]` marker in every column; the column heading, not the checkbox, reflects status.
+- `note` appends a dated entry under `## Agent sessions` without changing `status` or any board. Use it for delegation reviews, design notes, partial-progress records, and other trace entries on task notes in any status.
+- `start` and `complete` also move the task's card to the matching column when the project has a board (`Projects/<Project>/Board.md`) — creating the card, and the column heading, if missing. Cards keep the `- [ ]` marker in every column; the column heading, not the checkbox, reflects status.
 - The command's output (`Updated:` / `Status:` / `Board:`) confirms the write. To report resulting state, rely on that output plus `oaw resolve --meta` if needed — do not re-read the whole note with `--full`.
 - The session ID is read automatically from the harness environment; the first of `CODEX_THREAD_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `OPENCODE_SESSION_ID`, `GEMINI_SESSION_ID` that is set wins. `oaw` never invents one: with no session variable set, the command fails with a clear error (so there is no need to check the variables beforehand). Pass `--allow-missing-session-id` only when the user explicitly accepts an untraceable entry.
 
@@ -110,5 +112,6 @@ oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
 - Use `oaw` before any manual vault search. Do not resolve IDs by searching agent state directories (`.codex`, `.claude`, `.agents`) or session transcripts unless the user explicitly asks for forensic work.
 - When changing `NEXT-board`, prefer `oaw board add/move/done`; edit the markdown directly only for convention text, bulk cleanup, or cases the command cannot express.
 - Keep durable written links as path links with the ID as display text, e.g. `[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]` — the link target is the vault-relative path without the `.md` extension. Reuse the path from resolve output already in hand; run `oaw resolve --path` only when no resolve has been done yet.
+- When `oaw` lacks a needed capability, capture a new OAW task describing the gap, then do the minimal manual workaround and keep moving.
 - If a needed capability is not documented here, check `oaw --help` before reaching for filesystem search.
 - For `PMX-*` IDs, prefer the dedicated `pmx` skill and CLI.
