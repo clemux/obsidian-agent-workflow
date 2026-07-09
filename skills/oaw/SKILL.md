@@ -123,6 +123,7 @@ oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
 - When changing `NEXT-board`, prefer `oaw board add/move/done`; edit the markdown directly only for convention text, bulk cleanup, or cases the command cannot express.
 - Keep durable written links as path links with the ID as display text, e.g. `[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]` — the link target is the vault-relative path without the `.md` extension. Reuse the path from resolve output already in hand; run `oaw resolve --path` only when no resolve has been done yet.
 - When `oaw` lacks a needed capability, capture a new OAW task describing the gap, then do the minimal manual workaround and keep moving.
+- For real vault writes, prefer stable installed commands: `oaw task ...`, `oaw board ...`, `oaw session snapshot ...`, or `obsidian ...` for note/metadata writes. Use `python bin/oaw ...` only for CLI development, temp-vault fixtures, or deliberately testing the checkout copy. This follows the approval-scope lesson from [[Agents/Feedback/2026-07-08 allow-listed skill scripts for vault writes|AGT-FDBK-allow-listed-skill-scripts]].
 - If a needed capability is not documented here, check `oaw --help` before reaching for filesystem search.
 - For `PMX-*` IDs, prefer the dedicated `pmx` skill and CLI.
 
