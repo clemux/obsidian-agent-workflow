@@ -127,7 +127,7 @@ Example output:
 
 ```text
 ID: OAW-TSK-project-alias-resolution
-Path: Projects/Obsidian Agent Workflow/Tasks/Project alias resolution for obs references.md
+Path: /path/to/vault/Projects/Obsidian Agent Workflow/Tasks/Project alias resolution for obs references.md
 Title: Project alias resolution for obs references
 Matched by: id
 
@@ -147,7 +147,7 @@ Outline:
 `--path` prints only the resolved file:
 
 ```text
-Projects/Codex Delegation/Index.md
+/path/to/vault/Projects/Codex Delegation/Index.md
 ```
 
 Survey a project queue without opening every note body. This is useful for status checks and planning the next agent action:
