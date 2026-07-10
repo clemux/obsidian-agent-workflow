@@ -1,18 +1,70 @@
 # obsidian-agent-workflow
 
-Local-first tooling for resolving Obsidian reference IDs and recording agent work on project task notes.
+Local-first tooling for agent-driven Obsidian workflows: the `oaw` CLI resolves vault reference IDs from note frontmatter and records agent work — task lifecycle, board moves, session traces — on project notes.
 
-## Disclaimer
+## Status and caveats
 
 This project has been written entirely by AI. The repository owner has not read or reviewed any of the code. Use it at your own risk.
 
-## Warning
-
 This repository is tooling tailored for a local Obsidian and agent workflow. It is not intended as reusable software, and it probably does not make sense to install or use as-is. Some paths are machine-specific legacy debt; prefer `OAW_VAULT` for any new automation.
 
-## `oaw`
+## Install
 
-`oaw` resolves vault IDs from note frontmatter instead of asking agents to search broad local state:
+Install with `uv` from the repo checkout:
+
+```bash
+cd /path/to/obsidian-agent-workflow
+uv tool install .
+```
+
+This builds a snapshot into a uv-managed tool environment, so the installed
+`oaw` is decoupled from the checkout: switching branches or editing `bin/oaw`
+does not change the installed command. After merging changes, refresh with:
+
+```bash
+uv tool install --reinstall .
+```
+
+During development, run the checkout directly with `python bin/oaw ...`
+(preferably against a temp vault via `OAW_VAULT`).
+
+The default vault path is machine-specific legacy debt; override with `OAW_VAULT`.
+
+## Table of contents
+
+- [Command overview](#command-overview)
+- [Resolving references](#resolving-references)
+- [Listing notes](#listing-notes)
+- [Task lifecycle](#task-lifecycle)
+- [Boards](#boards)
+- [Sessions](#sessions)
+  - [Session lookup](#session-lookup)
+  - [Session snapshots](#session-snapshots)
+- [Notes and retrospectives](#notes-and-retrospectives)
+- [Import and export](#import-and-export)
+  - [Safe export ingestion](#safe-export-ingestion)
+  - [Outbound export bundles](#outbound-export-bundles)
+- [Link hygiene](#link-hygiene)
+- [Installed vs checkout CLI](#installed-vs-checkout-cli)
+- [Examples from agent sessions](#examples-from-agent-sessions)
+- [Development worktrees](#development-worktrees)
+
+## Command overview
+
+| Command | Purpose |
+| --- | --- |
+| [`oaw resolve`](#resolving-references) | Resolve a reference ID or `obs:` alias to a vault note |
+| [`oaw list`](#listing-notes) | List a project's tasks or captures by frontmatter type |
+| [`oaw task`](#task-lifecycle) | Update task lifecycle status with an agent-session trace |
+| [`oaw board`](#boards) | Add, move, and complete kanban cards on project boards |
+| [`oaw session`](#sessions) | Look up a session ID across notes and artifacts; snapshot session artifacts |
+| [`oaw note` / `oaw retro`](#notes-and-retrospectives) | Append session traces or observations; create retrospective drafts |
+| [`oaw ingest` / `oaw export`](#import-and-export) | Ingest marked-safe handoff files; export marked-safe note bundles |
+| [`oaw link`](#link-hygiene) | Check, add, and lint durable wikilinks between notes |
+
+## Resolving references
+
+`oaw resolve` resolves vault IDs from note frontmatter instead of asking agents to search broad local state:
 
 ```bash
 oaw resolve obs:AGT-TSK-obsidian-task-ids
@@ -23,13 +75,112 @@ oaw resolve --json SR-index
 
 Short uppercase project aliases such as `obs:CDX` resolve to a matching `Projects/<Project>/Index.md` note whose ID is `CDX-index` when there is no exact frontmatter `id` or `aliases` match. Ambiguous project aliases fail with candidate paths instead of falling back to a literal folder.
 
-It can list project notes by frontmatter type. Task listing is the default; capture listing hides `status: archived` notes unless explicitly requested:
+## Listing notes
+
+`oaw list` lists project notes by frontmatter type. Task listing is the default; capture listing hides `status: archived` notes unless explicitly requested:
 
 ```bash
 oaw list --project Fable
 oaw list --project Fable --type capture
 oaw list --project Fable --type capture --include-archived
 ```
+
+## Task lifecycle
+
+`oaw task` provides a conservative task lifecycle for project tasks under `Projects/*/Tasks`:
+
+```bash
+oaw task backlog OAW-TSK-cli --note "Parked until the dependency is ready."
+oaw task promote OAW-TSK-cli --note "Selected for the next session."
+oaw task start OAW-TSK-cli --note "Implemented resolver and lifecycle CLI."
+oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "python -m unittest"
+oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "python -m unittest"
+```
+
+Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on the project `Board.md` when one exists. `backlog` sets `status: backlog`, `promote` sets `status: todo`, `start` sets `status: active`, and `complete` sets `status: done`. They never invent a session ID; pass a real ID through a known harness env var such as `CODEX_THREAD_ID`, or use `--allow-missing-session-id` explicitly.
+
+Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It uses the same session-id handling as `start` and `complete`, accepts optional `--checks`, and works on task notes regardless of current status.
+
+## Boards
+
+Project boards use the column convention `Backlog` -> `Todo` -> `Active` -> `Done`. `Todo` is for near-term chosen work; `Backlog` is for unscheduled known work. When a session decides what should happen next, promote the matching task so the board reflects that decision.
+
+Use `oaw board ensure-backlog --project "Project Name"` to add the `Backlog` column to an existing project board before `Todo` without rewriting cards.
+
+The cross-project Next steps board is a hand-curated priority layer at `Projects/Next steps.md`. Use `oaw board` commands for routine card edits instead of manually moving kanban lines:
+
+```bash
+oaw board add \
+  --column "Next session(s)" \
+  --link "Projects/Obsidian Agent Workflow/Tasks/Next steps board integration" \
+  --title "Next steps board integration" \
+  --why "document conventions and wire wrap-up handling" \
+  --id OAW-TSK-next-board
+
+oaw board move OAW-TSK-next-board --column "Now (current session)"
+oaw board done OAW-TSK-next-board
+```
+
+`move` and `done` require the token to match exactly one card. `done` moves the card to `Done` and marks it `[x]`; other moves preserve the existing card text and keep the checkbox open.
+
+The aggregate cross-project task Base lives at `Projects/Cross-project tasks.base`. Use it when choosing what to work on next across OAW and adjacent agent-tooling queues: its open-task view includes `Projects/*/Tasks` and `Agents/Tasks`, keeps `backlog`, `todo`, `active`, and legacy `open` tasks visible, and excludes terminal `done` and `superseded` work. Priority is a vault-wide 1/2/3 scale: `1` is urgent, blocking, or unusually high-leverage; `2` is normal next-session work with clear value; `3` is useful backlog work. Cross-project usefulness can raise priority, and the Base sorts by priority, then effort (`S`, `M`, `L`), then title.
+
+## Sessions
+
+### Session lookup
+
+`oaw session lookup` looks up a session/thread ID across vault notes and session artifacts:
+
+```bash
+oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc
+oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc --codex-root /tmp/example-codex-sessions --claude-root /tmp/example-claude-projects
+```
+
+`oaw session lookup <id>` follows a two-step resolution strategy:
+
+- First it scans the vault and prints matching note paths and frontmatter IDs for the literal ID.
+- If no vault match is found, it scans artifact roots and prints a synopsis of discovered session artifacts.
+- If no match is found anywhere, it exits `0` and prints a clear *not logged* message.
+
+### Session snapshots
+
+Session snapshots copy transient harness artifacts into the vault's retrospective attachments folder:
+
+```bash
+oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
+  --slug sr-dogfood-zombie-codex \
+  --partial \
+  --codex-thread 019f3e73-029f-7ea2-9772-fdfa1e25fb8f \
+  --codex-thread 019f3e8d-8307-7052-b367-57e78f3316ae \
+  --claude-session 019f3ef0-1111-7222-8333-c26aa5d38893
+```
+
+The command finds the Claude parent transcript plus nested subagent transcripts, task outputs under `tasks/`, workflow run artifacts under `subagents/workflows/`, persisted workflow scripts under `workflows/scripts/`, discoverable Codex rollouts, referenced plugin job logs, and fork parents referenced by explicit Claude/fork markers or `--claude-session`. Bare JSON `sessionId` fields do not trigger fork discovery. It writes `manifest.json` with source paths, copy time, file hashes, category, and parent completeness. Use `--codex-rollout` for an exact rollout filename or path. Use `--grep` only for a literal that identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags. Re-run the same command to refresh a partial parent transcript, preserve nested subagents, pick up new artifacts, and remove stale files listed in the previous manifest.
+
+Test or demo runs can override the artifact roots with `--codex-root` and `--claude-root`. Lookup and snapshot commands share the `OAW_CODEX_SESSIONS_ROOT` and `OAW_CLAUDE_PROJECTS_ROOT` environment overrides; their fallback roots are `~/.codex/sessions` and `~/.claude/projects`.
+
+## Notes and retrospectives
+
+For non-project notes, append the same session trace or a dated observation block without hand-editing headings:
+
+```bash
+oaw note session AGT-TSK-session-retrospectives --note "Reviewed retrospective habit."
+oaw note observe CDX-RES-routing-evidence \
+  --title "Wrap-up format gap" \
+  --body "The evidence note needs a mechanical append path."
+```
+
+Create retrospective drafts from a stable template:
+
+```bash
+oaw retro create \
+  --title "Resolver dogfood" \
+  --summary "Captured the resolver workflow and follow-ups."
+```
+
+`oaw note session` and `oaw retro create` require a real session ID from a supported harness environment variable unless `--allow-missing-session-id` is explicitly accepted. `oaw note observe` does not require a session ID.
+
+## Import and export
 
 ### Safe export ingestion
 
@@ -51,49 +202,7 @@ Safety evaluation reads frontmatter only. In `--write` mode, accepted files are 
 
 Default handoff path is `OAW_INGESTION_ROOT` (if unset, `~/obsidian-ingestion`). Default destination is `Imports/Safe export`.
 
-It also supports a conservative task lifecycle for project tasks under `Projects/*/Tasks`:
-
-```bash
-oaw task backlog OAW-TSK-cli --note "Parked until the dependency is ready."
-oaw task promote OAW-TSK-cli --note "Selected for the next session."
-oaw task start OAW-TSK-cli --note "Implemented resolver and lifecycle CLI."
-oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "python -m unittest"
-oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "python -m unittest"
-```
-
-Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on the project `Board.md` when one exists. `backlog` sets `status: backlog`, `promote` sets `status: todo`, `start` sets `status: active`, and `complete` sets `status: done`. They never invent a session ID; pass a real ID through a known harness env var such as `CODEX_THREAD_ID`, or use `--allow-missing-session-id` explicitly.
-
-Project boards use the column convention `Backlog` -> `Todo` -> `Active` -> `Done`. `Todo` is for near-term chosen work; `Backlog` is for unscheduled known work. When a session decides what should happen next, promote the matching task so the board reflects that decision.
-
-Use `oaw board ensure-backlog --project "Project Name"` to add the `Backlog` column to an existing project board before `Todo` without rewriting cards.
-
-It can also look up a session/thread ID across vault notes and session artifacts:
-
-```bash
-oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc
-oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc --codex-root /tmp/example-codex-sessions --claude-root /tmp/example-claude-projects
-```
-
-Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It uses the same session-id handling as `start` and `complete`, accepts optional `--checks`, and works on task notes regardless of current status.
-
-For non-project notes, append the same session trace or a dated observation block without hand-editing headings:
-
-```bash
-oaw note session AGT-TSK-session-retrospectives --note "Reviewed retrospective habit."
-oaw note observe CDX-RES-routing-evidence \
-  --title "Wrap-up format gap" \
-  --body "The evidence note needs a mechanical append path."
-```
-
-Create retrospective drafts from a stable template:
-
-```bash
-oaw retro create \
-  --title "Resolver dogfood" \
-  --summary "Captured the resolver workflow and follow-ups."
-```
-
-`oaw note session` and `oaw retro create` require a real session ID from a supported harness environment variable unless `--allow-missing-session-id` is explicitly accepted. `oaw note observe` does not require a session ID.
+### Outbound export bundles
 
 Outbound exports require explicit note frontmatter before anything leaves the vault:
 
@@ -113,23 +222,7 @@ oaw export validate ~/obsidian-export/OAW-TSK-export-example --target work
 
 The bundle contains `note.md`, optional copied artifacts, and `manifest.json` with vault-relative source paths and checksums. Unmarked notes are refused; validation also refuses paths outside the bundle, tampered notes, wrong targets, missing artifacts, and checksum mismatches. Legacy `safe_for_export: true` plus `export_target: work` remains accepted for existing notes, but new notes should use `export-scope: work` so inbound and outbound safety markers share one schema.
 
-The cross-project Next steps board is a hand-curated priority layer at `Projects/Next steps.md`. Use `oaw board` commands for routine card edits instead of manually moving kanban lines:
-
-```bash
-oaw board add \
-  --column "Next session(s)" \
-  --link "Projects/Obsidian Agent Workflow/Tasks/Next steps board integration" \
-  --title "Next steps board integration" \
-  --why "document conventions and wire wrap-up handling" \
-  --id OAW-TSK-next-board
-
-oaw board move OAW-TSK-next-board --column "Now (current session)"
-oaw board done OAW-TSK-next-board
-```
-
-`move` and `done` require the token to match exactly one card. `done` moves the card to `Done` and marks it `[x]`; other moves preserve the existing card text and keep the checkbox open.
-
-The aggregate cross-project task Base lives at `Projects/Cross-project tasks.base`. Use it when choosing what to work on next across OAW and adjacent agent-tooling queues: its open-task view includes `Projects/*/Tasks` and `Agents/Tasks`, keeps `backlog`, `todo`, `active`, and legacy `open` tasks visible, and excludes terminal `done` and `superseded` work. Priority is a vault-wide 1/2/3 scale: `1` is urgent, blocking, or unusually high-leverage; `2` is normal next-session work with clear value; `3` is useful backlog work. Cross-project usefulness can raise priority, and the Base sorts by priority, then effort (`S`, `M`, `L`), then title.
+## Link hygiene
 
 `oaw link` supports durable Obsidian wikilink hygiene:
 
@@ -143,32 +236,14 @@ oaw link lint
 
 `ensure` and `ensure-bidirectional` default to a dry-run preview and append a `[[vault/path|ID]]` link only when the target path is missing. Pass `--write` to apply the append-only section edit.
 
-Session snapshots copy transient harness artifacts into the vault's retrospective attachments folder:
-
-```bash
-oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
-  --slug sr-dogfood-zombie-codex \
-  --partial \
-  --codex-thread 019f3e73-029f-7ea2-9772-fdfa1e25fb8f \
-  --codex-thread 019f3e8d-8307-7052-b367-57e78f3316ae \
-  --claude-session 019f3ef0-1111-7222-8333-c26aa5d38893
-```
-
-The command finds the Claude parent transcript plus nested subagent transcripts, task outputs under `tasks/`, workflow run artifacts under `subagents/workflows/`, persisted workflow scripts under `workflows/scripts/`, discoverable Codex rollouts, referenced plugin job logs, and fork parents referenced by explicit Claude/fork markers or `--claude-session`. Bare JSON `sessionId` fields do not trigger fork discovery. It writes `manifest.json` with source paths, copy time, file hashes, category, and parent completeness. Use `--codex-rollout` for an exact rollout filename or path. Use `--grep` only for a literal that identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags. Re-run the same command to refresh a partial parent transcript, preserve nested subagents, pick up new artifacts, and remove stale files listed in the previous manifest.
+## Installed vs checkout CLI
 
 Use installed `oaw ...` commands for operational vault writes such as task lifecycle updates, board moves, and session snapshots. Reserve `python bin/oaw ...` for development checks against this checkout, preferably with temp vaults. This keeps approval prompts scoped to stable commands instead of broad interpreter entrypoints; see `AGT-FDBK-allow-listed-skill-scripts`.
 
-`oaw session lookup <id>` follows the same two-step resolution strategy:
-
-- First it scans the vault and prints matching note paths and frontmatter IDs for the literal ID.
-- If no vault match is found, it scans artifact roots and prints a synopsis of discovered session artifacts.
-- If no match is found anywhere, it exits `0` and prints a clear *not logged* message.
-
-Test or demo runs can override the artifact roots with `--codex-root` and `--claude-root`. Lookup and snapshot commands share the `OAW_CODEX_SESSIONS_ROOT` and `OAW_CLAUDE_PROJECTS_ROOT` environment overrides; their fallback roots are `~/.codex/sessions` and `~/.claude/projects`.
-
 ## Examples from agent sessions
 
-### From the 2026-07-10 integration session
+<details>
+<summary><strong>From the 2026-07-10 integration session</strong></summary>
 
 The following commands and outputs come from the session that reviewed, fixed, and integrated the overnight branches. Because the checkout itself was changing, the session deliberately ran `python bin/oaw ...` to dogfood the active version before it reached `main`.
 
@@ -277,7 +352,10 @@ Column: Done
 Matched: OAW-TSK-overnight-branch-review
 ```
 
-### Earlier examples
+</details>
+
+<details>
+<summary><strong>Earlier examples</strong></summary>
 
 Recent Codex sessions used `oaw` for a few recurring jobs that are hard to do reliably with plain text search.
 
@@ -402,27 +480,7 @@ Status: done
 Board: updated
 ```
 
-## Install
-
-Install with `uv` from the repo checkout:
-
-```bash
-cd /path/to/obsidian-agent-workflow
-uv tool install .
-```
-
-This builds a snapshot into a uv-managed tool environment, so the installed
-`oaw` is decoupled from the checkout: switching branches or editing `bin/oaw`
-does not change the installed command. After merging changes, refresh with:
-
-```bash
-uv tool install --reinstall .
-```
-
-During development, run the checkout directly with `python bin/oaw ...`
-(preferably against a temp vault via `OAW_VAULT`).
-
-The default vault path is machine-specific legacy debt; override with `OAW_VAULT`.
+</details>
 
 ## Development worktrees
 
