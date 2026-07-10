@@ -26,7 +26,7 @@ oaw resolve --json OAW-TSK-cli     # machine-readable (path, frontmatter, outlin
 
 The default view answers most questions. Use `--full` (entire note body) only after deciding the body is actually needed.
 
-Short uppercase project aliases such as `obs:CDX` or `obs:OAW` resolve to the matching project index note (`CDX-index`, `OAW-index`) only when there is no exact frontmatter `id` or `aliases` match. Ambiguous project aliases are errors with candidate paths; do not treat a failed `obs:<project alias>` as a literal vault folder.
+Short uppercase project aliases such as `obs:CDX` or `obs:OAW` resolve only through matching notes at `Projects/<Project>/Index.md` (`CDX-index`, `OAW-index`) and only when there is no exact frontmatter `id` or `aliases` match. Ambiguous project aliases are errors with candidate paths; do not treat a failed `obs:<project alias>` as a literal vault folder.
 
 On failure `oaw` exits non-zero with a clear message: "no note with frontmatter id or alias" for a miss, or a candidate-path list when an ID is duplicated. Surface that error to the user instead of guessing a path or falling back to text search.
 

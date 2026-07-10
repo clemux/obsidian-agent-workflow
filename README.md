@@ -17,7 +17,7 @@ oaw resolve --path OAW-TSK-cli
 oaw resolve --json SR-index
 ```
 
-Short uppercase project aliases such as `obs:CDX` resolve to the matching project index ID (`CDX-index`) when there is no exact frontmatter `id` or `aliases` match. Ambiguous project aliases fail with candidate paths instead of falling back to a literal folder.
+Short uppercase project aliases such as `obs:CDX` resolve to a matching `Projects/<Project>/Index.md` note whose ID is `CDX-index` when there is no exact frontmatter `id` or `aliases` match. Ambiguous project aliases fail with candidate paths instead of falling back to a literal folder.
 
 It can list project notes by frontmatter type. Task listing is the default; capture listing hides `status: archived` notes unless explicitly requested:
 
@@ -96,8 +96,7 @@ is cc-multi-cli mentioned anywhere else in obs:CDX?
 ```
 
 ```bash
-oaw resolve obs:CDX     # currently reports a missing short project alias
-oaw resolve --path CDX-index
+oaw resolve obs:CDX     # resolves the matching Projects/<Project>/Index.md note
 ```
 
 ```text
