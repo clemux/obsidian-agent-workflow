@@ -22,6 +22,15 @@ Keep small workflow changes close to `bin/oaw` and mirror behavior changes in te
 
 There is no build step or dependency installation; the project uses only the Python standard library.
 
+## CLI Dogfooding
+
+When changing `bin/oaw`, use the updated CLI from the active checkout or worktree for subsequent OAW operations: run `python bin/oaw ...` instead of the separately installed `oaw` until the change is integrated. This prevents an older installed version from hiding integration problems and continuously exercises argument parsing, output, resolution, and lifecycle behavior.
+
+- Exercise changed or newly combined behavior against a temporary vault with `OAW_VAULT` before any real-vault write.
+- When the operation is safe and relevant, use the checkout CLI for the current task's real-vault resolution and lifecycle bookkeeping too. Do not dogfood experimental or destructive writes against the real vault; prefer dry-run modes and temporary fixtures.
+- Treat friction found while dogfooding as evidence: record the command and observed behavior in the related OAW task, or create a focused OAW task when no suitable note exists. Add a regression test and fix it immediately when the correction is small and in scope.
+- Include the dogfooding command among the checks reported in the task note or pull request. Fall back to the installed `oaw` only when the checkout version is itself broken, and record that failure.
+
 ## Coding Style & Naming Conventions
 
 Write Python 3 with 4-space indentation, useful type hints, and small functions with user-facing errors raised as `OawError`. Use `snake_case` for functions and variables, `PascalCase` for classes and dataclasses, and uppercase constants such as `DEFAULT_VAULT`.
