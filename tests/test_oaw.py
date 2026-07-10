@@ -1581,6 +1581,7 @@ aliases:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(manifest["schema"], "oaw-session-snapshot-v1")
         self.assertEqual(manifest["session_id"], session_id)
+        self.assertEqual(manifest["snapshot"]["mode"], "claude-parent")
         self.assertEqual(manifest["snapshot"]["parent_completeness"], "partial")
         sources = {entry["source"] for entry in manifest["files"]}
         self.assertIn(str(parent), sources)
@@ -1671,6 +1672,108 @@ aliases:
         destinations = {entry["destination"] for entry in manifest["files"]}
         self.assertIn("claude/agent-new.jsonl", destinations)
         self.assertIn("claude/subagents/nested/agent-nested.jsonl", destinations)
+
+    def test_session_snapshot_supports_codex_only_thread_and_discovers_references(self):
+        thread_id = "019f48d7-39c2-7043-9c19-5a3565995898"
+        child_thread = "019f48d8-1111-7222-8333-c26aa5d38893"
+        codex_root = self.vault / "harness/codex/sessions"
+        plugin_root = self.vault / "harness/claude/plugins/data"
+        output_root = self.vault / "attachments"
+        rollout = (
+            codex_root
+            / "2026/07/10"
+            / f"rollout-2026-07-10T00-00-00-{thread_id}.jsonl"
+        )
+        child_rollout = (
+            codex_root
+            / "2026/07/10"
+            / f"rollout-2026-07-10T00-05-00-{child_thread}.jsonl"
+        )
+        write(
+            rollout,
+            '{"timestamp":"2026-07-10T00:00:00.000Z",'
+            f'"content":"codex_thread={child_thread}; plugin task-abcd1234-efgh5678"}}\n',
+        )
+        write(child_rollout, '{"timestamp":"2026-07-10T00:05:00.000Z"}\n')
+        write(
+            plugin_root / "example/jobs/task-abcd1234-efgh5678.log",
+            "complete\n",
+        )
+
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            thread_id,
+            "--codex-only",
+            "--slug",
+            "codex only",
+            "--output-root",
+            str(output_root),
+            "--codex-root",
+            str(codex_root),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+            "--plugin-data-root",
+            str(plugin_root),
+            env={"CODEX_THREAD_ID": thread_id},
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        snapshot = output_root / "2026-07-10-codex-only"
+        self.assertTrue((snapshot / "codex" / rollout.name).exists())
+        self.assertTrue((snapshot / "codex" / child_rollout.name).exists())
+        self.assertTrue(
+            (snapshot / "plugin-logs/task-abcd1234-efgh5678.log").exists()
+        )
+        manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["snapshot"]["mode"], "codex-only")
+        self.assertIsNone(manifest["snapshot"]["parent_transcript"])
+        self.assertEqual(manifest["snapshot"]["parent_completeness"], "partial")
+        codex_entries = [
+            entry for entry in manifest["files"] if entry["category"] == "codex-rollout"
+        ]
+        self.assertTrue(
+            all(entry["completeness"] == "partial" for entry in codex_entries)
+        )
+        self.assertIn("Transcript: partial", proc.stdout)
+
+    def test_session_snapshot_codex_only_requires_the_primary_rollout(self):
+        thread_id = "019f48d7-39c2-7043-9c19-5a3565995898"
+        unrelated_id = "019f48d8-1111-7222-8333-c26aa5d38893"
+        codex_root = self.vault / "harness/codex/sessions"
+        write(
+            codex_root / f"rollout-2026-07-10T00-00-00-{unrelated_id}.jsonl",
+            "unrelated marker\n",
+        )
+
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            thread_id,
+            "--codex-only",
+            "--grep",
+            "unrelated marker",
+            "--output-root",
+            str(self.vault / "attachments"),
+            "--codex-root",
+            str(codex_root),
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn(f"Codex rollout not found for thread {thread_id}", proc.stderr)
+
+    def test_session_snapshot_codex_only_rejects_non_uuid_thread(self):
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            "*",
+            "--codex-only",
+            "--codex-root",
+            str(self.vault / "harness/codex/sessions"),
+        )
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("requires a full Codex thread UUID", proc.stderr)
 
     def test_session_snapshot_does_not_treat_bare_session_id_as_fork_parent(self):
         session_id = "019f3ed8-245c-79f3-8ec6-c1ba30e3646d"

@@ -1889,11 +1889,12 @@ def remove_stale_snapshot_files(dest_root: Path, current_entries: list[dict[str,
 def write_snapshot_manifest(
     dest_root: Path,
     session_id: str,
-    parent: Path,
+    parent: Path | None,
     date: str,
     slug: str,
     parent_completeness: str,
     files: list[dict[str, object]],
+    mode: str = "claude-parent",
 ) -> Path:
     manifest = {
         "schema": "oaw-session-snapshot-v1",
@@ -1903,7 +1904,8 @@ def write_snapshot_manifest(
             "date": date,
             "slug": slug,
             "path": str(dest_root),
-            "parent_transcript": str(parent),
+            "mode": mode,
+            "parent_transcript": str(parent) if parent else None,
             "parent_completeness": parent_completeness,
         },
         "files": files,
@@ -1917,8 +1919,32 @@ def session_snapshot(args: argparse.Namespace) -> None:
     session_id = args.session_id.strip()
     if not session_id:
         raise OawError("empty session ID")
-    parent = find_claude_parent(session_id, args.claude_root.expanduser())
-    date = snapshot_date(parent, args.date)
+    parent = None if args.codex_only else find_claude_parent(
+        session_id, args.claude_root.expanduser()
+    )
+    explicit_threads = args.codex_thread or []
+    primary_codex_rollouts: list[Path] = []
+    if args.codex_only:
+        if not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            session_id,
+            re.IGNORECASE,
+        ):
+            raise OawError("--codex-only requires a full Codex thread UUID")
+        primary_codex_rollouts = find_codex_rollouts(
+            args.codex_root.expanduser(), "", [session_id], [], []
+        )
+        if not primary_codex_rollouts:
+            raise OawError(f"Codex rollout not found for thread {session_id}")
+        explicit_threads = [session_id, *explicit_threads]
+    codex_rollouts = find_codex_rollouts(
+        args.codex_root.expanduser(),
+        "",
+        explicit_threads,
+        args.codex_rollout or [],
+        args.grep or [],
+    )
+    date = snapshot_date(parent or primary_codex_rollouts[0], args.date)
     slug = slugify(args.slug or session_id[:8])
     output_root = (
         args.output_root.expanduser()
@@ -1928,35 +1954,42 @@ def session_snapshot(args: argparse.Namespace) -> None:
     destination_root = output_root / f"{date}-{slug}"
     destination_root.mkdir(parents=True, exist_ok=True)
 
-    session_dir = parent.with_suffix("")
-    subagents_dir = session_dir / "subagents"
-    workflow_root = subagents_dir / "workflows"
-    subagents = [
-        path
-        for path in iter_files(subagents_dir, (".jsonl",))
-        if not path.is_relative_to(workflow_root)
-    ]
-    task_outputs = snapshot_tree_copies(
-        session_dir / "tasks",
-        Path("claude") / "tasks",
-        "claude-task-output",
-    )
-    workflow_artifacts = snapshot_tree_copies(
-        subagents_dir / "workflows",
-        Path("claude") / "workflows",
-        "claude-workflow-artifact",
-    )
-    workflow_scripts = snapshot_tree_copies(
-        session_dir / "workflows" / "scripts",
-        Path("claude") / "workflow-scripts",
-        "claude-workflow-script",
-    )
+    subagents_dir: Path | None = None
+    subagents: list[Path] = []
+    task_outputs: list[SnapshotCopy] = []
+    workflow_artifacts: list[SnapshotCopy] = []
+    workflow_scripts: list[SnapshotCopy] = []
+    if parent:
+        session_dir = parent.with_suffix("")
+        subagents_dir = session_dir / "subagents"
+        workflow_root = subagents_dir / "workflows"
+        subagents = [
+            path
+            for path in iter_files(subagents_dir, (".jsonl",))
+            if not path.is_relative_to(workflow_root)
+        ]
+        task_outputs = snapshot_tree_copies(
+            session_dir / "tasks",
+            Path("claude") / "tasks",
+            "claude-task-output",
+        )
+        workflow_artifacts = snapshot_tree_copies(
+            subagents_dir / "workflows",
+            Path("claude") / "workflows",
+            "claude-workflow-artifact",
+        )
+        workflow_scripts = snapshot_tree_copies(
+            session_dir / "workflows" / "scripts",
+            Path("claude") / "workflow-scripts",
+            "claude-workflow-script",
+        )
     scan_paths = [
-        parent,
+        *([parent] if parent else []),
         *subagents,
         *(copy.source for copy in task_outputs),
         *(copy.source for copy in workflow_artifacts),
         *(copy.source for copy in workflow_scripts),
+        *codex_rollouts,
     ]
     text = transcript_text(scan_paths)
     parent_completeness = detect_parent_completeness(session_id, args)
@@ -1969,18 +2002,21 @@ def session_snapshot(args: argparse.Namespace) -> None:
     if extra_claude_parents:
         text = "\n".join([text, transcript_text(extra_claude_parents)])
 
-    parent_name = f"parent-{session_id[:8]}"
-    if parent_completeness == "partial":
-        parent_name += "-PARTIAL"
-    copies = [
-        SnapshotCopy(
-            parent,
-            Path("claude") / f"{parent_name}.jsonl",
-            "claude-parent",
-            parent_completeness,
+    copies: list[SnapshotCopy] = []
+    if parent:
+        parent_name = f"parent-{session_id[:8]}"
+        if parent_completeness == "partial":
+            parent_name += "-PARTIAL"
+        copies.append(
+            SnapshotCopy(
+                parent,
+                Path("claude") / f"{parent_name}.jsonl",
+                "claude-parent",
+                parent_completeness,
+            )
         )
-    ]
     for path in subagents:
+        assert subagents_dir is not None
         relative = path.relative_to(subagents_dir)
         destination = (
             Path("claude") / path.name
@@ -1999,15 +2035,21 @@ def session_snapshot(args: argparse.Namespace) -> None:
         )
         for path in extra_claude_parents
     )
+    codex_rollouts = find_codex_rollouts(
+        args.codex_root.expanduser(),
+        text,
+        explicit_threads,
+        args.codex_rollout or [],
+        args.grep or [],
+    )
     copies.extend(
-        SnapshotCopy(path, Path("codex") / path.name, "codex-rollout")
-        for path in find_codex_rollouts(
-            args.codex_root.expanduser(),
-            text,
-            args.codex_thread or [],
-            args.codex_rollout or [],
-            args.grep or [],
+        SnapshotCopy(
+            path,
+            Path("codex") / path.name,
+            "codex-rollout",
+            parent_completeness if args.codex_only else "complete",
         )
+        for path in codex_rollouts
     )
     copies.extend(
         SnapshotCopy(path, Path("plugin-logs") / path.name, "plugin-job")
@@ -2032,12 +2074,13 @@ def session_snapshot(args: argparse.Namespace) -> None:
         slug,
         parent_completeness,
         entries,
+        "codex-only" if args.codex_only else "claude-parent",
     )
 
     print(f"Snapshot: {destination_root}")
     print(f"Manifest: {manifest_path}")
     print(f"Copied: {len(entries)}")
-    print(f"Parent: {parent_completeness}")
+    print(f"Transcript: {parent_completeness}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2229,12 +2272,17 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot.add_argument(
         "--partial",
         action="store_true",
-        help="mark the parent transcript as partial even if it is not the current session",
+        help="mark the session transcript as partial even if it is not current",
     )
     snapshot.add_argument(
         "--complete",
         action="store_true",
-        help="mark the parent transcript as complete even if it is the current session",
+        help="mark the session transcript as complete even if it is current",
+    )
+    snapshot.add_argument(
+        "--codex-only",
+        action="store_true",
+        help="snapshot a Codex-only thread without requiring a Claude parent transcript",
     )
     snapshot.add_argument(
         "--codex-thread",

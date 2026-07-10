@@ -237,14 +237,17 @@ oaw session snapshot 73550790-5af5-4efc-828c-72e6e1053d8f \
   --codex-thread 019f3e73-029f-7ea2-9772-fdfa1e25fb8f \
   --codex-thread 019f3e8d-8307-7052-b367-57e78f3316ae \
   --claude-session 019f3ef0-1111-7222-8333-c26aa5d38893
+
+# Codex-only session (no Claude parent transcript)
+oaw session snapshot "$CODEX_THREAD_ID" --codex-only --partial --slug codex-dogfood
 ```
 
 - The command writes to `Agents/Retrospectives/attachments/<date>-<slug>/` by default.
-- It copies the Claude parent transcript, nested Claude subagent transcripts, task outputs under `tasks/`, workflow run artifacts under `subagents/workflows/`, persisted workflow scripts under `workflows/scripts/`, discoverable Codex rollouts, referenced plugin job logs, and fork parents referenced by explicit Claude/fork markers or `--claude-session`.
+- By default it copies the Claude parent transcript, nested Claude subagent transcripts, task outputs under `tasks/`, workflow run artifacts under `subagents/workflows/`, persisted workflow scripts under `workflows/scripts/`, discoverable Codex rollouts, referenced plugin job logs, and fork parents referenced by explicit Claude/fork markers or `--claude-session`. Use `--codex-only` when no Claude parent exists; the positional Codex thread's own rollout is always required.
 - Fork parents are auto-discovered from `CLAUDE_SESSION_ID`, `claude-session`, `fork ... session`, and `btw-session` references in copied artifacts. Use `--claude-session <id>` for parents those artifacts do not reference clearly; repeat it for multiple fork parents.
 - Codex rollouts are discovered by referenced thread IDs or explicit `--codex-thread <id>` flags. Use `--codex-rollout <filename-or-path>` for an exact rollout. Use `--grep <literal>` only when the literal identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags.
-- It writes `manifest.json` with each source path, destination path, copy time, size, hash, category, and completeness. Use the manifest instead of hand-writing provenance.
-- Use `--partial` while the parent session is still live. Re-run the same command later to refresh the parent transcript, preserve nested subagents, pick up new artifacts, and remove stale files listed in the previous manifest.
+- It writes `manifest.json` with each source path, destination path, copy time, size, hash, category, mode, and completeness. Use the manifest instead of hand-writing provenance.
+- Use `--partial` while the session is still live. Re-run the same command later to refresh the transcript, preserve nested artifacts, pick up new artifacts, and remove stale files listed in the previous manifest.
 - For real vault snapshots, use the installed `oaw session snapshot ...` command. Reserve `python bin/oaw session snapshot ...` for repo-development checks, temp-vault fixtures, or deliberately testing the checkout copy.
 
 ## Rules
