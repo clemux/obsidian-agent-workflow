@@ -2,6 +2,10 @@
 
 Local-first tooling for resolving Obsidian reference IDs and recording agent work on project task notes.
 
+## Disclaimer
+
+This project has been written entirely by AI. The repository owner has not read or reviewed any of the code. Use it at your own risk.
+
 ## Warning
 
 This repository is tooling tailored for a local Obsidian and agent workflow. It is not intended as reusable software, and it probably does not make sense to install or use as-is. Some paths are machine-specific legacy debt; prefer `OAW_VAULT` for any new automation.
@@ -163,6 +167,117 @@ Use installed `oaw ...` commands for operational vault writes such as task lifec
 Test or demo runs can override the artifact roots with `--codex-root` and `--claude-root`. Lookup and snapshot commands share the `OAW_CODEX_SESSIONS_ROOT` and `OAW_CLAUDE_PROJECTS_ROOT` environment overrides; their fallback roots are `~/.codex/sessions` and `~/.claude/projects`.
 
 ## Examples from agent sessions
+
+### From the 2026-07-10 integration session
+
+The following commands and outputs come from the session that reviewed, fixed, and integrated the overnight branches. Because the checkout itself was changing, the session deliberately ran `python bin/oaw ...` to dogfood the active version before it reached `main`.
+
+Trace the current Codex thread back to every vault note that recorded it:
+
+```bash
+python bin/oaw session lookup "$CODEX_THREAD_ID"
+```
+
+```text
+Session: <codex-thread-id>
+Vault matches:
+- Projects/Obsidian Agent Workflow/Tasks/Overnight branch review and merge.md | id: OAW-TSK-overnight-branch-review
+- Projects/Obsidian Agent Workflow/Tasks/Session artifact snapshot command.md | id: OAW-TSK-session-snapshot
+```
+
+Inspect task metadata without opening the full note body:
+
+```bash
+python bin/oaw resolve --meta OAW-TSK-overnight-branch-review
+```
+
+```text
+type: task
+status: done
+project: Obsidian Agent Workflow
+id: OAW-TSK-overnight-branch-review
+aliases:
+  - OAW-TSK-overnight-branch-review
+priority: 1
+effort: M
+```
+
+Check whether two notes already link to each other before applying an append-only repair:
+
+```bash
+python bin/oaw link check \
+  OAW-TSK-overnight-branch-review \
+  OAW-TSK-session-snapshot
+```
+
+```text
+Left: Projects/Obsidian Agent Workflow/Tasks/Overnight branch review and merge.md | id: OAW-TSK-overnight-branch-review
+Right: Projects/Obsidian Agent Workflow/Tasks/Session artifact snapshot command.md | id: OAW-TSK-session-snapshot
+Left links right: no
+Right links left: no
+```
+
+Refuse an outbound export when the source note has not explicitly opted in:
+
+```bash
+python bin/oaw export note OAW-TSK-export-notes-to-work \
+  --target work \
+  --output-root /tmp/oaw-dogfood-export
+```
+
+```text
+oaw: export requires export-scope: work in note frontmatter (legacy safe_for_export: true plus export_target: work is also accepted)
+```
+
+Snapshot a completed multi-agent review into a manifest-backed bundle. The real session UUID was redacted here; the run copied 81 parent, workflow, and rollout artifacts:
+
+```bash
+python bin/oaw session snapshot <claude-session-id> \
+  --slug overnight-review-dogfood \
+  --output-root /tmp/oaw-dogfood-snapshot \
+  --complete
+```
+
+```text
+Snapshot: /tmp/oaw-dogfood-snapshot/2026-07-09-overnight-review-dogfood
+Manifest: /tmp/oaw-dogfood-snapshot/2026-07-09-overnight-review-dogfood/manifest.json
+Copied: 81
+Parent: complete
+```
+
+Record an integration checkpoint without changing task status or moving its board card:
+
+```bash
+python bin/oaw task note OAW-TSK-overnight-branch-review \
+  --note "Second integration batch ready." \
+  --checks "python -m unittest (52 tests OK)"
+```
+
+```text
+Updated: Projects/Obsidian Agent Workflow/Tasks/Overnight branch review and merge.md
+Status: active
+Board: unchanged
+```
+
+Complete the task and then move its cross-project priority card to Done:
+
+```bash
+python bin/oaw task complete OAW-TSK-overnight-branch-review \
+  --note "Merged and verified the reviewed overnight branches." \
+  --checks "python -m unittest (59 tests OK)"
+python bin/oaw board done OAW-TSK-overnight-branch-review
+```
+
+```text
+Updated: Projects/Obsidian Agent Workflow/Tasks/Overnight branch review and merge.md
+Status: done
+Board: updated
+Board: Projects/Next steps.md
+Column: Done
+Matched: OAW-TSK-overnight-branch-review
+```
+
+### Earlier examples
 
 Recent Codex sessions used `oaw` for a few recurring jobs that are hard to do reliably with plain text search.
 
