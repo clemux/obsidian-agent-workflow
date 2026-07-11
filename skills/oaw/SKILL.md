@@ -111,6 +111,7 @@ oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "pyt
 - `backlog`, `promote`, `start`, and `complete` append a dated entry under `## Agent sessions` and move the task's card to the matching column when the project has a board (`Projects/<Project>/Board.md`) — creating the card and column heading if missing. Cards keep the `- [ ]` marker in every column; the column heading, not the checkbox, reflects status.
 - The command's output (`Updated:` / `Status:` / `Board:`) confirms the write. To report resulting state, rely on that output plus `oaw resolve --meta` if needed — do not re-read the whole note with `--full`.
 - The session ID is read automatically from the harness environment; the first of `CODEX_THREAD_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `OPENCODE_SESSION_ID`, `GEMINI_SESSION_ID` that is set wins. `oaw` never invents one: with no session variable set, the command fails with a clear error (so there is no need to check the variables beforehand). Pass `--allow-missing-session-id` only when the user explicitly accepts an untraceable entry.
+- With a real harness ID, lifecycle and `task note` writes append it as a quoted string to a deduplicated `session-ids` frontmatter block list, preserving existing entries, comments, and any legacy scalar `session-id`. Unsupported inline, mapping, or ambiguous non-string `session-ids` shapes fail before the note is written. The explicit missing-ID path writes only the body trace; it does not add a synthetic list value.
 
 Project boards should use the column order `Backlog` → `Todo` → `Active` → `Done`. Keep `Todo` for near-term chosen work. Put unscheduled known work in `Backlog`, and when a session decides what should happen next, run `oaw task promote ...` so the board reflects the decision.
 
@@ -142,7 +143,7 @@ oaw retro create \
   --summary "Captured the resolver workflow and follow-ups."
 ```
 
-`oaw note session` and `oaw retro create` require a real session ID from a supported harness environment variable unless the user explicitly accepts `--allow-missing-session-id`. `oaw note observe` does not require a session ID.
+`oaw note session` and `oaw retro create` require a real session ID from a supported harness environment variable unless the user explicitly accepts `--allow-missing-session-id`. `note session` maintains the same deduplicated `session-ids` frontmatter list as task writes; retrospective creation initializes that list. `oaw note observe` does not require a session ID.
 Use `note observe --section` for a heading other than `Observations`. `retro create`
 also accepts `--date` and `--id`; replacing an existing generated note requires
 the explicit `--force` flag.

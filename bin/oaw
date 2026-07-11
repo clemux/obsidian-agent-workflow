@@ -345,6 +345,77 @@ def set_frontmatter_scalar(text: str, key: str, value: str) -> str:
     return "".join(lines)
 
 
+def parse_yaml_string_list_item(raw: str, key: str) -> str:
+    value = raw.strip()
+    if value.startswith('"'):
+        try:
+            parsed, end = json.JSONDecoder().raw_decode(value)
+        except json.JSONDecodeError as exc:
+            raise OawError(f"{key} contains an invalid quoted string") from exc
+        remainder = value[end:].strip()
+        if not isinstance(parsed, str) or (remainder and not remainder.startswith("#")):
+            raise OawError(f"{key} must contain only string list items")
+        return parsed
+    if value.startswith("'"):
+        match = re.fullmatch(r"'((?:[^']|'')*)'\s*(?:#.*)?", value)
+        if not match:
+            raise OawError(f"{key} contains an invalid quoted string")
+        return match.group(1).replace("''", "'")
+
+    value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+    ambiguous = re.fullmatch(
+        r"(?i:true|false|null|yes|no|on|off|~|[-+]?\d+(?:\.\d+)?|\d{4}-\d{2}-\d{2})",
+        value,
+    )
+    if (
+        not value
+        or value.startswith(("[", "{", "&", "*", "!", "|", ">", "@", "`"))
+        or re.search(r":\s", value)
+        or ambiguous
+    ):
+        raise OawError(f"{key} must contain only unambiguous string list items")
+    return value
+
+
+def append_frontmatter_list_value(text: str, key: str, value: str) -> str:
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise OawError("note has no YAML frontmatter")
+    end = next((idx for idx in range(1, len(lines)) if lines[idx].strip() == "---"), None)
+    if end is None:
+        raise OawError("note frontmatter is not closed")
+
+    pattern = re.compile(rf"^{re.escape(key)}\s*:")
+    key_idx = next((idx for idx in range(1, end) if pattern.match(lines[idx])), None)
+    if key_idx is None:
+        lines[end:end] = [f"{key}:\n", f"  - {json.dumps(value, ensure_ascii=False)}\n"]
+        return "".join(lines)
+
+    _, inline_value = lines[key_idx].split(":", 1)
+    if inline_value.strip():
+        raise OawError(
+            f"{key} must use a YAML block list before OAW can append safely"
+        )
+
+    block_end = key_idx + 1
+    while block_end < end and lines[block_end].startswith((" ", "\t")):
+        block_end += 1
+    existing: list[str] = []
+    for line in lines[key_idx + 1 : block_end]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        item = re.match(r"^\s+-\s+(.+?)\r?\n?$", line)
+        if not item:
+            raise OawError(
+                f"{key} must be a flat YAML block list before OAW can append safely"
+            )
+        existing.append(parse_yaml_string_list_item(item.group(1), key))
+    if value in existing:
+        return text
+    lines.insert(block_end, f"  - {json.dumps(value, ensure_ascii=False)}\n")
+    return "".join(lines)
+
+
 def detect_session(allow_missing: bool) -> tuple[str, str]:
     for provider, env_name in SESSION_ENV:
         value = os.environ.get(env_name)
@@ -355,6 +426,13 @@ def detect_session(allow_missing: bool) -> tuple[str, str]:
     raise OawError(
         "no stable session ID found; set CODEX_THREAD_ID or pass --allow-missing-session-id"
     )
+
+
+def append_session_id_frontmatter(text: str, session_ref: str) -> str:
+    name, separator, value = session_ref.partition("=")
+    if not separator or (name == "session_id" and value == "unavailable"):
+        return text
+    return append_frontmatter_list_value(text, "session-ids", value)
 
 
 def append_session_entry(
@@ -484,6 +562,7 @@ def update_note_session(
     match = resolve_id(raw_id, root)
     provider, session_ref = detect_session(allow_missing)
     text = match.path.read_text(encoding="utf-8")
+    text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
     match.path.write_text(text, encoding="utf-8")
     print(f"Updated: {match.relpath}")
@@ -674,6 +753,7 @@ def update_task(raw_id: str, status: str, note: str, checks: str | None, allow_m
     provider, session_ref = detect_session(allow_missing)
     text = match.path.read_text(encoding="utf-8")
     text = set_frontmatter_scalar(text, "status", status)
+    text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
     match.path.write_text(text, encoding="utf-8")
     refreshed = resolve_id(raw_id, root)
@@ -696,6 +776,7 @@ def append_task_note(raw_id: str, note: str, checks: str | None, allow_missing: 
         raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
     provider, session_ref = detect_session(allow_missing)
     text = match.path.read_text(encoding="utf-8")
+    text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
     match.path.write_text(text, encoding="utf-8")
     refreshed = resolve_id(raw_id, root)
