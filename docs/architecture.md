@@ -29,7 +29,8 @@ src/oaw/
     __init__.py      # version only
     errors.py        # OawError
     notes.py         # note model: split/read/write, atomic writes
-    frontmatter.py   # parse/serialize + round-trip YAML behind one interface
+    frontmatter.py   # parse/serialize, raw pre-filter, frontmatter-only reads;
+                     # round-trip YAML behind one interface
     resolver.py      # vault walk, id/alias matching, project aliases, NoteMatch
     links.py         # wikilink parse, durable links, link commands
     lifecycle.py     # task create/status transitions/notes
@@ -45,25 +46,53 @@ tests/
 ```
 
 Reserved seams (do not build yet, per the agent-run planning constraints on
-the task note): `runs.py` for the agent-run registry/lifecycle, with task
-identity, run identity, and session provenance kept distinct, and
-transaction/journal boundaries around registry + task + board mutations.
+the task note). Two distinct modules, mirroring the two extraction seams the
+constraints require, both behind the existing task, resolver, and board
+contracts:
+
+- `run_registry.py` — the agent-run registry: run identity and session
+  provenance, kept distinct from task identity.
+- `run_lifecycle.py` — run lifecycle transitions and their policy rules.
+
+Shared contract for both: a `TaskRef` value — the canonical frontmatter id
+plus the vault-relative Tasks path it resolves to. Every run references a
+`TaskRef`; a run never creates a second task note. Lifecycle interfaces must
+support the three execution modes (human, agent, hybrid: missing execution
+becomes agent only at agent start; explicit human execution refuses agent
+lifecycle writes) and multiple concurrently active provider/session runs per
+task. Registry + task + board mutations sit inside transaction/journal
+boundaries with rollback or a recoverable journal; partial writes are
+rejected or recovered, never silently kept.
 
 ## Dependency rules
 
-- `cli.py` imports command modules; command modules import shared layers
-  (`resolver`, `notes`, `frontmatter`, `boards`, `sessions`); shared layers
-  import only `errors` and the stdlib.
-- No command module imports another command module. Cross-cutting behavior
-  (e.g. lifecycle writes appending session traces) lives in the shared layer.
-- Only `frontmatter.py` may import the YAML library. Everything else uses its
-  interface, so the permitted round-trip dependency (`ruamel.yaml`) stays
-  swappable and the current hand-rolled parser can be kept as the fallback
-  during migration.
-- `resolver.py` owns all vault scanning. Performance work (pre-filtering,
-  frontmatter-only reads, a future stat-validated id index) lands there
-  without touching command semantics. Write operations accept an existing
-  `NoteMatch` so a lifecycle command resolves once, not twice.
+Explicit acyclic layer graph — imports flow strictly downward:
+
+```
+cli.py
+  → command domains: lifecycle, links, snapshot, exports, ingest, retro
+      → shared services: resolver, boards, sessions
+          → note model: notes, frontmatter
+              → errors (+ stdlib)
+```
+
+- `cli.py` imports command domains only. Command domains import the shared
+  services and the note model; they never import each other. Cross-cutting
+  behavior (e.g. lifecycle writes appending session traces) lives in a shared
+  layer.
+- Shared services (`resolver`, `boards`, `sessions`) may import `notes` and
+  `frontmatter` — `resolver` in particular consumes frontmatter parsing and
+  pre-filtering. The note model imports only `errors` and the stdlib.
+- The YAML-library exception is confined to `frontmatter.py`: it alone may
+  import the YAML library. Everything else uses its interface, so the
+  permitted round-trip dependency (`ruamel.yaml`) stays swappable and the
+  current hand-rolled parser can be kept as the fallback during migration.
+- `resolver.py` owns vault traversal, id/alias matching, and any future
+  stat-validated id index. `frontmatter.py` owns the cheap raw-frontmatter
+  pre-filter and frontmatter-only parsing operations (per the performance
+  findings, that is where they belong); resolver calls them during the walk.
+  Write operations accept an existing `NoteMatch` so a lifecycle command
+  resolves once, not twice.
 
 ## Packaging
 
@@ -73,8 +102,13 @@ transaction/journal boundaries around registry + task + board mutations.
   frontmatter-swap step (guardrail: preserves comments, ordering, unknown
   keys, scalar types — verified by round-trip contract tests).
 - The installed CLI remains a snapshot (`uv tool install --reinstall .` after
-  merges). Installed-parity verification moves from single-file hash to
-  package version + `oaw --version` (new flag) once the src layout lands.
+  merges). Installed-parity verification generalizes the current single-file
+  hash to the whole package: compare a manifest of content hashes for every
+  module under `src/oaw/` against the corresponding installed package modules
+  (`oaw parity-check` or an equivalent dev script). Package version +
+  `oaw --version` (new flag) is an additional cheap signal, not the
+  verification itself — versions rarely change per commit, so version
+  equality cannot prove the installed snapshot matches the checkout.
 
 ## Tooling
 
@@ -109,8 +143,15 @@ Target:
    `Board:`, error phrasing). These are the golden tests that gate every
    extraction step.
 4. **Perf smoke** (optional, marked, excluded by default): resolve on a
-   generated 5k-note fixture with a generous ceiling, so scan regressions
-   surface before hitting a real vault.
+   generated 5k-note fixture, gated relative to a measured baseline on that
+   same fixture (see step 2), so scan regressions surface before hitting a
+   real vault.
+5. **Reserved contract suites** (land with the reserved run seams, specified
+   now so the seams stay honest): run-registry, run-lifecycle, and
+   transaction/journal contract tests, independent of argparse — canonical
+   `TaskRef` scope, stale runs, multiple concurrent provider/session runs,
+   execution-mode policy (human/agent/hybrid), and rejection or recovery of
+   partial registry/task/board writes.
 
 ## Incremental extraction order
 
@@ -123,9 +164,15 @@ Each step: suite green, committed, behavior identical unless stated.
    `split_note`, `parse_frontmatter`, `set_frontmatter_scalar`,
    `append_frontmatter_list_value`; add unit tests. Hand-rolled parser kept.
 2. **`resolver`**: move the scan/match code; then the performance ladder from
-   `OAW-TSK-cli-performance` — pre-filter before parse, frontmatter-only
-   reads, single-resolve writes. Gate: resolve < 150 ms on the perf fixture;
-   lifecycle writes scan once.
+   `OAW-TSK-cli-performance` — frontmatter-layer pre-filter before parse,
+   frontmatter-only reads, single-resolve writes. Gate: first benchmark the
+   extracted-but-unoptimized resolver on the generated 5k-note fixture to
+   establish a measured baseline, then gate each ladder step relative to that
+   baseline (each step must improve or hold it; the final gate is a
+   fixed-percentage regression bound on the best measured result). The
+   real-vault figures (387 ms resolve over 6,189 notes, ~270 ms in
+   frontmatter parsing) remain observational data, not a threshold on the
+   fixture, since the workloads differ. Lifecycle writes must scan once.
 3. **`boards`**: unify the two board implementations behind one column engine
    (contract tests pin both card formats first).
 4. **`lifecycle`**: task create/transitions/notes on top of 1–3.
@@ -134,8 +181,9 @@ Each step: suite green, committed, behavior identical unless stated.
 6. **Frontmatter swap**: introduce `ruamel.yaml` behind the `frontmatter`
    interface with round-trip contract tests (comments, ordering, unknown
    keys, quoting preserved). Unlocks safe writes the hand parser refuses.
-7. **Reserved**: `runs.py` seams per the agent-run constraints — separate
-   proposal once task contracts are approved.
+7. **Reserved**: `run_registry.py` and `run_lifecycle.py` seams per the
+   agent-run constraints (see "Reserved seams" above) — separate proposal
+   once task contracts are approved.
 
 ## Non-goals
 
