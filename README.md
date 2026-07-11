@@ -424,7 +424,7 @@ then create the recovery worktree from an explicitly clean ref:
 
 ```bash
 git switch -c preserved-dirty-state
-git add -- <confirmed-dirty-paths>
+git add -- path/to/confirmed-file
 git commit -m "chore: preserve interrupted session state"
 git switch main
 git gtr new recovered-review --from main --no-fetch --yes
@@ -447,7 +447,7 @@ that really ran. Preserve the session and verify or append the durable SR link
 with installed operational commands rather than embedding transcript content:
 
 ```bash
-oaw session snapshot <session-id> --partial --slug aborted-review-recovery
+oaw session snapshot "$SESSION_ID" --partial --slug aborted-review-recovery
 oaw link check OAW-TSK-session-snapshot SR-TSK-oaw-aborted-review-recovery-retro
 oaw link ensure-bidirectional \
   OAW-TSK-session-snapshot SR-TSK-oaw-aborted-review-recovery-retro \
