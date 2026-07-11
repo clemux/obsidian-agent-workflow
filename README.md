@@ -418,11 +418,16 @@ verification phase ran. An interrupted worker can also consume substantial
 tokens without producing journaled results; report that absence as uncertainty,
 not success.
 
-Keep unrelated dirty state out of the recovery branch. After identifying which
-changes belong together, isolate them with the repository's worktree workflow:
+Keep unrelated dirty state out of the recovery branch. After confirming who
+owns each changed path, preserve those edits on their own branch and commit,
+then create the recovery worktree from an explicitly clean ref:
 
 ```bash
-git gtr new recovered-review --from-current --no-fetch --yes
+git switch -c preserved-dirty-state
+git add -- <confirmed-dirty-paths>
+git commit -m "chore: preserve interrupted session state"
+git switch main
+git gtr new recovered-review --from main --no-fetch --yes
 cd "$(git gtr go recovered-review)"
 git status --short
 ```
@@ -432,16 +437,22 @@ the checkpoint actually reached:
 
 ```bash
 python bin/oaw resolve --full OAW-TSK-session-snapshot
-python bin/oaw task note OAW-TSK-session-snapshot \
+oaw task note OAW-TSK-session-snapshot \
   --note "Recovered the review evidence; merge and verification remain pending." \
   --checks "git status --short; inspected workflow report and journal"
 ```
 
 After independent review and verification, use `task complete` with the checks
-that really ran. Preserve the session for retrospective work with `session
-snapshot`, and add a durable task link to the Session Retrospectives candidate
-rather than embedding private transcript content. This recovery sequence is the
-public OAW counterpart to `SR-TSK-oaw-aborted-review-recovery-retro`.
+that really ran. Preserve the session and verify or append the durable SR link
+with installed operational commands rather than embedding transcript content:
+
+```bash
+oaw session snapshot <session-id> --partial --slug aborted-review-recovery
+oaw link check OAW-TSK-session-snapshot SR-TSK-oaw-aborted-review-recovery-retro
+oaw link ensure-bidirectional \
+  OAW-TSK-session-snapshot SR-TSK-oaw-aborted-review-recovery-retro \
+  --section Related --write
+```
 
 </details>
 
