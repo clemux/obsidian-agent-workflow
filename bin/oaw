@@ -786,6 +786,112 @@ def append_task_note(raw_id: str, note: str, checks: str | None, allow_missing: 
     print("Board: unchanged")
 
 
+def resolve_project_root(raw: str, root: Path) -> tuple[Path, str | None]:
+    """Resolve a project alias or folder name to (project folder, alias prefix)."""
+    target = strip_obs_prefix(raw.strip())
+    if not target:
+        raise OawError("task create requires a non-empty --project")
+    matches = project_alias_matches(target, root)
+    if len(matches) > 1:
+        paths = "\n".join(f"  {match.relpath}" for match in matches)
+        raise OawError(f"project alias '{target}' is ambiguous:\n{paths}")
+    if matches:
+        return matches[0].path.parent, target
+    candidate = root / "Projects" / target
+    if candidate.is_dir():
+        prefix = None
+        index = candidate / "Index.md"
+        if index.exists():
+            _, data = read_frontmatter_only(index)
+            index_id = str(data.get("id") or "")
+            if index_id.endswith("-index"):
+                prefix = index_id.removesuffix("-index")
+        return candidate, prefix
+    raise OawError(f"project not found: {raw}")
+
+
+def create_task(args: argparse.Namespace) -> None:
+    root = vault_root()
+    title = args.title.strip()
+    if not title:
+        raise OawError("task create requires a non-empty --title")
+    if "/" in title or title.startswith("."):
+        raise OawError("task title must not contain '/' or start with '.'")
+    project_root, alias = resolve_project_root(args.project, root)
+    provider, session_ref = detect_session(args.allow_missing_session_id)
+    if args.id is not None:
+        note_id = args.id.strip()
+        if not note_id:
+            raise OawError("task create requires a non-empty --id")
+    elif alias:
+        note_id = f"{alias}-TSK-{slugify(title)}"
+    else:
+        raise OawError(
+            "cannot derive a task ID: project index has no '<ALIAS>-index' id; pass --id"
+        )
+    path = project_root / "Tasks" / f"{title}.md"
+    relpath = path.relative_to(root)
+    conflicts = [
+        match
+        for candidate in iter_markdown(root)
+        if (match := note_match(candidate, root, note_id))
+    ]
+    if conflicts:
+        paths = "\n".join(f"  {match.relpath} ({match.matched_by})" for match in conflicts)
+        raise OawError(f"id '{note_id}' is already in use:\n{paths}")
+    if path.exists():
+        raise OawError(f"task note already exists: {relpath.as_posix()}")
+    today = _dt.date.today().isoformat()
+    project_slug = slugify(project_root.name)
+    lines = [
+        "---",
+        "type: task",
+        f"project: {project_slug}",
+        f"status: {args.status}",
+        f"created: {today}",
+    ]
+    if args.priority is not None:
+        lines.append(f"priority: {args.priority}")
+    if args.effort:
+        lines.append(f"effort: {args.effort}")
+    lines += [
+        f"id: {note_id}",
+        "aliases:",
+        f"  - {note_id}",
+        "tags:",
+        "  - projects",
+        f"  - {project_slug}",
+        "  - task",
+    ]
+    for tag in args.tag or []:
+        cleaned = tag.strip()
+        if cleaned:
+            lines.append(f"  - {cleaned}")
+    session_id = session_ref.split("=", 1)[1] if "=" in session_ref else ""
+    if session_id and session_id != "unavailable":
+        lines += ["session-ids:", f"  - {session_id}"]
+    lines += ["---", "", f"# {title}", "", "## Problem", ""]
+    lines.append(args.note.strip() if args.note else "_To be defined._")
+    lines += ["", "## Related", ""]
+    index = project_root / "Index.md"
+    if alias and index.exists():
+        index_rel = index.relative_to(root).with_suffix("").as_posix()
+        lines.append(f"- [[{index_rel}|{alias}-index]]")
+        lines.append("")
+    lines += [
+        "## Agent sessions",
+        "",
+        f"- {today} - {provider} - `{session_ref}` - Created task note.",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    moved = move_board_card(project_root, path, title, note_id, args.status)
+    print(f"Created: {relpath.as_posix()}")
+    print(f"ID: {note_id}")
+    print(f"Status: {args.status}")
+    print(f"Board: {'updated' if moved else 'not found'}")
+
+
 def note_type_matches(data: dict[str, object], note_type: str) -> bool:
     value = data.get("type")
     return isinstance(value, str) and value == note_type
@@ -2241,6 +2347,17 @@ def build_parser() -> argparse.ArgumentParser:
     task_note.add_argument("--checks")
     task_note.add_argument("--allow-missing-session-id", action="store_true")
 
+    task_create = task_sub.add_parser("create", help="create a new project task note")
+    task_create.add_argument("--project", required=True, help="project alias (obs:OAW) or folder name under Projects/")
+    task_create.add_argument("--title", required=True)
+    task_create.add_argument("--id", help="task ID; derived as <ALIAS>-TSK-<slug> when omitted")
+    task_create.add_argument("--status", choices=("backlog", "todo"), default="backlog")
+    task_create.add_argument("--priority", type=int, choices=(1, 2, 3))
+    task_create.add_argument("--effort", choices=("S", "M", "L"))
+    task_create.add_argument("--note", help="initial problem statement")
+    task_create.add_argument("--tag", action="append", help="extra tag; repeatable")
+    task_create.add_argument("--allow-missing-session-id", action="store_true")
+
     note = sub.add_parser("note", help="append session traces or observations to resolved notes")
     note_sub = note.add_subparsers(dest="note_command", required=True)
 
@@ -2468,6 +2585,8 @@ def main(argv: list[str] | None = None) -> int:
                     args.checks,
                     args.allow_missing_session_id,
                 )
+            elif args.task_command == "create":
+                create_task(args)
             else:
                 update_task(
                     args.id,

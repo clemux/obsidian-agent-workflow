@@ -1905,6 +1905,161 @@ aliases:
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("matched multiple Codex rollouts", proc.stderr)
 
+    def test_task_create_defaults_to_backlog_with_derived_id(self):
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Improve resolver errors",
+            "--note",
+            "Error messages should list candidates.",
+            "--priority",
+            "2",
+            "--effort",
+            "M",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Created: Projects/Obsidian Agent Workflow/Tasks/Improve resolver errors.md", proc.stdout)
+        self.assertIn("ID: OAW-TSK-improve-resolver-errors", proc.stdout)
+        self.assertIn("Status: backlog", proc.stdout)
+        self.assertIn("Board: updated", proc.stdout)
+        note = (
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Improve resolver errors.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("type: task", note)
+        self.assertIn("project: obsidian-agent-workflow", note)
+        self.assertIn("status: backlog", note)
+        self.assertIn("priority: 2", note)
+        self.assertIn("effort: M", note)
+        self.assertIn("id: OAW-TSK-improve-resolver-errors", note)
+        self.assertIn("session-ids:\n  - test-thread", note)
+        self.assertIn("Error messages should list candidates.", note)
+        self.assertIn("- [[Projects/Obsidian Agent Workflow/Index|OAW-index]]", note)
+        self.assertIn("## Agent sessions", note)
+        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("## Backlog", board)
+        self.assertIn(
+            "- [ ] [[Tasks/Improve resolver errors|Improve resolver errors]] - OAW-TSK-improve-resolver-errors",
+            board,
+        )
+        resolved = self.run_oaw("resolve", "--json", "OAW-TSK-improve-resolver-errors")
+        self.assertEqual(resolved.returncode, 0, resolved.stderr)
+        listing = self.run_oaw("list", "--project", "Obsidian Agent Workflow")
+        self.assertIn("OAW-TSK-improve-resolver-errors", listing.stdout)
+
+    def test_task_create_todo_places_card_in_todo_column(self):
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "Obsidian Agent Workflow",
+            "--title",
+            "Todo task",
+            "--status",
+            "todo",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("ID: OAW-TSK-todo-task", proc.stdout)
+        board_lines = (
+            self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        ).read_text(encoding="utf-8").splitlines()
+        todo_idx = board_lines.index("## Todo")
+        done_idx = board_lines.index("## Done")
+        card_idx = next(
+            idx for idx, line in enumerate(board_lines) if "OAW-TSK-todo-task" in line
+        )
+        self.assertTrue(todo_idx < card_idx < done_idx)
+
+    def test_task_create_duplicate_id_fails_without_writes(self):
+        before_board = (
+            self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        ).read_text(encoding="utf-8")
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Fresh title",
+            "--id",
+            "OAW-TSK-cli",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("already in use", proc.stderr)
+        self.assertFalse(
+            (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Fresh title.md").exists()
+        )
+        after_board = (
+            self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(before_board, after_board)
+
+    def test_task_create_existing_path_fails(self):
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Resolver CLI",
+            "--id",
+            "OAW-TSK-resolver-duplicate",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("task note already exists", proc.stderr)
+
+    def test_task_create_unknown_project_fails(self):
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "No Such Project",
+            "--title",
+            "Anything",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("project not found", proc.stderr)
+
+    def test_task_create_requires_session_id(self):
+        env = {
+            "CODEX_THREAD_ID": "",
+            "CLAUDE_SESSION_ID": "",
+            "CLAUDE_CODE_SESSION_ID": "",
+            "OPENCODE_SESSION_ID": "",
+            "GEMINI_SESSION_ID": "",
+        }
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "No session task",
+            env=env,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("no stable session ID", proc.stderr)
+        allowed = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "No session task",
+            "--allow-missing-session-id",
+            env=env,
+        )
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        note = (
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/No session task.md"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("session-ids:", note)
+        self.assertIn("`session_id=unavailable`", note)
+
 
 if __name__ == "__main__":
     unittest.main()

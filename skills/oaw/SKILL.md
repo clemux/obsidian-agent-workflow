@@ -98,6 +98,7 @@ Safety is explicit by design: only frontmatter-marked files are ingested.
 Lifecycle writes apply only to task notes under `Projects/*/Tasks` (the CLI enforces this):
 
 ```bash
+oaw task create --project obs:OAW --title "Example task" --note "Initial problem statement."
 oaw task backlog OAW-TSK-cli --note "Parked until the dependency is ready."
 oaw task promote OAW-TSK-cli --note "Selected for the next session."
 oaw task start OAW-TSK-cli --note "Started resolver implementation."
@@ -105,6 +106,7 @@ oaw task complete OAW-TSK-cli --note "Finished and verified." --checks "python -
 oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "python -m unittest"
 ```
 
+- `create` makes a new task note under the project's `Tasks/` folder with standard frontmatter, a `Problem` section, a durable project-index link, an `## Agent sessions` trace, and a board card. `--project` takes a project alias (`obs:OAW`) or `Projects/` folder name; the ID defaults to `<ALIAS>-TSK-<slug>` (override with `--id`); status defaults to `backlog` (`--status todo` for selected work); optional `--priority 1|2|3`, `--effort S|M|L`, and repeatable `--tag`. Duplicate IDs or existing paths fail without writing. Use it instead of hand-writing task frontmatter.
 - `backlog` sets `status: backlog`; `promote` sets `status: todo`; `start` sets `status: active`; `complete` sets `status: done`.
 - `complete` requires `--checks` naming the verification actually run; do not fabricate checks.
 - `note` appends a dated entry under `## Agent sessions` without changing `status` or any board. Use it for delegation reviews, design notes, partial-progress records, and other trace entries on task notes in any status.

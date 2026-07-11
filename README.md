@@ -111,6 +111,16 @@ Lifecycle commands update task frontmatter, append an `## Agent sessions` trace,
 
 Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It uses the same session-id handling as `start` and `complete`, accepts optional `--checks`, and works on task notes regardless of current status.
 
+New task notes are created with `oaw task create` instead of hand-writing frontmatter:
+
+```bash
+oaw task create --project obs:OAW --title "Example task" \
+  --note "Initial problem statement." --priority 2 --effort M
+oaw task create --project "Obsidian Agent Workflow" --title "Chosen task" --status todo
+```
+
+`--project` accepts a project alias (`obs:OAW`) or a folder name under `Projects/`. The note is created under the project's `Tasks/` folder with standard frontmatter (`type`, `project`, `status`, `created`, `id`, `aliases`, tags, optional `priority`/`effort`), a `Problem` section from `--note`, a durable link to the project index, and an `## Agent sessions` trace. The task ID defaults to `<ALIAS>-TSK-<slug>` derived from the title; pass `--id` to override. Status is `backlog` by default with an explicit `--status todo` option, and the board card is registered through the same code as the lifecycle commands. Duplicate IDs and existing paths fail without writing anything. Session recording follows the lifecycle rules: a real harness ID is required unless `--allow-missing-session-id` is passed, and no ID is ever fabricated.
+
 ## Boards
 
 Project boards use the column convention `Backlog` -> `Todo` -> `Active` -> `Done`. `Todo` is for near-term chosen work; `Backlog` is for unscheduled known work. When a session decides what should happen next, promote the matching task so the board reflects that decision.
