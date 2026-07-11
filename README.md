@@ -400,6 +400,52 @@ Matched: OAW-TSK-overnight-branch-review
 </details>
 
 <details>
+<summary><strong>Recovering an interrupted review without overstating it</strong></summary>
+
+Start from durable task identity and read-only evidence, not the last agent's summary:
+
+```bash
+python bin/oaw resolve --full OAW-TSK-overnight-branch-review
+git status --short
+git log --oneline --decorate -12
+```
+
+Then inspect the preserved workflow report and journal at their documented
+placeholder paths, such as `/path/to/workflow/report.md` and
+`/path/to/workflow/journal.jsonl`. A killed workflow is not a completed
+workflow, and a completed review phase is not evidence that the merge or final
+verification phase ran. An interrupted worker can also consume substantial
+tokens without producing journaled results; report that absence as uncertainty,
+not success.
+
+Keep unrelated dirty state out of the recovery branch. After identifying which
+changes belong together, isolate them with the repository's worktree workflow:
+
+```bash
+git gtr new recovered-review --from-current --no-fetch --yes
+cd "$(git gtr go recovered-review)"
+git status --short
+```
+
+Resolve the existing related task before creating a new one, then record only
+the checkpoint actually reached:
+
+```bash
+python bin/oaw resolve --full OAW-TSK-session-snapshot
+python bin/oaw task note OAW-TSK-session-snapshot \
+  --note "Recovered the review evidence; merge and verification remain pending." \
+  --checks "git status --short; inspected workflow report and journal"
+```
+
+After independent review and verification, use `task complete` with the checks
+that really ran. Preserve the session for retrospective work with `session
+snapshot`, and add a durable task link to the Session Retrospectives candidate
+rather than embedding private transcript content. This recovery sequence is the
+public OAW counterpart to `SR-TSK-oaw-aborted-review-recovery-retro`.
+
+</details>
+
+<details>
 <summary><strong>Earlier examples</strong></summary>
 
 Recent Codex sessions used `oaw` for a few recurring jobs that are hard to do reliably with plain text search.
