@@ -345,6 +345,42 @@ def set_frontmatter_scalar(text: str, key: str, value: str) -> str:
     return "".join(lines)
 
 
+def yaml_list_scalar(value: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def append_frontmatter_list_value(text: str, key: str, value: str) -> str:
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise OawError("note has no YAML frontmatter")
+    end = next((idx for idx in range(1, len(lines)) if lines[idx].strip() == "---"), None)
+    if end is None:
+        raise OawError("note frontmatter is not closed")
+
+    data = parse_frontmatter("".join(lines[1:end]))
+    current = data.get(key, [])
+    values = [str(item) for item in current] if isinstance(current, list) else [str(current)]
+    values = [item for item in values if item]
+    if value in values:
+        return text
+    values.append(value)
+    replacement = [f"{key}:\n", *(f"  - {yaml_list_scalar(item)}\n" for item in values)]
+
+    pattern = re.compile(rf"^{re.escape(key)}\s*:")
+    key_idx = next((idx for idx in range(1, end) if pattern.match(lines[idx])), None)
+    if key_idx is None:
+        lines[end:end] = replacement
+        return "".join(lines)
+
+    block_end = key_idx + 1
+    while block_end < end and lines[block_end].startswith((" ", "\t")):
+        block_end += 1
+    lines[key_idx:block_end] = replacement
+    return "".join(lines)
+
+
 def detect_session(allow_missing: bool) -> tuple[str, str]:
     for provider, env_name in SESSION_ENV:
         value = os.environ.get(env_name)
@@ -355,6 +391,13 @@ def detect_session(allow_missing: bool) -> tuple[str, str]:
     raise OawError(
         "no stable session ID found; set CODEX_THREAD_ID or pass --allow-missing-session-id"
     )
+
+
+def append_session_id_frontmatter(text: str, session_ref: str) -> str:
+    name, separator, value = session_ref.partition("=")
+    if not separator or (name == "session_id" and value == "unavailable"):
+        return text
+    return append_frontmatter_list_value(text, "session-ids", value)
 
 
 def append_session_entry(
@@ -484,6 +527,7 @@ def update_note_session(
     match = resolve_id(raw_id, root)
     provider, session_ref = detect_session(allow_missing)
     text = match.path.read_text(encoding="utf-8")
+    text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
     match.path.write_text(text, encoding="utf-8")
     print(f"Updated: {match.relpath}")
@@ -674,6 +718,7 @@ def update_task(raw_id: str, status: str, note: str, checks: str | None, allow_m
     provider, session_ref = detect_session(allow_missing)
     text = match.path.read_text(encoding="utf-8")
     text = set_frontmatter_scalar(text, "status", status)
+    text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
     match.path.write_text(text, encoding="utf-8")
     refreshed = resolve_id(raw_id, root)
@@ -696,6 +741,7 @@ def append_task_note(raw_id: str, note: str, checks: str | None, allow_missing: 
         raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
     provider, session_ref = detect_session(allow_missing)
     text = match.path.read_text(encoding="utf-8")
+    text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
     match.path.write_text(text, encoding="utf-8")
     refreshed = resolve_id(raw_id, root)

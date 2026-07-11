@@ -270,6 +270,7 @@ id: AGT-TSK-obsidian-task-ids
         board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
         self.assertIn("status: active", task)
         self.assertIn("CODEX_THREAD_ID=test-thread", task)
+        self.assertIn("session-ids:\n  - test-thread\n", task)
         self.assertLess(board.index("OAW-TSK-cli"), board.index("## Todo"))
 
     def test_complete_requires_checks(self):
@@ -281,6 +282,13 @@ id: AGT-TSK-obsidian-task-ids
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
         board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
         before_board = board_path.read_text(encoding="utf-8")
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace(
+                "status: archived\n",
+                "status: archived\nsession-ids:\n  - earlier-thread\n",
+            ),
+            encoding="utf-8",
+        )
 
         proc = self.run_oaw(
             "task",
@@ -300,7 +308,20 @@ id: AGT-TSK-obsidian-task-ids
         self.assertIn("status: archived", task)
         self.assertIn("CODEX_THREAD_ID=test-thread", task)
         self.assertIn("Reviewed independently.; checks: python -m unittest", task)
+        self.assertIn("session-ids:\n  - earlier-thread\n  - test-thread\n", task)
         self.assertEqual(before_board, board_path.read_text(encoding="utf-8"))
+
+        repeated = self.run_oaw(
+            "task",
+            "note",
+            "OAW-TSK-archived",
+            "--note",
+            "Same session again.",
+        )
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        task = task_path.read_text(encoding="utf-8")
+        self.assertEqual(task.count("  - earlier-thread\n"), 1)
+        self.assertEqual(task.count("  - test-thread\n"), 1)
 
     def test_task_note_requires_session_id_unless_allowed(self):
         env = {
@@ -333,6 +354,7 @@ id: AGT-TSK-obsidian-task-ids
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
         task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
         self.assertIn("session_id=unavailable", task)
+        self.assertNotIn("session-ids:", task)
 
     def test_task_backlog_updates_status_board_and_session(self):
         proc = self.run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later.")
@@ -387,8 +409,31 @@ id: AGT-TSK-obsidian-task-ids
         note = (self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md").read_text()
         self.assertIn("## Agent sessions", note)
         self.assertIn("CODEX_THREAD_ID=test-thread", note)
+        self.assertIn("session-ids:\n  - test-thread\n", note)
         self.assertIn("Reviewed resolver policy.", note)
         self.assertIn("Updated: Agents/Tasks/Resolve vault-wide Obsidian task IDs.md", proc.stdout)
+
+    def test_note_session_converts_scalar_session_ids_to_a_list(self):
+        path = self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "status: open\n",
+                "status: open\nsession-ids: earlier-thread\n",
+            ),
+            encoding="utf-8",
+        )
+
+        proc = self.run_oaw(
+            "note",
+            "session",
+            "AGT-TSK-obsidian-task-ids",
+            "--note",
+            "Normalize session metadata.",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        note = path.read_text(encoding="utf-8")
+        self.assertIn("session-ids:\n  - earlier-thread\n  - test-thread\n", note)
 
     def test_note_observe_appends_block_under_target_section(self):
         write(
