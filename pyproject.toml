@@ -8,6 +8,9 @@ dependencies = []
 [project.scripts]
 oaw = "oaw_cli:main"
 
+[dependency-groups]
+dev = ["pyinstrument"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
