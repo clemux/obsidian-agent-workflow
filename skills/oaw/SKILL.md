@@ -147,6 +147,11 @@ Use `note observe --section` for a heading other than `Observations`. `retro cre
 also accepts `--date` and `--id`; replacing an existing generated note requires
 the explicit `--force` flag.
 
+Review historical agent retrospectives through `Agents/Retrospectives.base#Recent`. The Base also
+provides Drafts, By provider, Sensitive, and Metadata audit views. `Projects/Session Retrospectives/`
+is a separate software project whose Base tracks project tasks and research; it is not the historical
+agent-retrospective review surface.
+
 ## Safe outbound exports
 
 Use `oaw export note` only for notes that have explicit frontmatter approval:
@@ -205,7 +210,7 @@ oaw board done OAW-TSK-next-board
 
 ## Cross-project task Base
 
-When deciding what OAW or adjacent agent-tooling work to pick up next, consult the aggregate task Base at `Projects/Cross-project tasks.base` before relying on one project board. Its `Open cross-project tasks` view includes task notes from `Projects/*/Tasks` and `Agents/Tasks`, keeps `backlog`, `todo`, `active`, and legacy `open` tasks visible, and excludes terminal `done` and `superseded` work.
+When deciding what work to pick up next, consult the aggregate task Base at `Projects/Cross-project tasks.base` before relying on one project board. Its `Open cross-project tasks` view includes task notes from `Projects/*/Tasks`, `Agents/Tasks`, and root `Tasks/`; keeps `active`, `review`, `todo`, `backlog`, and legacy `open` tasks visible; and excludes terminal `done` and `superseded` work. The display order is Active, Review, Todo, Open / untriaged, then Backlog. New tasks should use `todo` when deliberately selected or `backlog` when unscheduled; do not create new `open` tasks.
 
 Priority uses a vault-wide 1/2/3 scale:
 
