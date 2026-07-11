@@ -1814,6 +1814,33 @@ def find_codex_rollouts(
     return sorted(matches)
 
 
+def discover_codex_rollouts(
+    codex_root: Path,
+    scan_paths: list[Path],
+    seed_rollouts: list[Path],
+    explicit_threads: list[str],
+    explicit_rollouts: list[str],
+    grep_patterns: list[str],
+) -> tuple[list[Path], str]:
+    """Expand referenced Codex rollouts until no new lineage is discovered."""
+    discovered = set(seed_rollouts)
+    while True:
+        text = transcript_text([*scan_paths, *sorted(discovered)])
+        matches = set(
+            find_codex_rollouts(
+                codex_root,
+                text,
+                explicit_threads,
+                explicit_rollouts,
+                grep_patterns,
+            )
+        )
+        new_matches = matches - discovered
+        if not new_matches:
+            return sorted(discovered), text
+        discovered.update(new_matches)
+
+
 def referenced_plugin_jobs(text: str) -> set[str]:
     return set(re.findall(r"\btask-[a-z0-9]+-[a-z0-9]+\b", text))
 
@@ -1931,6 +1958,7 @@ def session_snapshot(args: argparse.Namespace) -> None:
             re.IGNORECASE,
         ):
             raise OawError("--codex-only requires a full Codex thread UUID")
+        session_id = session_id.lower()
         primary_codex_rollouts = find_codex_rollouts(
             args.codex_root.expanduser(), "", [session_id], [], []
         )
@@ -1989,9 +2017,15 @@ def session_snapshot(args: argparse.Namespace) -> None:
         *(copy.source for copy in task_outputs),
         *(copy.source for copy in workflow_artifacts),
         *(copy.source for copy in workflow_scripts),
-        *codex_rollouts,
     ]
-    text = transcript_text(scan_paths)
+    codex_rollouts, text = discover_codex_rollouts(
+        args.codex_root.expanduser(),
+        scan_paths,
+        codex_rollouts,
+        explicit_threads,
+        args.codex_rollout or [],
+        args.grep or [],
+    )
     parent_completeness = detect_parent_completeness(session_id, args)
     extra_claude_parents = find_extra_claude_parents(
         args.claude_root.expanduser(),
@@ -2000,7 +2034,15 @@ def session_snapshot(args: argparse.Namespace) -> None:
         session_id,
     )
     if extra_claude_parents:
-        text = "\n".join([text, transcript_text(extra_claude_parents)])
+        scan_paths.extend(extra_claude_parents)
+        codex_rollouts, text = discover_codex_rollouts(
+            args.codex_root.expanduser(),
+            scan_paths,
+            codex_rollouts,
+            explicit_threads,
+            args.codex_rollout or [],
+            args.grep or [],
+        )
 
     copies: list[SnapshotCopy] = []
     if parent:
@@ -2034,13 +2076,6 @@ def session_snapshot(args: argparse.Namespace) -> None:
             "claude-fork-parent",
         )
         for path in extra_claude_parents
-    )
-    codex_rollouts = find_codex_rollouts(
-        args.codex_root.expanduser(),
-        text,
-        explicit_threads,
-        args.codex_rollout or [],
-        args.grep or [],
     )
     copies.extend(
         SnapshotCopy(

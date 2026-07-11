@@ -49,6 +49,19 @@ class CliParityTests(unittest.TestCase):
         self.assertIn("Mismatch: oaw --help", proc.stderr)
         self.assertIn("Parity: failed", proc.stderr)
 
+    def test_matching_help_with_stale_source_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stale = Path(tmp) / "stale_oaw.py"
+            stale.write_text(
+                BIN.read_text(encoding="utf-8") + "\n# stale installed source\n",
+                encoding="utf-8",
+            )
+            proc = self.run_check(stale)
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("Source mismatch: installed artifact does not match checkout", proc.stderr)
+        self.assertNotIn("Mismatch: oaw --help", proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

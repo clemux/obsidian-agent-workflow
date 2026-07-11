@@ -1676,6 +1676,7 @@ aliases:
     def test_session_snapshot_supports_codex_only_thread_and_discovers_references(self):
         thread_id = "019f48d7-39c2-7043-9c19-5a3565995898"
         child_thread = "019f48d8-1111-7222-8333-c26aa5d38893"
+        grandchild_thread = "019f48d9-2222-7333-8444-d37bb6e49904"
         codex_root = self.vault / "harness/codex/sessions"
         plugin_root = self.vault / "harness/claude/plugins/data"
         output_root = self.vault / "attachments"
@@ -1689,12 +1690,23 @@ aliases:
             / "2026/07/10"
             / f"rollout-2026-07-10T00-05-00-{child_thread}.jsonl"
         )
+        grandchild_rollout = (
+            codex_root
+            / "2026/07/10"
+            / f"rollout-2026-07-10T00-10-00-{grandchild_thread}.jsonl"
+        )
         write(
             rollout,
             '{"timestamp":"2026-07-10T00:00:00.000Z",'
-            f'"content":"codex_thread={child_thread}; plugin task-abcd1234-efgh5678"}}\n',
+            f'"content":"codex_thread={child_thread}"}}\n',
         )
-        write(child_rollout, '{"timestamp":"2026-07-10T00:05:00.000Z"}\n')
+        write(
+            child_rollout,
+            '{"timestamp":"2026-07-10T00:05:00.000Z",'
+            f'"content":"codex_thread={grandchild_thread}; '
+            'plugin task-abcd1234-efgh5678"}\n',
+        )
+        write(grandchild_rollout, '{"timestamp":"2026-07-10T00:10:00.000Z"}\n')
         write(
             plugin_root / "example/jobs/task-abcd1234-efgh5678.log",
             "complete\n",
@@ -1703,7 +1715,7 @@ aliases:
         proc = self.run_oaw(
             "session",
             "snapshot",
-            thread_id,
+            thread_id.upper(),
             "--codex-only",
             "--slug",
             "codex only",
@@ -1722,6 +1734,7 @@ aliases:
         snapshot = output_root / "2026-07-10-codex-only"
         self.assertTrue((snapshot / "codex" / rollout.name).exists())
         self.assertTrue((snapshot / "codex" / child_rollout.name).exists())
+        self.assertTrue((snapshot / "codex" / grandchild_rollout.name).exists())
         self.assertTrue(
             (snapshot / "plugin-logs/task-abcd1234-efgh5678.log").exists()
         )
