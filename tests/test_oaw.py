@@ -270,7 +270,7 @@ id: AGT-TSK-obsidian-task-ids
         board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
         self.assertIn("status: active", task)
         self.assertIn("CODEX_THREAD_ID=test-thread", task)
-        self.assertIn("session-ids:\n  - test-thread\n", task)
+        self.assertIn('session-ids:\n  - "test-thread"\n', task)
         self.assertLess(board.index("OAW-TSK-cli"), board.index("## Todo"))
 
     def test_complete_requires_checks(self):
@@ -285,7 +285,8 @@ id: AGT-TSK-obsidian-task-ids
         task_path.write_text(
             task_path.read_text(encoding="utf-8").replace(
                 "status: archived\n",
-                "status: archived\nsession-ids:\n  - earlier-thread\n",
+                'status: archived\nsession-ids:\n  - "old,with-comma"\n'
+                "  - earlier-thread # prior run\n",
             ),
             encoding="utf-8",
         )
@@ -308,7 +309,12 @@ id: AGT-TSK-obsidian-task-ids
         self.assertIn("status: archived", task)
         self.assertIn("CODEX_THREAD_ID=test-thread", task)
         self.assertIn("Reviewed independently.; checks: python -m unittest", task)
-        self.assertIn("session-ids:\n  - earlier-thread\n  - test-thread\n", task)
+        self.assertIn(
+            'session-ids:\n  - "old,with-comma"\n'
+            "  - earlier-thread # prior run\n"
+            '  - "test-thread"\n',
+            task,
+        )
         self.assertEqual(before_board, board_path.read_text(encoding="utf-8"))
 
         repeated = self.run_oaw(
@@ -320,8 +326,9 @@ id: AGT-TSK-obsidian-task-ids
         )
         self.assertEqual(repeated.returncode, 0, repeated.stderr)
         task = task_path.read_text(encoding="utf-8")
-        self.assertEqual(task.count("  - earlier-thread\n"), 1)
-        self.assertEqual(task.count("  - test-thread\n"), 1)
+        self.assertEqual(task.count('  - "old,with-comma"\n'), 1)
+        self.assertEqual(task.count("  - earlier-thread # prior run\n"), 1)
+        self.assertEqual(task.count('  - "test-thread"\n'), 1)
 
     def test_task_note_requires_session_id_unless_allowed(self):
         env = {
@@ -409,31 +416,33 @@ id: AGT-TSK-obsidian-task-ids
         note = (self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md").read_text()
         self.assertIn("## Agent sessions", note)
         self.assertIn("CODEX_THREAD_ID=test-thread", note)
-        self.assertIn("session-ids:\n  - test-thread\n", note)
+        self.assertIn('session-ids:\n  - "test-thread"\n', note)
         self.assertIn("Reviewed resolver policy.", note)
         self.assertIn("Updated: Agents/Tasks/Resolve vault-wide Obsidian task IDs.md", proc.stdout)
 
-    def test_note_session_converts_scalar_session_ids_to_a_list(self):
+    def test_note_session_refuses_unsupported_session_ids_without_writing(self):
         path = self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
-        path.write_text(
-            path.read_text(encoding="utf-8").replace(
-                "status: open\n",
-                "status: open\nsession-ids: earlier-thread\n",
-            ),
-            encoding="utf-8",
-        )
+        baseline = path.read_text(encoding="utf-8")
+        for session_ids in (
+            'session-ids: ["old,with-comma", earlier-thread]\n',
+            "session-ids:\n  owner: earlier-thread\n",
+            "session-ids:\n  - null\n",
+        ):
+            with self.subTest(session_ids=session_ids):
+                before = baseline.replace("status: open\n", "status: open\n" + session_ids)
+                path.write_text(before, encoding="utf-8")
 
-        proc = self.run_oaw(
-            "note",
-            "session",
-            "AGT-TSK-obsidian-task-ids",
-            "--note",
-            "Normalize session metadata.",
-        )
+                proc = self.run_oaw(
+                    "note",
+                    "session",
+                    "AGT-TSK-obsidian-task-ids",
+                    "--note",
+                    "Must not corrupt session metadata.",
+                )
 
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        note = path.read_text(encoding="utf-8")
-        self.assertIn("session-ids:\n  - earlier-thread\n  - test-thread\n", note)
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn("session-ids must", proc.stderr)
+                self.assertEqual(path.read_text(encoding="utf-8"), before)
 
     def test_note_observe_appends_block_under_target_section(self):
         write(
