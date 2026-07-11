@@ -51,6 +51,7 @@ To survey a project's tasks, list them instead of resolving one by one:
 
 ```bash
 oaw list --project "Obsidian Agent Workflow"   # tab-separated: id, status, title, relative path
+oaw list --project "Obsidian Agent Workflow" --status active
 ```
 
 The project name is the folder name under `Projects/` in the vault. `task` is the default note type.
@@ -72,6 +73,7 @@ OAW_INGESTION_ROOT=/path/to/ingestion-root \
   oaw ingest safe-export
 OAW_INGESTION_ROOT=/path/to/ingestion-root \
   oaw ingest safe-export --write
+oaw ingest safe-export --ingestion-root /path/to/handoff --destination "Imports/Reviewed"
 ```
 
 - Scans markdown files in the handoff folder:
@@ -84,6 +86,7 @@ OAW_INGESTION_ROOT=/path/to/ingestion-root \
   - `safe-export-personal: true`
   - `safe-export-personal` tag
 - Dry-run by default: it reports what would be ingested or rejected without writing.
+- `--ingestion-root` overrides the environment/default source and `--destination` sets a vault-relative destination.
 - `--write` performs the actual move:
   - accepted notes go to the vault-relative `Imports/Safe export`
   - rejected notes go to `.rejected/` in the handoff path
@@ -140,6 +143,9 @@ oaw retro create \
 ```
 
 `oaw note session` and `oaw retro create` require a real session ID from a supported harness environment variable unless the user explicitly accepts `--allow-missing-session-id`. `oaw note observe` does not require a session ID.
+Use `note observe --section` for a heading other than `Observations`. `retro create`
+also accepts `--date` and `--id`; replacing an existing generated note requires
+the explicit `--force` flag.
 
 ## Safe outbound exports
 
@@ -166,6 +172,7 @@ oaw export validate ~/obsidian-export/OAW-TSK-export-example --target work
 
 - `note` refuses unmarked notes and notes whose `export-scope` does not match `--target`. Legacy `safe_for_export: true` plus a matching `export_target` remains accepted for existing notes.
 - The bundle contains `note.md`, optional copied artifacts from `export_artifacts`, and `manifest.json`.
+- Existing bundles are refused unless `export note --force` is explicit; `validate --target` defaults to the manifest target when omitted.
 - Manifest paths are vault-relative, not absolute local paths.
 - `validate` confines manifest paths to the bundle and checks the safe marker, target, note checksum, artifact checksums, and artifact presence.
 
@@ -216,6 +223,7 @@ Use `oaw link` for durable wikilink checks and append-only repairs:
 oaw link check OAW-TSK-cli OAW-TSK-session-lookup
 oaw link list OAW-TSK-cli
 oaw link ensure OAW-TSK-cli OAW-TSK-session-lookup --section Related
+oaw link ensure OAW-TSK-cli OAW-TSK-session-lookup --label "Session lookup"
 oaw link ensure-bidirectional OAW-TSK-cli OAW-TSK-session-lookup --section Related
 oaw link lint
 ```
@@ -223,6 +231,7 @@ oaw link lint
 - `check` reports whether each note links to the other.
 - `list` prints explicit wikilinks from a note and resolves each target when possible.
 - `ensure` and `ensure-bidirectional` default to a dry-run preview. Pass `--write` only when the user asked to apply the append-only section edit.
+- One-way `ensure --label` overrides the target ID used as display text.
 - Edits use durable `[[vault/path|ID]]` links and skip duplicates when a path-form link is already present with any alias.
 - `lint` reports opaque ID links such as `[[OAW-TSK-cli]]` and suggests durable replacements when the ID resolves.
 
@@ -248,6 +257,7 @@ oaw session snapshot "$CODEX_THREAD_ID" --codex-only --partial --slug codex-dogf
 - Codex rollouts are discovered by referenced thread IDs or explicit `--codex-thread <id>` flags. Use `--codex-rollout <filename-or-path>` for an exact rollout. Use `--grep <literal>` only when the literal identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags.
 - It writes `manifest.json` with each source path, destination path, copy time, size, hash, category, mode, and completeness. Use the manifest instead of hand-writing provenance.
 - Use `--partial` while the session is still live. Re-run the same command later to refresh the transcript, preserve nested artifacts, pick up new artifacts, and remove stale files listed in the previous manifest.
+- Use `--complete` to override current-session detection, `--date` to override the folder date, and `--output-root`, `--claude-root`, `--codex-root`, or `--plugin-data-root` for controlled test/demo locations.
 - For real vault snapshots, use the installed `oaw session snapshot ...` command. Reserve `python bin/oaw session snapshot ...` for repo-development checks, temp-vault fixtures, or deliberately testing the checkout copy.
 
 ## Rules

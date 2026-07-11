@@ -88,7 +88,12 @@ Short uppercase project aliases such as `obs:CDX` resolve to a matching `Project
 oaw list --project Fable
 oaw list --project Fable --type capture
 oaw list --project Fable --type capture --include-archived
+oaw list --project Fable --type capture --status archived
 ```
+
+Use `--status <value>` to select one exact frontmatter status. When `--status`
+is omitted, `--include-archived` adds archived notes to the normal listing;
+otherwise archived notes are hidden.
 
 ## Task lifecycle
 
@@ -127,6 +132,10 @@ oaw board done OAW-TSK-next-board
 ```
 
 `move` and `done` require the token to match exactly one card. `done` moves the card to `Done` and marks it `[x]`; other moves preserve the existing card text and keep the checkbox open.
+
+`ensure-backlog` and task lifecycle commands target a project-local
+`Projects/<Project>/Board.md`. The `add`, `move`, and `done` commands target the
+cross-project `Projects/Next steps.md` board.
 
 The aggregate cross-project task Base lives at `Projects/Cross-project tasks.base`. Use it when choosing what to work on next across OAW and adjacent agent-tooling queues: its open-task view includes `Projects/*/Tasks` and `Agents/Tasks`, keeps `backlog`, `todo`, `active`, and legacy `open` tasks visible, and excludes terminal `done` and `superseded` work. Priority is a vault-wide 1/2/3 scale: `1` is urgent, blocking, or unusually high-leverage; `2` is normal next-session work with clear value; `3` is useful backlog work. Cross-project usefulness can raise priority, and the Base sorts by priority, then effort (`S`, `M`, `L`), then title.
 
@@ -168,7 +177,13 @@ oaw session snapshot "$CODEX_THREAD_ID" \
 
 By default the command finds the Claude parent transcript plus nested subagent transcripts, task outputs under `tasks/`, workflow run artifacts under `subagents/workflows/`, persisted workflow scripts under `workflows/scripts/`, discoverable Codex rollouts, referenced plugin job logs, and fork parents referenced by explicit Claude/fork markers or `--claude-session`. Use `--codex-only` when the positional ID is a Codex thread with no Claude parent transcript; the command requires that primary rollout even when extra discovery options are supplied. Bare JSON `sessionId` fields do not trigger fork discovery. It writes `manifest.json` with source paths, copy time, file hashes, category, snapshot mode, and transcript completeness. Use `--codex-rollout` for an exact rollout filename or path. Use `--grep` only for a literal that identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags. Re-run the same command to refresh a partial transcript, preserve nested artifacts, pick up new artifacts, and remove stale files listed in the previous manifest.
 
-Test or demo runs can override the artifact roots with `--codex-root` and `--claude-root`. Lookup and snapshot commands share the `OAW_CODEX_SESSIONS_ROOT` and `OAW_CLAUDE_PROJECTS_ROOT` environment overrides; their fallback roots are `~/.codex/sessions` and `~/.claude/projects`.
+Use `--partial` or `--complete` to override automatic transcript completeness,
+and `--date` to override the folder date. Test or demo runs can override the
+destination with `--output-root` and artifact roots with `--codex-root`,
+`--claude-root`, and `--plugin-data-root`. Lookup and snapshot commands share
+the `OAW_CODEX_SESSIONS_ROOT` and `OAW_CLAUDE_PROJECTS_ROOT` environment
+overrides; their fallback roots are `~/.codex/sessions` and
+`~/.claude/projects`.
 
 ## Notes and retrospectives
 
@@ -177,6 +192,7 @@ For non-project notes, append the same session trace or a dated observation bloc
 ```bash
 oaw note session AGT-TSK-session-retrospectives --note "Reviewed retrospective habit."
 oaw note observe CDX-RES-routing-evidence \
+  --section "Observations" \
   --title "Wrap-up format gap" \
   --body "The evidence note needs a mechanical append path."
 ```
@@ -190,6 +206,9 @@ oaw retro create \
 ```
 
 `oaw note session` and `oaw retro create` require a real session ID from a supported harness environment variable unless `--allow-missing-session-id` is explicitly accepted. `oaw note observe` does not require a session ID.
+`note observe --section` defaults to `Observations`. Retrospective creation also
+accepts `--date` and `--id` overrides; `--force` is required to replace an
+existing generated path.
 
 ## Import and export
 
@@ -200,6 +219,7 @@ oaw retro create \
 ```bash
 OAW_INGESTION_ROOT=/path/to/ingestion-root oaw ingest safe-export
 OAW_INGESTION_ROOT=/path/to/ingestion-root oaw ingest safe-export --write
+oaw ingest safe-export --ingestion-root /path/to/handoff --destination "Imports/Reviewed"
 ```
 
 Scanned files are accepted when frontmatter indicates one of:
@@ -211,7 +231,10 @@ Scanned files are accepted when frontmatter indicates one of:
 
 Safety evaluation reads frontmatter only. In `--write` mode, accepted files are ingested to `Imports/Safe export` (vault-relative) and rejected files are quarantined under `.rejected/`.
 
-Default handoff path is `OAW_INGESTION_ROOT` (if unset, `~/obsidian-ingestion`). Default destination is `Imports/Safe export`.
+Default handoff path is `OAW_INGESTION_ROOT` (if unset,
+`~/obsidian-ingestion`). `--ingestion-root` overrides it. Default destination
+is `Imports/Safe export`; `--destination` accepts a vault-relative override.
+`--dry-run` is explicit but optional because preview mode is the default.
 
 ### Outbound export bundles
 
@@ -232,6 +255,9 @@ oaw export validate ~/obsidian-export/OAW-TSK-export-example --target work
 ```
 
 The bundle contains `note.md`, optional copied artifacts, and `manifest.json` with vault-relative source paths and checksums. Unmarked notes are refused; validation also refuses paths outside the bundle, tampered notes, wrong targets, missing artifacts, and checksum mismatches. Legacy `safe_for_export: true` plus `export_target: work` remains accepted for existing notes, but new notes should use `export-scope: work` so inbound and outbound safety markers share one schema.
+An existing bundle is not replaced unless `export note --force` is supplied.
+For validation, `--target` is optional and otherwise defaults to the manifest's
+target.
 
 ## Link hygiene
 
@@ -241,11 +267,15 @@ The bundle contains `note.md`, optional copied artifacts, and `manifest.json` wi
 oaw link check OAW-TSK-cli OAW-TSK-session-lookup
 oaw link list OAW-TSK-cli
 oaw link ensure OAW-TSK-cli OAW-TSK-session-lookup --section Related
+oaw link ensure OAW-TSK-cli OAW-TSK-session-lookup --label "Session lookup" \
+  --write
 oaw link ensure-bidirectional OAW-TSK-cli OAW-TSK-session-lookup --section Related
 oaw link lint
 ```
 
 `ensure` and `ensure-bidirectional` default to a dry-run preview and append a `[[vault/path|ID]]` link only when the target path is missing. Pass `--write` to apply the append-only section edit.
+For one-way `ensure`, `--label` overrides the target ID used as the wikilink
+display text.
 
 ## Installed vs checkout CLI
 
@@ -332,7 +362,7 @@ python bin/oaw session snapshot <claude-session-id> \
 Snapshot: /tmp/oaw-dogfood-snapshot/2026-07-09-overnight-review-dogfood
 Manifest: /tmp/oaw-dogfood-snapshot/2026-07-09-overnight-review-dogfood/manifest.json
 Copied: 81
-Parent: complete
+Transcript: complete
 ```
 
 Record an integration checkpoint without changing task status or moving its board card:
