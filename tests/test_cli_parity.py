@@ -54,6 +54,52 @@ class TestCliParity(Assertions):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertRegex(proc.stdout, r"Parity: ok \(\d+ help surfaces\)")
 
+    def test_absolute_python_shebang_aligns_checkout_interpreter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed = root / "bin" / "oaw"
+            installed.parent.mkdir()
+            copytree(ROOT / "src", root / "src")
+            installed.write_text(
+                f"#!{sys.executable}\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))\n"
+                "from oaw.cli import main\n"
+                "raise SystemExit(main())\n",
+                encoding="utf-8",
+            )
+            installed.chmod(0o755)
+            proc = self.run_check(installed)
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_non_python_launcher_shebang_fails_clearly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            installed = Path(tmp) / "oaw"
+            installed.write_text(
+                "#!/usr/bin/env bash\nfrom oaw.cli import main\n",
+                encoding="utf-8",
+            )
+            installed.chmod(0o755)
+            proc = self.run_check(installed)
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("launcher shebang is not Python", proc.stderr)
+
+    def test_malformed_env_shebang_fails_clearly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            installed = Path(tmp) / "oaw"
+            installed.write_text(
+                "#!/usr/bin/env -S\nfrom oaw.cli import main\n",
+                encoding="utf-8",
+            )
+            installed.chmod(0o755)
+            proc = self.run_check(installed)
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("malformed env shebang", proc.stderr)
+
     def test_stale_cli_surface_fails_with_diff(self):
         with tempfile.TemporaryDirectory() as tmp:
             stale = Path(tmp) / "stale_oaw.py"

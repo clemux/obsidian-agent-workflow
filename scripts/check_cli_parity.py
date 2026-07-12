@@ -17,6 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CHECKOUT = ROOT / "bin" / "oaw"
+PYTHON_INTERPRETER = re.compile(r"^(?:python|python3)(?:\d+(?:\.\d+)*)?$")
 
 
 def command_prefix(value: str, label: str) -> list[str]:
@@ -30,6 +31,50 @@ def command_prefix(value: str, label: str) -> list[str]:
     if executable:
         return [executable]
     raise SystemExit(f"{label} command not found: {value}")
+
+
+def launcher_interpreter(launcher: Path) -> list[str]:
+    try:
+        first_line = launcher.open(encoding="utf-8").readline().rstrip("\r\n")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SystemExit(f"cannot read installed oaw launcher {launcher}: {exc}") from exc
+    if not first_line.startswith("#!"):
+        raise SystemExit(f"installed oaw launcher has no interpreter: {launcher}")
+    try:
+        shebang = shlex.split(first_line[2:].strip())
+    except ValueError as exc:
+        raise SystemExit(f"installed oaw launcher has malformed shebang: {launcher}: {exc}") from exc
+    if not shebang:
+        raise SystemExit(f"installed oaw launcher has an empty shebang: {launcher}")
+
+    command = Path(shebang[0])
+    if command == Path("/usr/bin/env"):
+        arguments = shebang[1:]
+        if arguments[:1] == ["-S"]:
+            arguments = arguments[1:]
+        if not arguments:
+            raise SystemExit(f"installed oaw launcher has malformed env shebang: {launcher}")
+        interpreter_name = Path(arguments[0]).name
+    elif command.is_absolute():
+        interpreter_name = command.name
+    else:
+        raise SystemExit(
+            f"installed oaw launcher has unsupported shebang: {launcher}: {first_line}"
+        )
+    if not PYTHON_INTERPRETER.fullmatch(interpreter_name):
+        raise SystemExit(
+            f"installed oaw launcher shebang is not Python: {launcher}: {first_line}"
+        )
+    return shebang
+
+
+def align_checkout_interpreter(checkout: list[str], installed: list[str]) -> list[str]:
+    checkout_source = Path(checkout[-1]).resolve()
+    if len(installed) > 1:
+        interpreter = installed[:-1]
+    else:
+        interpreter = launcher_interpreter(Path(installed[0]).resolve())
+    return [*interpreter, str(checkout_source)]
 
 
 def help_result(prefix: list[str], path: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
@@ -71,14 +116,9 @@ def source_path(prefix: list[str]) -> Path:
         launcher,
         re.MULTILINE,
     )
-    if len(prefix) == 1 and launcher_match:
+    if launcher_match:
         module_name = launcher_match.group(1)
-        first_line = launcher.splitlines()[0] if launcher.splitlines() else ""
-        if not first_line.startswith("#!"):
-            raise SystemExit(f"installed oaw launcher has no interpreter: {executable}")
-        interpreter = shlex.split(first_line[2:].strip())
-        if not interpreter:
-            raise SystemExit(f"installed oaw launcher has an empty shebang: {executable}")
+        interpreter = launcher_interpreter(executable)
         proc = subprocess.run(
             [
                 *interpreter,
@@ -184,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     checkout = command_prefix(args.checkout, "checkout")
     installed = command_prefix(args.installed, "installed")
+    checkout = align_checkout_interpreter(checkout, installed)
     checked, failures = compare_surfaces(checkout, installed)
     if mismatch := source_failure(checkout, installed):
         failures.insert(0, mismatch)
