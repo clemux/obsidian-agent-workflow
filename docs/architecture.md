@@ -76,10 +76,19 @@ cli.py
               → errors (+ stdlib)
 ```
 
-- `cli.py` imports command domains only. Command domains import the shared
-  services and the note model; they never import each other. Cross-cutting
-  behavior (e.g. lifecycle writes appending session traces) lives in a shared
-  layer.
+`cli.py` additionally dispatches straight to shared-service command
+entrypoints for the stable `resolve`, `list`, `board`, and `session`
+subcommands — still a strictly downward edge, skipping the command-domain
+layer. Those modules are dual-role: shared service for the command domains,
+and direct command implementation for their own subcommands. Rename-only
+adapter modules above them would violate the non-goals.
+
+- `cli.py` sits at the top and may import any lower layer; in practice it
+  imports the command domains plus the shared-service command entrypoints
+  named above. Command domains import the shared services and the note model;
+  they never import each other. Shared services never import command domains
+  or `cli.py`. Cross-cutting behavior (e.g. lifecycle writes appending session
+  traces) lives in a shared layer.
 - Shared services (`resolver`, `boards`, `sessions`) may import `notes` and
   `frontmatter` — `resolver` in particular consumes frontmatter parsing and
   pre-filtering. The note model imports only `errors` and the stdlib.
