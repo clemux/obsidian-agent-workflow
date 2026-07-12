@@ -14,8 +14,8 @@ Keep small workflow changes close to `bin/oaw` and mirror behavior changes in te
 
 ## Build, Test, and Development Commands
 
-- `python -m unittest` runs the full test suite.
-- `python -m unittest tests.test_oaw` runs only the current CLI tests.
+- `uv run pytest` runs the full test suite.
+- `uv run pytest tests/test_oaw.py` runs only the current CLI tests.
 - `python bin/oaw --help` shows top-level CLI commands.
 - `python bin/oaw resolve --json OAW-TSK-cli` exercises vault resolution.
 - `OAW_VAULT=/tmp/example-vault python bin/oaw ...` points the CLI at a non-default vault for manual testing.
@@ -41,7 +41,7 @@ Prefer `pathlib.Path`, UTF-8 file reads/writes, and `json.dumps` for machine-rea
 
 Tests use `unittest` and temporary vault fixtures via `tempfile.TemporaryDirectory`. Name new tests `test_<behavior>` and verify return codes plus important stdout/stderr text. For lifecycle changes, assert task note and board contents, not only command success.
 
-Run `python -m unittest` before submitting changes. Update tests whenever resolver matching, frontmatter parsing, board movement, session detection, or CLI arguments change.
+Run `uv run pytest` before submitting changes. Update tests whenever resolver matching, frontmatter parsing, board movement, session detection, or CLI arguments change.
 
 ## Commit & Pull Request Guidelines
 
