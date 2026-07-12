@@ -146,7 +146,7 @@ oaw task create --from-capture obs:OAW-CAP-urgent --title "Handle urgent request
 
 When an actionable capture becomes material work, pass its stable ID with `--from-capture`. The project and title default to the capture's project folder and heading, while explicit `--project` and `--title` still override them. The command preserves the capture note and body, records its ID as `source-capture` on the task, adds durable links in both directions, appends the task wikilink to the capture's `destinations` frontmatter, registers the task on the project board, and only then changes the capture to `status: triaged`. Those writes commit together and roll back together on failure. The capture's `Outcome` remains an expected-next-shape statement; promotion never replaces it with completion prose. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent. `--start` uses the same real session provenance as creation and is only valid with `--from-capture`.
 
-## Research packet scaffolds
+## Research packet lifecycle
 
 Create a project's `Research/<track>/Prompt.md` from the vault template instead of rebuilding the packet by hand:
 
@@ -158,9 +158,23 @@ OAW_VAULT=~/vaults/example oaw research scaffold \
   --date 2026-07-12
 ```
 
-The default template is the vault-relative `Templates/Research packet.md`; override it with `--template <vault-relative-path>`. The command fills the project, track, title, and date fields and refuses to replace an existing prompt unless `--force` is explicit. It also verifies that the template has exactly one line whose Markdown heading is `## Deep research prompt` (deeper headings and prose mentions do not count) and, after rendering, that project/track metadata does not appear there as a complete token. Characters from short metadata values may still occur inside ordinary words. Frontmatter and local-only sections belong before that heading; everything from that heading onward is the self-contained provider-visible handoff body.
+The command creates `Prompt.md`, `Synthesis.md`, and the shared folder-scoped `Bases/Research packet.base`. The default template is the vault-relative `Templates/Research packet.md`; override it with `--template <vault-relative-path>`. It fills project, track, title, and date and refuses to replace an existing prompt unless `--force` is explicit. A forced scaffold never replaces an existing synthesis.
 
-Matching an existing project prompt is not sufficient; lint the provider-visible handoff output before sending it.
+The template must have exactly one `## Deep research prompt` heading followed only by one non-empty fenced `text` block. That block is the complete provider-visible request and its contents are the exact one-click copy payload; fence markers and local metadata are excluded. Project/track tokens are rejected beyond the boundary.
+
+After launching one provider run, register it atomically:
+
+```bash
+OAW_VAULT=~/vaults/example oaw research start \
+  --project "Example Project" \
+  --track "architecture/provider-choice" \
+  --source "ChatGPT Pro" \
+  --url "https://example.com/share/run"
+```
+
+`start` requires a safe, unique human source label and an absolute HTTP(S) URL. It creates only `Results - <Source>.md` with `status: running`, records source/URL/date provenance, appends the run under `## Running research sessions`, and creates a missing synthesis or shared Base without replacing existing content. Validation and all writes complete transactionally.
+
+Use the `obsidian-research` helper to preflight and print the exact fenced-block contents, then to ingest the finished report while preserving its raw artifact. Native report intake is intentionally outside `oaw`.
 
 ## Boards
 
@@ -432,7 +446,7 @@ Record an integration checkpoint without changing task status or moving its boar
 ```bash
 python bin/oaw task note OAW-TSK-overnight-branch-review \
   --note "Second integration batch ready." \
-  --checks "python -m unittest (52 tests OK)"
+  --checks "uv run pytest (tests passed)"
 ```
 
 ```text
@@ -446,7 +460,7 @@ Complete the task and then move its cross-project priority card to Done:
 ```bash
 python bin/oaw task complete OAW-TSK-overnight-branch-review \
   --note "Merged and verified the reviewed overnight branches." \
-  --checks "python -m unittest (59 tests OK)"
+  --checks "uv run pytest (tests passed)"
 python bin/oaw board done OAW-TSK-overnight-branch-review
 ```
 

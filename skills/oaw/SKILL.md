@@ -139,7 +139,7 @@ At wrap-up, check whether substantive work occurred. If it did and no task owns 
 
 Use `oaw board ensure-backlog --project "Project Name"` to add a missing `Backlog` column before `Todo` on an existing project board without rewriting cards.
 
-## Research packet scaffolds
+## Research packet lifecycle
 
 Use the vault's Obsidian-compatible template to create research prompts; do not reconstruct packet structure from instructions:
 
@@ -151,9 +151,21 @@ OAW_VAULT=~/vaults/example oaw research scaffold \
   --date 2026-07-12
 ```
 
-The command writes `Projects/<project>/Research/<track>/Prompt.md` from `Templates/Research packet.md`, filling project, track, title, and date. It refuses an existing prompt unless `--force` is explicit; `--template` accepts another vault-relative template. Keep all local metadata in frontmatter or local-only sections before the single exact `## Deep research prompt` heading line; deeper headings and prose mentions do not establish the boundary. Everything from that heading onward is provider-visible and must stand alone for a reader with no vault access. After rendering, the scaffold validates that complete project and track metadata tokens do not cross that boundary; characters from short values may occur inside ordinary words. Use the `obsidian-research` skill for provider handoff, linting, result placeholders, and intake.
+The command writes `Prompt.md`, `Synthesis.md`, and the shared folder-scoped `Bases/Research packet.base`. It refuses an existing prompt unless `--force` is explicit; forcing never replaces an existing synthesis. The single exact `## Deep research prompt` heading must be followed only by one non-empty fenced `text` block. Its contents are the complete copy-ready provider request; local metadata, fence markers, and extra commentary are excluded from handoff.
 
-Matching an existing project prompt is not sufficient; lint the provider-visible handoff output before sending it.
+Immediately after launching exactly one provider run, register it:
+
+```bash
+OAW_VAULT=~/vaults/example oaw research start \
+  --project "Example Project" \
+  --track "architecture/provider-choice" \
+  --source "ChatGPT Pro" \
+  --url "https://example.com/share/run"
+```
+
+`start` creates one `Results - <Source>.md` with running status and provenance, appends it to the prompt's initially empty `## Running research sessions`, refuses unsafe or duplicate source labels and non-HTTP(S) URLs, and rolls back partial writes. It creates a missing synthesis/Base but never overwrites synthesis content.
+
+Use the `obsidian-research` skill for provider-visible handoff preflight, exact copy output, finished-report intake, raw-artifact preservation, and provider-specific normalization. Do not pre-create pending provider placeholders or use its legacy `set-url` command for OAW-owned project packets.
 
 ## Note intake
 

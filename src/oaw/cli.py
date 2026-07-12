@@ -14,6 +14,7 @@ import shutil
 import sys
 import tempfile
 import unicodedata
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,6 +37,8 @@ SAFE_EXPORT_TAG = "safe-export-personal"
 SAFE_EXPORT_SCOPE = "personal"
 RESEARCH_PACKET_TEMPLATE = Path("Templates/Research packet.md")
 DEEP_RESEARCH_HEADING = "## Deep research prompt"
+RUNNING_RESEARCH_HEADING = "## Running research sessions"
+RESEARCH_PACKET_BASE = Path("Bases/Research packet.base")
 FRONTMATTER_READ_LIMIT = 64 * 1024
 DEFAULT_EXPORT_ROOT = Path("~/obsidian-export")
 SESSION_ENV = [
@@ -166,14 +169,176 @@ def create_research_packet(args: argparse.Namespace) -> None:
             "rendered research prompt places local-only metadata after "
             f"'{DEEP_RESEARCH_HEADING}': {', '.join(leaked_fields)}"
         )
-    destination = project_root / "Research" / track / "Prompt.md"
+    provider_prompt_from_text(rendered)
+    packet_dir = project_root / "Research" / track
+    destination = packet_dir / "Prompt.md"
     if destination.exists() and not args.force:
         raise OawError(f"research prompt already exists: {destination.relative_to(root).as_posix()}")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(rendered, encoding="utf-8")
+    synthesis = packet_dir / "Synthesis.md"
+    base = root / RESEARCH_PACKET_BASE
+    transaction = VaultTransaction()
+    transaction.stage(destination, rendered)
+    if not synthesis.exists():
+        transaction.stage(
+            synthesis,
+            research_synthesis_text(
+                slugify(project_root.name), track.as_posix(), title, date.isoformat()
+            ),
+        )
+    if not base.exists():
+        transaction.stage(base, research_packet_base_text())
+    transaction.commit()
     print(f"Created: {destination.relative_to(root).as_posix()}")
+    print(f"Synthesis: {synthesis.relative_to(root).as_posix()}")
+    print(f"Base: {RESEARCH_PACKET_BASE.as_posix()}")
     print(f"Template: {template_rel.as_posix()}")
     print(f"Deep research prompt: self-contained provider-visible body")
+
+
+def provider_prompt_from_text(text: str) -> str:
+    matches = list(re.finditer(rf"(?m)^{re.escape(DEEP_RESEARCH_HEADING)}[ \t]*$", text))
+    if len(matches) != 1:
+        raise OawError(
+            f"research prompt must contain exactly one '{DEEP_RESEARCH_HEADING}' heading"
+        )
+    remainder = text[matches[0].end() :]
+    block = re.fullmatch(r"\s*```text[ \t]*\n(.*?)\n```[ \t]*\s*", remainder, re.DOTALL)
+    if block is None or not block.group(1).strip():
+        raise OawError(
+            f"'{DEEP_RESEARCH_HEADING}' must contain exactly one non-empty fenced text block"
+        )
+    return block.group(1).strip() + "\n"
+
+
+def research_synthesis_text(project: str, track: str, title: str, date: str) -> str:
+    return (
+        "---\n"
+        "type: research-synthesis\n"
+        f"project: {project}\n"
+        f"track: {track}\n"
+        f"title: {json.dumps(title, ensure_ascii=False)}\n"
+        "status: todo\n"
+        f"created: {date}\n"
+        "tags:\n"
+        "  - projects\n"
+        f"  - {project}\n"
+        "  - research-synthesis\n"
+        "---\n\n"
+        f"# Synthesis - {title}\n\n"
+        "## Source reports\n\n"
+        "![[Bases/Research packet.base#Source reports]]\n\n"
+        "## Synthesis\n\n"
+    )
+
+
+def research_packet_base_text() -> str:
+    return (
+        "filters:\n"
+        "  and:\n"
+        "    - type == \"research-result\"\n"
+        "    - file.folder == this.file.folder\n"
+        "views:\n"
+        "  - type: table\n"
+        "    name: Source reports\n"
+        "    order:\n"
+        "      - file.name\n"
+        "      - source\n"
+        "      - status\n"
+        "      - url\n"
+        "      - created\n"
+    )
+
+
+def safe_research_source(raw: str) -> str:
+    source = raw.strip()
+    if (
+        not source
+        or source in {".", ".."}
+        or source != raw
+        or any(ch in source for ch in '/\\:*?"<>|')
+        or any(unicodedata.category(ch).startswith("C") for ch in source)
+        or Path(source).name != source
+    ):
+        raise OawError(
+            "research start requires a safe --source label without surrounding whitespace, "
+            "path separators, traversal components, or control characters"
+        )
+    return source
+
+
+def http_url(raw: str) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+    except ValueError as exc:
+        raise OawError("research start --url must be an absolute HTTP(S) URL") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise OawError("research start --url must be an absolute HTTP(S) URL")
+    return raw
+
+
+def start_research_run(args: argparse.Namespace) -> None:
+    root = vault_root()
+    project_root, _ = resolve_project_root(args.project, root)
+    track = safe_relative_path(args.track, "track")
+    source = safe_research_source(args.source)
+    url = http_url(args.url)
+    packet_dir = project_root / "Research" / track
+    prompt_path = packet_dir / "Prompt.md"
+    if not prompt_path.is_file():
+        raise OawError(f"research prompt not found: {prompt_path.relative_to(root).as_posix()}")
+    prompt = prompt_path.read_text(encoding="utf-8")
+    provider_prompt_from_text(prompt)
+    if len(re.findall(rf"(?m)^{re.escape(RUNNING_RESEARCH_HEADING)}[ \t]*$", prompt)) != 1:
+        raise OawError(
+            f"research prompt must contain exactly one '{RUNNING_RESEARCH_HEADING}' heading"
+        )
+    result = packet_dir / f"Results - {source}.md"
+    if result.exists():
+        raise OawError(f"research source already exists: {result.relative_to(root).as_posix()}")
+    _, frontmatter, _ = split_note(prompt)
+    metadata = parse_frontmatter(frontmatter)
+    title = metadata.get("title")
+    if not isinstance(title, str) or not title.strip():
+        raise OawError("research prompt frontmatter requires a non-empty title")
+    project = slugify(project_root.name)
+    created = _dt.date.today().isoformat()
+    entry = f"{source}: [running]({url})"
+    updated_prompt = append_to_section(prompt, RUNNING_RESEARCH_HEADING[3:], entry)
+    result_text = (
+        "---\n"
+        "type: research-result\n"
+        f"source: {json.dumps(source, ensure_ascii=False)}\n"
+        f"url: {json.dumps(url, ensure_ascii=False)}\n"
+        "status: running\n"
+        f"project: {project}\n"
+        f"track: {track.as_posix()}\n"
+        f"created: {created}\n"
+        "tags:\n"
+        "  - projects\n"
+        f"  - {project}\n"
+        "  - research-result\n"
+        "---\n\n"
+        f"# Results - {source}\n\n"
+        f"Topic: {title}\n\n"
+        "The provider run is in progress. Ingest the completed report with the "
+        "obsidian-research helper.\n"
+    )
+    synthesis = packet_dir / "Synthesis.md"
+    base = root / RESEARCH_PACKET_BASE
+    transaction = VaultTransaction()
+    transaction.stage(result, result_text)
+    transaction.stage(prompt_path, updated_prompt)
+    if not synthesis.exists():
+        transaction.stage(
+            synthesis,
+            research_synthesis_text(project, track.as_posix(), title, created),
+        )
+    if not base.exists():
+        transaction.stage(base, research_packet_base_text())
+    transaction.commit()
+    print(f"Created: {result.relative_to(root).as_posix()}")
+    print(f"Status: running")
+    print(f"Prompt: updated")
 
 
 def strip_obs_prefix(raw_id: str) -> str:
@@ -2381,7 +2546,7 @@ def build_parser() -> argparse.ArgumentParser:
     research = sub.add_parser("research", help="research packet utilities")
     research_sub = research.add_subparsers(dest="research_command", required=True)
     research_scaffold = research_sub.add_parser(
-        "scaffold", help="create Prompt.md from the vault research packet template"
+        "scaffold", help="create Prompt.md and Synthesis.md from the vault research template"
     )
     research_scaffold.add_argument(
         "--project", required=True, help="project alias (obs:OAW) or folder name under Projects/"
@@ -2396,7 +2561,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=RESEARCH_PACKET_TEMPLATE.as_posix(),
         help="vault-relative template path, default: Templates/Research packet.md",
     )
-    research_scaffold.add_argument("--force", action="store_true", help="replace Prompt.md")
+    research_scaffold.add_argument(
+        "--force", action="store_true", help="replace Prompt.md; never replace Synthesis.md"
+    )
+    research_start = research_sub.add_parser(
+        "start", help="register one launched provider run in an existing research packet"
+    )
+    research_start.add_argument(
+        "--project", required=True, help="project alias (obs:OAW) or folder name under Projects/"
+    )
+    research_start.add_argument(
+        "--track", required=True, help="path below the project's Research/ folder"
+    )
+    research_start.add_argument("--source", required=True, help="safe human source label")
+    research_start.add_argument("--url", required=True, help="launched run's HTTP(S) URL")
 
     task = sub.add_parser("task", help="project task lifecycle")
     task_sub = task.add_subparsers(dest="task_command", required=True)
@@ -2667,6 +2845,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "research":
             if args.research_command == "scaffold":
                 create_research_packet(args)
+            elif args.research_command == "start":
+                start_research_run(args)
             else:
                 parser.error("unknown research command")
         elif args.command == "task":

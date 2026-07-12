@@ -92,10 +92,6 @@ created: {{date}}
 
 ## Running research sessions
 
-- ChatGPT:
-- Gemini:
-- Claude:
-
 ## Local packet context
 
 - Project: {{project}}
@@ -103,12 +99,14 @@ created: {{date}}
 
 ## Deep research prompt
 
+```text
 Research {{title}} for a reader with no access to local notes or files.
 
 Precise questions:
 1. Replace this placeholder with the research questions.
 
 Deliverable: Replace this placeholder with the expected output format.
+```
 """,
         )
         write(
@@ -254,6 +252,8 @@ aliases:
         self.assertEqual(
             proc.stdout,
             "Created: Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Prompt.md\n"
+            "Synthesis: Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Synthesis.md\n"
+            "Base: Bases/Research packet.base\n"
             "Template: Templates/Research packet.md\n"
             "Deep research prompt: self-contained provider-visible body\n",
         )
@@ -269,6 +269,15 @@ aliases:
         self.assertIn("Research Provider choice", provider)
         self.assertNotIn("obsidian-agent-workflow", provider)
         self.assertNotIn("architecture/provider-choice", provider)
+        self.assertIn("```text\nResearch Provider choice", provider)
+        synthesis = (
+            self.vault
+            / "Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Synthesis.md"
+        )
+        synthesis_text = synthesis.read_text(encoding="utf-8")
+        self.assertIn("type: research-synthesis", synthesis_text)
+        self.assertIn("![[Bases/Research packet.base#Source reports]]", synthesis_text)
+        self.assertTrue((self.vault / "Bases/Research packet.base").is_file())
 
     def test_research_scaffold_refuses_existing_prompt_without_force(self):
         args = (
@@ -375,6 +384,73 @@ id: X-index
         prompt = self.vault / "Projects/X/Research/a/b/Prompt.md"
         self.assertTrue(prompt.is_file())
         self.assertIn("expected output format", prompt.read_text(encoding="utf-8"))
+
+    def test_research_scaffold_force_preserves_existing_synthesis(self):
+        args = (
+            "research", "scaffold", "--project", "obs:OAW", "--track", "topic",
+            "--title", "Topic", "--date", "2026-07-12",
+        )
+        self.assertEqual(self.run_oaw(*args).returncode, 0)
+        synthesis = self.vault / "Projects/Obsidian Agent Workflow/Research/topic/Synthesis.md"
+        synthesis.write_text("irreplaceable synthesis\n", encoding="utf-8")
+        proc = self.run_oaw(*args, "--force")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(synthesis.read_text(encoding="utf-8"), "irreplaceable synthesis\n")
+
+    def test_research_start_creates_one_running_result_and_updates_prompt(self):
+        scaffold = self.run_oaw(
+            "research", "scaffold", "--project", "obs:OAW", "--track", "topic",
+            "--title", "Topic", "--date", "2026-07-12",
+        )
+        self.assertEqual(scaffold.returncode, 0, scaffold.stderr)
+        proc = self.run_oaw(
+            "research", "start", "--project", "obs:OAW", "--track", "topic",
+            "--source", "ChatGPT Pro", "--url", "https://chatgpt.com/share/example",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        packet = self.vault / "Projects/Obsidian Agent Workflow/Research/topic"
+        results = sorted(packet.glob("Results - *.md"))
+        self.assertEqual([path.name for path in results], ["Results - ChatGPT Pro.md"])
+        result = results[0].read_text(encoding="utf-8")
+        self.assertIn('source: "ChatGPT Pro"', result)
+        self.assertIn('url: "https://chatgpt.com/share/example"', result)
+        self.assertIn("status: running", result)
+        prompt = (packet / "Prompt.md").read_text(encoding="utf-8")
+        self.assertIn("- ChatGPT Pro: [running](https://chatgpt.com/share/example)", prompt)
+
+    def test_research_start_rejects_unsafe_duplicate_and_non_http_sources(self):
+        self.assertEqual(self.run_oaw(
+            "research", "scaffold", "--project", "obs:OAW", "--track", "topic",
+            "--title", "Topic",
+        ).returncode, 0)
+        common = ("research", "start", "--project", "obs:OAW", "--track", "topic")
+        unsafe = self.run_oaw(*common, "--source", "../ChatGPT", "--url", "https://example.com")
+        self.assertEqual(unsafe.returncode, 1)
+        self.assertIn("safe --source label", unsafe.stderr)
+        reserved = self.run_oaw(
+            *common, "--source", "ChatGPT: Pro", "--url", "https://example.com"
+        )
+        self.assertEqual(reserved.returncode, 1)
+        self.assertIn("safe --source label", reserved.stderr)
+        bad_url = self.run_oaw(*common, "--source", "ChatGPT", "--url", "file:///tmp/report")
+        self.assertEqual(bad_url.returncode, 1)
+        self.assertIn("HTTP(S)", bad_url.stderr)
+        first = self.run_oaw(*common, "--source", "ChatGPT", "--url", "https://example.com")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        duplicate = self.run_oaw(*common, "--source", "ChatGPT", "--url", "https://other.test")
+        self.assertEqual(duplicate.returncode, 1)
+        self.assertIn("source already exists", duplicate.stderr)
+
+    def test_research_start_rejects_malformed_packet_without_partial_write(self):
+        packet = self.vault / "Projects/Obsidian Agent Workflow/Research/topic"
+        write(packet / "Prompt.md", "---\ntitle: Topic\n---\n\n## Running research sessions\n")
+        proc = self.run_oaw(
+            "research", "start", "--project", "obs:OAW", "--track", "topic",
+            "--source", "ChatGPT", "--url", "https://example.com",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertFalse((packet / "Results - ChatGPT.md").exists())
+        self.assertFalse((packet / "Synthesis.md").exists())
 
     def test_resolve_short_project_alias_to_project_index(self):
         proc = self.run_oaw("resolve", "--json", "obs:CDX")
