@@ -137,9 +137,30 @@ New task notes are created with `oaw task create` instead of hand-writing frontm
 oaw task create --project obs:OAW --title "Example task" \
   --note "Initial problem statement." --priority 2 --effort M
 oaw task create --project "Obsidian Agent Workflow" --title "Chosen task" --status todo
+oaw task create --from-capture obs:OAW-CAP-routing-regression \
+  --title "Investigate routing regression" --status todo
+oaw task create --from-capture obs:OAW-CAP-urgent --title "Handle urgent request" --start
 ```
 
 `--project` accepts a project alias (`obs:OAW`) or a folder name under `Projects/`. The note is created under the project's `Tasks/` folder with standard frontmatter (`type`, `project`, `status`, `created`, `id`, `aliases`, tags, optional `priority`/`effort`), a `Problem` section from `--note`, a durable link to the project index, and an `## Agent sessions` trace. The task ID defaults to `<ALIAS>-TSK-<slug>` derived from the title; pass `--id` to override. Status is `backlog` by default with an explicit `--status todo` option, and the board card is registered through the same code as the lifecycle commands. Duplicate IDs and existing paths fail without writing anything. Session recording follows the lifecycle rules: a real harness ID is required unless `--allow-missing-session-id` is passed, and no ID is ever fabricated.
+
+When an actionable capture becomes material work, pass its stable ID with `--from-capture`. The project and title default to the capture's project folder and heading, while explicit `--project` and `--title` still override them. The command preserves the capture note and body, records its ID as `source-capture` on the task, adds durable links in both directions, appends the task wikilink to the capture's `destinations` frontmatter, registers the task on the project board, and only then changes the capture to `status: triaged`. Those writes commit together and roll back together on failure. The capture's `Outcome` remains an expected-next-shape statement; promotion never replaces it with completion prose. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent. `--start` uses the same real session provenance as creation and is only valid with `--from-capture`.
+
+## Research packet scaffolds
+
+Create a project's `Research/<track>/Prompt.md` from the vault template instead of rebuilding the packet by hand:
+
+```bash
+OAW_VAULT=~/vaults/example oaw research scaffold \
+  --project "Example Project" \
+  --track "architecture/provider-choice" \
+  --title "Provider choice" \
+  --date 2026-07-12
+```
+
+The default template is the vault-relative `Templates/Research packet.md`; override it with `--template <vault-relative-path>`. The command fills the project, track, title, and date fields and refuses to replace an existing prompt unless `--force` is explicit. It also verifies that the template has exactly one line whose Markdown heading is `## Deep research prompt` (deeper headings and prose mentions do not count) and, after rendering, that project/track metadata does not appear there as a complete token. Characters from short metadata values may still occur inside ordinary words. Frontmatter and local-only sections belong before that heading; everything from that heading onward is the self-contained provider-visible handoff body.
+
+Matching an existing project prompt is not sufficient; lint the provider-visible handoff output before sending it.
 
 ## Boards
 

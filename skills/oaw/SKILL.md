@@ -112,6 +112,10 @@ Lifecycle writes apply only to task notes under `Projects/*/Tasks` (the CLI enfo
 
 ```bash
 oaw task create --project obs:OAW --title "Example task" --note "Initial problem statement."
+oaw task create --from-capture obs:OAW-CAP-routing-regression \
+  --title "Investigate routing regression" --status todo
+oaw task create --from-capture obs:OAW-CAP-urgent \
+  --title "Handle urgent request" --start
 oaw task backlog OAW-TSK-cli --note "Parked until the dependency is ready."
 oaw task promote OAW-TSK-cli --note "Selected for the next session."
 oaw task start OAW-TSK-cli --note "Started resolver implementation."
@@ -120,6 +124,7 @@ oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "pyt
 ```
 
 - `create` makes a new task note under the project's `Tasks/` folder with standard frontmatter, a `Problem` section, a durable project-index link, an `## Agent sessions` trace, and a board card. `--project` takes a project alias (`obs:OAW`) or `Projects/` folder name; the ID defaults to `<ALIAS>-TSK-<slug>` (override with `--id`); status defaults to `backlog` (`--status todo` for selected work); optional `--priority 1|2|3`, `--effort S|M|L`, and repeatable `--tag`. Duplicate IDs or existing paths fail without writing. Use it instead of hand-writing task frontmatter.
+- An actionable request on an `obs:CAP-*` or project capture ID is a promotion trigger: before investigation, implementation, or other material work, run `task create --from-capture <CAP-ID>`. The project and title default from a capture under `Projects/<Project>/`, or may be explicit. Promotion preserves the capture note, body, stable ID, and expected-next-shape `Outcome`; records `source-capture` on the task; adds durable links in both directions; appends the task wikilink to the capture's `destinations` frontmatter; registers the project-board card; and changes the capture to `triaged` only when every write succeeds. Failure rolls all writes back. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent. `--start` does not relax session-ID requirements or invent provenance.
 - `backlog` sets `status: backlog`; `promote` sets `status: todo`; `start` sets `status: active`; `complete` sets `status: done`.
 - `complete` requires `--checks` naming the verification actually run; do not fabricate checks.
 - `note` appends a dated entry under `## Agent sessions` without changing `status` or any board. Use it for delegation reviews, design notes, partial-progress records, and other trace entries on task notes in any status.
@@ -130,7 +135,25 @@ oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "pyt
 
 Project boards should use the column order `Backlog` → `Todo` → `Active` → `Done`. Keep `Todo` for near-term chosen work. Put unscheduled known work in `Backlog`, and when a session decides what should happen next, run `oaw task promote ...` so the board reflects the decision.
 
+At wrap-up, check whether substantive work occurred. If it did and no task owns it, create or promote the source capture into a task before retrospective closeout. A retrospective may close only after that task is `done` via `oaw task complete ... --checks "<verification actually run>"`; link the retrospective primarily to the completed task and retain the source-capture link as provenance. Do not treat a capture `Outcome` as a completion report.
+
 Use `oaw board ensure-backlog --project "Project Name"` to add a missing `Backlog` column before `Todo` on an existing project board without rewriting cards.
+
+## Research packet scaffolds
+
+Use the vault's Obsidian-compatible template to create research prompts; do not reconstruct packet structure from instructions:
+
+```bash
+OAW_VAULT=~/vaults/example oaw research scaffold \
+  --project "Example Project" \
+  --track "architecture/provider-choice" \
+  --title "Provider choice" \
+  --date 2026-07-12
+```
+
+The command writes `Projects/<project>/Research/<track>/Prompt.md` from `Templates/Research packet.md`, filling project, track, title, and date. It refuses an existing prompt unless `--force` is explicit; `--template` accepts another vault-relative template. Keep all local metadata in frontmatter or local-only sections before the single exact `## Deep research prompt` heading line; deeper headings and prose mentions do not establish the boundary. Everything from that heading onward is provider-visible and must stand alone for a reader with no vault access. After rendering, the scaffold validates that complete project and track metadata tokens do not cross that boundary; characters from short values may occur inside ordinary words. Use the `obsidian-research` skill for provider handoff, linting, result placeholders, and intake.
+
+Matching an existing project prompt is not sufficient; lint the provider-visible handoff output before sending it.
 
 ## Note intake
 

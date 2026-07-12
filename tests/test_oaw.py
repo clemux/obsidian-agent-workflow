@@ -79,6 +79,39 @@ aliases:
 """,
         )
         write(
+            self.vault / "Templates/Research packet.md",
+            """---
+type: research-prompt
+project: {{project}}
+track: {{track}}
+title: {{title}}
+created: {{date}}
+---
+
+# Prompt - {{title}}
+
+## Running research sessions
+
+- ChatGPT:
+- Gemini:
+- Claude:
+
+## Local packet context
+
+- Project: {{project}}
+- Track: {{track}}
+
+## Deep research prompt
+
+Research {{title}} for a reader with no access to local notes or files.
+
+Precise questions:
+1. Replace this placeholder with the research questions.
+
+Deliverable: Replace this placeholder with the expected output format.
+""",
+        )
+        write(
             self.vault / "Projects/Codex Delegation/Index.md",
             """---
 type: project
@@ -203,6 +236,145 @@ aliases:
         self.assertEqual(data["id"], "AGT-TSK-obsidian-task-ids")
         self.assertEqual(data["matched_by"], "id")
         self.assertIn("Agents/Tasks", data["relative_path"])
+
+    def test_research_scaffold_renders_template_with_audience_boundary(self):
+        proc = self.run_oaw(
+            "research",
+            "scaffold",
+            "--project",
+            "obs:OAW",
+            "--track",
+            "architecture/provider-choice",
+            "--title",
+            "Provider choice",
+            "--date",
+            "2026-07-12",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stdout,
+            "Created: Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Prompt.md\n"
+            "Template: Templates/Research packet.md\n"
+            "Deep research prompt: self-contained provider-visible body\n",
+        )
+        prompt = (
+            self.vault
+            / "Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Prompt.md"
+        ).read_text(encoding="utf-8")
+        local, provider = prompt.split("## Deep research prompt", 1)
+        self.assertIn("project: obsidian-agent-workflow", local)
+        self.assertIn("track: architecture/provider-choice", local)
+        self.assertIn("created: 2026-07-12", local)
+        self.assertIn("# Prompt - Provider choice", local)
+        self.assertIn("Research Provider choice", provider)
+        self.assertNotIn("obsidian-agent-workflow", provider)
+        self.assertNotIn("architecture/provider-choice", provider)
+
+    def test_research_scaffold_refuses_existing_prompt_without_force(self):
+        args = (
+            "research",
+            "scaffold",
+            "--project",
+            "Obsidian Agent Workflow",
+            "--track",
+            "provider-choice",
+            "--title",
+            "Provider choice",
+        )
+        self.assertEqual(self.run_oaw(*args).returncode, 0)
+        proc = self.run_oaw(*args)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("research prompt already exists", proc.stderr)
+
+    def test_research_scaffold_rejects_template_that_leaks_local_metadata(self):
+        template = self.vault / "Templates/Research packet.md"
+        template.write_text(
+            template.read_text(encoding="utf-8") + "\nLocal track: {{track}}\n",
+            encoding="utf-8",
+        )
+        proc = self.run_oaw(
+            "research",
+            "scaffold",
+            "--project",
+            "Obsidian Agent Workflow",
+            "--track",
+            "provider-choice",
+            "--title",
+            "Provider choice",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("places local-only fields", proc.stderr)
+
+    def test_research_scaffold_requires_exact_provider_boundary_heading(self):
+        template = self.vault / "Templates/Research packet.md"
+        template.write_text(
+            template.read_text(encoding="utf-8").replace(
+                "## Deep research prompt", "### Deep research prompt"
+            ),
+            encoding="utf-8",
+        )
+        proc = self.run_oaw(
+            "research",
+            "scaffold",
+            "--project",
+            "Obsidian Agent Workflow",
+            "--track",
+            "provider-choice",
+            "--title",
+            "Provider choice",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("must contain exactly one '## Deep research prompt' heading", proc.stderr)
+
+    def test_research_scaffold_rejects_rendered_metadata_after_boundary(self):
+        template = self.vault / "Templates/Research packet.md"
+        template.write_text(
+            template.read_text(encoding="utf-8").replace(
+                "Research {{title}}", "Research obsidian-agent-workflow"
+            ),
+            encoding="utf-8",
+        )
+        proc = self.run_oaw(
+            "research",
+            "scaffold",
+            "--project",
+            "Obsidian Agent Workflow",
+            "--track",
+            "provider-choice",
+            "--title",
+            "Provider choice",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("rendered research prompt places local-only metadata", proc.stderr)
+        self.assertIn("project", proc.stderr)
+
+    def test_research_scaffold_allows_short_metadata_characters_inside_words(self):
+        write(
+            self.vault / "Projects/X/Index.md",
+            """---
+type: project
+id: X-index
+---
+
+# X
+""",
+        )
+        proc = self.run_oaw(
+            "research",
+            "scaffold",
+            "--project",
+            "X",
+            "--track",
+            "a/b",
+            "--title",
+            "T",
+            "--date",
+            "2026-07-12",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        prompt = self.vault / "Projects/X/Research/a/b/Prompt.md"
+        self.assertTrue(prompt.is_file())
+        self.assertIn("expected output format", prompt.read_text(encoding="utf-8"))
 
     def test_resolve_short_project_alias_to_project_index(self):
         proc = self.run_oaw("resolve", "--json", "obs:CDX")
@@ -2108,3 +2280,173 @@ aliases:
         )
         self.assertNotIn("session-ids:", note)
         self.assertIn("`session_id=unavailable`", note)
+
+    def test_task_create_from_capture_is_atomic_and_preserves_provenance(self):
+        capture_path = self.vault / "Projects/Obsidian Agent Workflow/Inbox/Active capture.md"
+        original = capture_path.read_text(encoding="utf-8")
+        capture_path.write_text(
+            original
+            + "\n## Outcome\n\nExpected next shape: route the regression into a verified task.\n"
+            + "\n## Evidence\n\nRouting-regression investigation details stay here.\n",
+            encoding="utf-8",
+        )
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--from-capture",
+            "obs:OAW-CAP-active",
+            "--title",
+            "Investigate routing regression",
+            "--status",
+            "todo",
+            "--note",
+            "Reproduce and fix the routing regression.",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Status: todo", proc.stdout)
+        self.assertIn("Capture: OAW-CAP-active -> triaged", proc.stdout)
+        task_path = (
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Investigate routing regression.md"
+        )
+        task = task_path.read_text(encoding="utf-8")
+        capture = capture_path.read_text(encoding="utf-8")
+        self.assertIn("source-capture: OAW-CAP-active", task)
+        self.assertIn(
+            "[[Projects/Obsidian Agent Workflow/Inbox/Active capture|OAW-CAP-active]]",
+            task,
+        )
+        self.assertIn(
+            "[[Projects/Obsidian Agent Workflow/Tasks/Investigate routing regression|OAW-TSK-investigate-routing-regression]]",
+            capture,
+        )
+        self.assertIn(
+            'destinations:\n  - "[[Projects/Obsidian Agent Workflow/Tasks/Investigate routing regression|OAW-TSK-investigate-routing-regression]]"',
+            capture,
+        )
+        self.assertIn("status: triaged", capture)
+        self.assertIn("Expected next shape: route the regression into a verified task.", capture)
+        self.assertIn("Routing-regression investigation details stay here.", capture)
+        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("OAW-TSK-investigate-routing-regression", board)
+
+    def test_task_create_from_capture_start_creates_active_task(self):
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--from-capture",
+            "OAW-CAP-active",
+            "--title",
+            "Start capture work",
+            "--start",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Status: active", proc.stdout)
+        task = (
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Start capture work.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("status: active", task)
+        self.assertIn("session-ids:\n  - test-thread", task)
+        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
+            encoding="utf-8"
+        )
+        active = board.split("## Active", 1)[1].split("## Todo", 1)[0]
+        self.assertIn("OAW-TSK-start-capture-work", active)
+
+    def test_task_create_from_capture_start_requires_real_session_provenance(self):
+        capture_path = self.vault / "Projects/Obsidian Agent Workflow/Inbox/Active capture.md"
+        before = capture_path.read_text(encoding="utf-8")
+        env = {
+            "CODEX_THREAD_ID": "",
+            "CLAUDE_SESSION_ID": "",
+            "CLAUDE_CODE_SESSION_ID": "",
+            "OPENCODE_SESSION_ID": "",
+            "GEMINI_SESSION_ID": "",
+        }
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--from-capture",
+            "OAW-CAP-active",
+            "--title",
+            "Start without provenance",
+            "--start",
+            env=env,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("no stable session ID", proc.stderr)
+        self.assertEqual(before, capture_path.read_text(encoding="utf-8"))
+        self.assertFalse(
+            (
+                self.vault / "Projects/Obsidian Agent Workflow/Tasks/Start without provenance.md"
+            ).exists()
+        )
+
+    def test_task_create_rejects_conflicting_capture_intents(self):
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--from-capture",
+            "OAW-CAP-active",
+            "--title",
+            "Conflicting intent",
+            "--status",
+            "todo",
+            "--start",
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("not allowed with argument", proc.stderr)
+
+    def test_task_create_from_capture_creation_failure_leaves_capture_unchanged(self):
+        capture_path = self.vault / "Projects/Obsidian Agent Workflow/Inbox/Active capture.md"
+        before = capture_path.read_text(encoding="utf-8")
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        board_before = board_path.read_text(encoding="utf-8")
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--from-capture",
+            "OAW-CAP-active",
+            "--title",
+            "Duplicate task",
+            "--id",
+            "OAW-TSK-cli",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("already in use", proc.stderr)
+        self.assertEqual(before, capture_path.read_text(encoding="utf-8"))
+        self.assertEqual(board_before, board_path.read_text(encoding="utf-8"))
+
+    def test_task_create_from_capture_link_failure_leaves_capture_unchanged(self):
+        capture_path = self.vault / "Projects/Obsidian Agent Workflow/Inbox/Alias capture.md"
+        write(
+            capture_path,
+            """---
+type: capture
+project: obsidian-agent-workflow
+status: capture
+aliases:
+  - OAW-CAP-alias-only
+---
+
+# Alias capture
+
+Routing-regression evidence.
+""",
+        )
+        before = capture_path.read_text(encoding="utf-8")
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--from-capture",
+            "OAW-CAP-alias-only",
+            "--title",
+            "Must not be created",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("stable frontmatter id", proc.stderr)
+        self.assertEqual(before, capture_path.read_text(encoding="utf-8"))
+        self.assertFalse(
+            (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Must not be created.md").exists()
+        )

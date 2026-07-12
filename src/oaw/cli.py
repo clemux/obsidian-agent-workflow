@@ -24,6 +24,7 @@ from .frontmatter import (
     set_frontmatter_scalar,
 )
 from .notes import read_note, split_note
+from .runs import VaultTransaction
 
 DEFAULT_VAULT = Path("/path/to/vault")
 NEXT_BOARD = Path("Projects/Next steps.md")
@@ -33,6 +34,8 @@ SAFE_EXPORT_DESTINATION = Path("Imports/Safe export")
 SAFE_EXPORT_QUARANTINE = Path(".rejected")
 SAFE_EXPORT_TAG = "safe-export-personal"
 SAFE_EXPORT_SCOPE = "personal"
+RESEARCH_PACKET_TEMPLATE = Path("Templates/Research packet.md")
+DEEP_RESEARCH_HEADING = "## Deep research prompt"
 FRONTMATTER_READ_LIMIT = 64 * 1024
 DEFAULT_EXPORT_ROOT = Path("~/obsidian-export")
 SESSION_ENV = [
@@ -90,6 +93,87 @@ class WikiLink:
 
 def vault_root() -> Path:
     return Path(os.environ.get("OAW_VAULT", DEFAULT_VAULT)).expanduser().resolve()
+
+
+def safe_relative_path(raw: str, label: str) -> Path:
+    path = Path(raw.strip())
+    if not raw.strip() or path.is_absolute() or ".." in path.parts:
+        raise OawError(f"{label} must be a non-empty vault-relative path without '..'")
+    return path
+
+
+def create_research_packet(args: argparse.Namespace) -> None:
+    root = vault_root()
+    project_root, _ = resolve_project_root(args.project, root)
+    track = safe_relative_path(args.track, "track")
+    title = args.title.strip()
+    if not title or "\n" in title or "\r" in title:
+        raise OawError("research scaffold requires a non-empty, single-line --title")
+    try:
+        date = _dt.date.fromisoformat(args.date) if args.date else _dt.date.today()
+    except ValueError as exc:
+        raise OawError("--date must use YYYY-MM-DD") from exc
+    template_rel = safe_relative_path(args.template, "template")
+    template_path = root / template_rel
+    if not template_path.is_file():
+        raise OawError(f"research packet template not found: {template_rel.as_posix()}")
+
+    template_text = template_path.read_text(encoding="utf-8")
+    boundary_matches = list(
+        re.finditer(rf"(?m)^{re.escape(DEEP_RESEARCH_HEADING)}[ \t]*$", template_text)
+    )
+    if len(boundary_matches) != 1:
+        raise OawError(
+            f"research packet template must contain exactly one '{DEEP_RESEARCH_HEADING}' heading"
+        )
+    boundary = boundary_matches[0]
+    provider_template = template_text[boundary.end() :]
+    local_tokens = [token for token in ("{{project}}", "{{track}}") if token in provider_template]
+    if local_tokens:
+        raise OawError(
+            "research packet template places local-only fields after "
+            f"'{DEEP_RESEARCH_HEADING}': {', '.join(local_tokens)}"
+        )
+    rendered = template_text
+    fields = {
+        "{{project}}": slugify(project_root.name),
+        "{{track}}": track.as_posix(),
+        "{{title}}": title,
+        "{{date}}": date.isoformat(),
+    }
+    for token, value in fields.items():
+        if token not in rendered:
+            raise OawError(f"research packet template is missing required field {token}")
+        rendered = rendered.replace(token, value)
+    rendered_boundary = re.search(
+        rf"(?m)^{re.escape(DEEP_RESEARCH_HEADING)}[ \t]*$", rendered
+    )
+    if rendered_boundary is None:
+        raise OawError(
+            f"rendered research prompt is missing '{DEEP_RESEARCH_HEADING}' heading"
+        )
+    rendered_provider = rendered[rendered_boundary.end() :]
+    leaked_fields = [
+        name
+        for name in ("project", "track")
+        if re.search(
+            rf"(?<!\w){re.escape(fields[f'{{{{{name}}}}}'])}(?!\w)",
+            rendered_provider,
+        )
+    ]
+    if leaked_fields:
+        raise OawError(
+            "rendered research prompt places local-only metadata after "
+            f"'{DEEP_RESEARCH_HEADING}': {', '.join(leaked_fields)}"
+        )
+    destination = project_root / "Research" / track / "Prompt.md"
+    if destination.exists() and not args.force:
+        raise OawError(f"research prompt already exists: {destination.relative_to(root).as_posix()}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(rendered, encoding="utf-8")
+    print(f"Created: {destination.relative_to(root).as_posix()}")
+    print(f"Template: {template_rel.as_posix()}")
+    print(f"Deep research prompt: self-contained provider-visible body")
 
 
 def strip_obs_prefix(raw_id: str) -> str:
@@ -497,6 +581,47 @@ def move_board_card(
     return True
 
 
+def updated_board_text(
+    project_root: Path, task_path: Path, title: str, note_id: str, status: str
+) -> tuple[Path | None, str | None]:
+    """Return a board update without writing it, for multi-file transactions."""
+    board = project_root / "Board.md"
+    if not board.exists():
+        return None, None
+    lines = board.read_text(encoding="utf-8").splitlines()
+    target_column = {
+        "backlog": "Backlog",
+        "todo": "Todo",
+        "active": "Active",
+        "done": "Done",
+    }[status]
+    identifiers = {task_path.stem, note_id}
+    new_lines: list[str] = []
+    existing_card = ""
+    target_heading_idx: int | None = None
+    for line in lines:
+        heading = re.match(r"^##\s+(.+?)\s*$", line)
+        if heading:
+            if heading.group(1) == target_column:
+                target_heading_idx = len(new_lines)
+            new_lines.append(line)
+            continue
+        if line.startswith("- [ ] ") and any(token in line for token in identifiers):
+            existing_card = line
+            continue
+        new_lines.append(line)
+    card = existing_card or card_line(task_path, project_root, title, note_id)
+    if target_heading_idx is None:
+        insert_at = board_column_insert_at(new_lines, target_column)
+        new_lines[insert_at:insert_at] = [f"## {target_column}", "", card, ""]
+    else:
+        insert_at = target_heading_idx + 1
+        while insert_at < len(new_lines) and new_lines[insert_at] == "":
+            insert_at += 1
+        new_lines.insert(insert_at, card)
+    return board, "\n".join(new_lines) + "\n"
+
+
 def board_path(root: Path) -> Path:
     board = root / NEXT_BOARD
     if not board.exists():
@@ -672,12 +797,33 @@ def resolve_project_root(raw: str, root: Path) -> tuple[Path, str | None]:
 
 def create_task(args: argparse.Namespace) -> None:
     root = vault_root()
-    title = args.title.strip()
+    capture = resolve_id(args.from_capture, root) if args.from_capture else None
+    if capture:
+        if capture.frontmatter.get("type") != "capture":
+            raise OawError(f"from-capture source is not a capture note: {capture.relpath}")
+        if not capture.note_id:
+            raise OawError("from-capture source must have a stable frontmatter id")
+        if capture.frontmatter.get("status") == "triaged":
+            raise OawError(f"capture is already triaged: {capture.note_id}")
+    elif args.start:
+        raise OawError("--start is only supported with --from-capture")
+    title = (args.title or (capture.title if capture else "")).strip()
     if not title:
         raise OawError("task create requires a non-empty --title")
     if "/" in title or title.startswith("."):
         raise OawError("task title must not contain '/' or start with '.'")
-    project_root, alias = resolve_project_root(args.project, root)
+    raw_project = args.project
+    if not raw_project and capture:
+        try:
+            relative = capture.path.relative_to(root / "Projects")
+            raw_project = relative.parts[0]
+        except (ValueError, IndexError) as exc:
+            raise OawError("--project is required when the capture is outside Projects/") from exc
+    if not raw_project:
+        raise OawError(
+            "task create requires --project unless --from-capture identifies a project capture"
+        )
+    project_root, alias = resolve_project_root(raw_project, root)
     provider, session_ref = detect_session(args.allow_missing_session_id)
     if args.id is not None:
         note_id = args.id.strip()
@@ -703,11 +849,12 @@ def create_task(args: argparse.Namespace) -> None:
         raise OawError(f"task note already exists: {relpath.as_posix()}")
     today = _dt.date.today().isoformat()
     project_slug = slugify(project_root.name)
+    status = "active" if args.start else args.status
     lines = [
         "---",
         "type: task",
         f"project: {project_slug}",
-        f"status: {args.status}",
+        f"status: {status}",
         f"created: {today}",
     ]
     if args.priority is not None:
@@ -723,6 +870,8 @@ def create_task(args: argparse.Namespace) -> None:
         f"  - {project_slug}",
         "  - task",
     ]
+    if capture:
+        lines.append(f"source-capture: {capture.note_id}")
     for tag in args.tag or []:
         cleaned = tag.strip()
         if cleaned:
@@ -738,18 +887,43 @@ def create_task(args: argparse.Namespace) -> None:
         index_rel = index.relative_to(root).with_suffix("").as_posix()
         lines.append(f"- [[{index_rel}|{alias}-index]]")
         lines.append("")
+    if capture:
+        lines.append(f"- {durable_wikilink(capture, capture.note_id)}")
+        lines.append("")
     lines += [
         "## Agent sessions",
         "",
         f"- {today} - {provider} - `{session_ref}` - Created task note.",
     ]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    moved = move_board_card(project_root, path, title, note_id, args.status)
+    task_text = "\n".join(lines) + "\n"
+    if capture:
+        task_link = f"[[{relpath.with_suffix('').as_posix()}|{note_id}]]"
+        capture_text = capture.path.read_text(encoding="utf-8")
+        capture_text = append_to_section(
+            capture_text,
+            "Related",
+            task_link,
+        )
+        capture_text = append_frontmatter_list_value(capture_text, "destinations", task_link)
+        capture_text = set_frontmatter_scalar(capture_text, "status", "triaged")
+        board, board_text = updated_board_text(project_root, path, title, note_id, status)
+        transaction = VaultTransaction()
+        transaction.stage(path, task_text)
+        if board and board_text:
+            transaction.stage(board, board_text)
+        transaction.stage(capture.path, capture_text)  # transition is deliberately last
+        transaction.commit()
+        moved = board is not None
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(task_text, encoding="utf-8")
+        moved = move_board_card(project_root, path, title, note_id, status)
     print(f"Created: {relpath.as_posix()}")
     print(f"ID: {note_id}")
-    print(f"Status: {args.status}")
+    print(f"Status: {status}")
     print(f"Board: {'updated' if moved else 'not found'}")
+    if capture:
+        print(f"Capture: {capture.note_id} -> triaged")
 
 
 def note_type_matches(data: dict[str, object], note_type: str) -> bool:
@@ -2204,6 +2378,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="include status: archived notes when no --status is set",
     )
 
+    research = sub.add_parser("research", help="research packet utilities")
+    research_sub = research.add_subparsers(dest="research_command", required=True)
+    research_scaffold = research_sub.add_parser(
+        "scaffold", help="create Prompt.md from the vault research packet template"
+    )
+    research_scaffold.add_argument(
+        "--project", required=True, help="project alias (obs:OAW) or folder name under Projects/"
+    )
+    research_scaffold.add_argument(
+        "--track", required=True, help="path below the project's Research/ folder"
+    )
+    research_scaffold.add_argument("--title", required=True, help="provider-facing topic title")
+    research_scaffold.add_argument("--date", help="creation date, default: today (YYYY-MM-DD)")
+    research_scaffold.add_argument(
+        "--template",
+        default=RESEARCH_PACKET_TEMPLATE.as_posix(),
+        help="vault-relative template path, default: Templates/Research packet.md",
+    )
+    research_scaffold.add_argument("--force", action="store_true", help="replace Prompt.md")
+
     task = sub.add_parser("task", help="project task lifecycle")
     task_sub = task.add_subparsers(dest="task_command", required=True)
     for name, status in (
@@ -2228,11 +2422,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     task_create = task_sub.add_parser("create", help="create a new project task note")
     task_create.add_argument(
-        "--project", required=True, help="project alias (obs:OAW) or folder name under Projects/"
+        "--project", help="project alias (obs:OAW) or folder name under Projects/"
     )
-    task_create.add_argument("--title", required=True)
+    task_create.add_argument("--title", help="task title; defaults to capture title")
+    task_create.add_argument("--from-capture", help="CAP note ID to promote atomically")
+    create_intent = task_create.add_mutually_exclusive_group()
+    create_intent.add_argument(
+        "--start", action="store_true", help="create promoted task directly as active"
+    )
     task_create.add_argument("--id", help="task ID; derived as <ALIAS>-TSK-<slug> when omitted")
-    task_create.add_argument("--status", choices=("backlog", "todo"), default="backlog")
+    create_intent.add_argument("--status", choices=("backlog", "todo"), default="backlog")
     task_create.add_argument("--priority", type=int, choices=(1, 2, 3))
     task_create.add_argument("--effort", choices=("S", "M", "L"))
     task_create.add_argument("--note", help="initial problem statement")
@@ -2465,6 +2664,11 @@ def main(argv: list[str] | None = None) -> int:
             output_resolve(resolve_id(args.id, vault_root()), args)
         elif args.command == "list":
             list_project(args.project, args.type, args.status, args.include_archived)
+        elif args.command == "research":
+            if args.research_command == "scaffold":
+                create_research_packet(args)
+            else:
+                parser.error("unknown research command")
         elif args.command == "task":
             if args.task_command == "note":
                 append_task_note(
