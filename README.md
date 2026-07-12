@@ -115,6 +115,35 @@ Use `--status <value>` to select one exact frontmatter status. When `--status`
 is omitted, `--include-archived` adds archived notes to the normal listing;
 otherwise archived notes are hidden.
 
+## Project workspace creation
+
+Create the minimal index for a first-class project from the vault's native template:
+
+```bash
+OAW_VAULT=~/vaults/example oaw project create \
+  --name "Example Project" \
+  --alias EXP \
+  --goal "Maintain the example project's durable workspace." \
+  --repo ~/dev/example-project \
+  --tag example-project
+```
+
+The command creates only `Projects/Example Project/Index.md`; task creation adds a
+`Tasks/` folder later when work is selected. It renders the vault-relative
+`Templates/Small project index.md` by default, or one custom path supplied with
+`--template`. The template must contain exactly one H1 with `{{title}}`, exactly one
+`## Goal`, and exactly one `## Current state`; optional native `{{date}}` tokens are
+also resolved. Any remaining template expression is rejected.
+
+Generated frontmatter records the active project, `<ALIAS>-index` ID and alias,
+deduplicated project tags, optional quoted `repo`, and current harness session ID.
+`--name`, `--alias`, `--goal`, optional `--repo`, and repeatable `--tag` values are
+validated before writing. Existing project folders, duplicate IDs or aliases,
+malformed templates, and unsafe paths fail without creating a partial project. A
+stable harness session ID is required unless `--allow-missing-session-id` is explicit.
+The command deliberately does not create a board, local Base, task notes, bookmarks,
+or edits to `Projects/Index.md`.
+
 ## Task lifecycle
 
 `oaw task` provides a conservative task lifecycle for project tasks under `Projects/*/Tasks`:

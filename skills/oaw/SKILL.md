@@ -106,6 +106,37 @@ oaw ingest safe-export --ingestion-root /path/to/handoff --destination "Imports/
 
 Safety is explicit by design: only frontmatter-marked files are ingested.
 
+## Project workspace creation
+
+Use the vault template to create the minimal project index before creating tasks for a
+new repository or workstream:
+
+```bash
+OAW_VAULT=~/vaults/example oaw project create \
+  --name "Example Project" \
+  --alias EXP \
+  --goal "Maintain the example project's durable workspace." \
+  --repo ~/dev/example-project \
+  --tag example-project
+```
+
+- `create` writes only `Projects/<name>/Index.md`. It does not create `Tasks/`, a
+  board, a project-local Base, bookmarks, or an entry in `Projects/Index.md`.
+- The default template is `Templates/Small project index.md`; `--template` accepts one
+  alternative vault-relative path. The template must have exactly one H1 containing
+  `{{title}}`, one `## Goal`, and one `## Current state`. OAW also resolves optional
+  native `{{date}}` tokens and rejects unresolved template expressions.
+- The command sets `type: project`, a slugged `project`, `status: active`, optional
+  quoted `repo`, `<ALIAS>-index` as the ID and alias, `projects` plus project tags, and
+  real session provenance. `--tag` is repeatable.
+- Project names must be safe one-segment folder names and aliases must match
+  `[A-Z][A-Z0-9]{1,7}`. User values, template structure, destination absence, and ID
+  uniqueness are all checked before the transactional write. There is no overwrite or
+  `--force` path.
+- A real harness session ID is required by default. Pass
+  `--allow-missing-session-id` only when the user explicitly accepts an untraceable
+  project creation.
+
 ## Project task lifecycle
 
 Lifecycle writes apply only to task notes under `Projects/*/Tasks` (the CLI enforces this):

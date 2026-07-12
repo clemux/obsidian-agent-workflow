@@ -7,6 +7,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+from oaw import cli
+from oaw.errors import OawError
+
 from .assertions import Assertions
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,6 +110,38 @@ Precise questions:
 
 Deliverable: Replace this placeholder with the expected output format.
 ```
+""",
+        )
+        write(
+            self.vault / "Templates/Small project index.md",
+            """---
+type: project
+project: example-project
+status: active
+repo: /path/to/repo
+tags:
+  - projects
+---
+
+# {{title}}
+
+## Goal
+
+Write the smallest useful description of the project outcome.
+
+## Current state
+
+- Status:
+- Repo:
+- Next action:
+
+## Shared project workspace
+
+![[Templates/Project workspace.base#Work queue]]
+
+## Agent notes
+
+Start here, then read active task notes before acting.
 """,
         )
         write(
@@ -234,6 +269,212 @@ aliases:
         self.assertEqual(data["id"], "AGT-TSK-obsidian-task-ids")
         self.assertEqual(data["matched_by"], "id")
         self.assertIn("Agents/Tasks", data["relative_path"])
+
+    def test_project_create_renders_native_template_and_frontmatter(self):
+        proc = self.run_oaw(
+            "project",
+            "create",
+            "--name",
+            "Agent Tooling",
+            "--alias",
+            "AGT",
+            "--goal",
+            "Maintain shared cross-harness skills.",
+            "--repo",
+            "~/dev/agent-skills:main",
+            "--tag",
+            "agent-tooling",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stdout,
+            "Created: Projects/Agent Tooling/Index.md\nID: AGT-index\nStatus: active\n",
+        )
+        note = (self.vault / "Projects/Agent Tooling/Index.md").read_text(encoding="utf-8")
+        self.assertIn('project: "agent-tooling"', note)
+        self.assertIn('repo: "~/dev/agent-skills:main"', note)
+        self.assertIn('id: "AGT-index"', note)
+        self.assertIn('  - "AGT-index"', note)
+        self.assertIn('  - "projects"\n  - "agent-tooling"', note)
+        self.assertIn('  - "test-thread"', note)
+        self.assertIn("# Agent Tooling", note)
+        self.assertIn("## Goal\n\nMaintain shared cross-harness skills.", note)
+        self.assertIn("- Status: active", note)
+        self.assertIn("- Repo: ~/dev/agent-skills:main", note)
+        self.assertIn("- Next action: create or select the first task when work is selected.", note)
+        self.assertIn("![[Templates/Project workspace.base#Work queue]]", note)
+        self.assertNotIn("{{", note)
+
+    def test_project_create_omits_optional_repo_and_missing_session_provenance(self):
+        proc = self.run_oaw(
+            "project",
+            "create",
+            "--name",
+            "Notebook",
+            "--alias",
+            "NB",
+            "--goal",
+            "Keep useful notes.",
+            "--allow-missing-session-id",
+            env={"CODEX_THREAD_ID": ""},
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        note = (self.vault / "Projects/Notebook/Index.md").read_text(encoding="utf-8")
+        self.assertNotIn("repo:", note.lower())
+        self.assertNotIn("session-ids:", note)
+
+    def test_project_create_supports_custom_template_and_native_date(self):
+        write(
+            self.vault / "Templates/Custom project.md",
+            """---
+created: {{date}}
+---
+
+# Workspace - {{title}}
+
+## Goal
+
+Placeholder.
+
+## Current state
+
+Placeholder.
+
+## Custom section
+
+Retained.
+""",
+        )
+        proc = self.run_oaw(
+            "project",
+            "create",
+            "--name",
+            "Custom Project",
+            "--alias",
+            "CP",
+            "--goal",
+            "Use the custom shape.",
+            "--template",
+            "Templates/Custom project.md",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        note = (self.vault / "Projects/Custom Project/Index.md").read_text(encoding="utf-8")
+        self.assertIn("# Workspace - Custom Project", note)
+        self.assertIn("## Custom section\n\nRetained.", note)
+        self.assertRegex(note, r"created: \d{4}-\d{2}-\d{2}")
+        self.assertNotIn("{{date}}", note)
+
+    def test_project_create_rejects_unsafe_inputs_without_writing(self):
+        cases = [
+            (("--name", "../Unsafe", "--alias", "OK", "--goal", "Goal"), "--name"),
+            (("--name", "Unsafe", "--alias", "bad", "--goal", "Goal"), "--alias"),
+            (("--name", "Unsafe", "--alias", "OK", "--goal", "line\nbreak"), "--goal"),
+            (
+                (
+                    "--name",
+                    "Unsafe",
+                    "--alias",
+                    "OK",
+                    "--goal",
+                    "Goal",
+                    "--tag",
+                    "bad tag",
+                ),
+                "--tag",
+            ),
+        ]
+        for arguments, expected in cases:
+            with self.subTest(arguments=arguments):
+                proc = self.run_oaw("project", "create", *arguments)
+                self.assertEqual(proc.returncode, 1)
+                self.assertIn(expected, proc.stderr)
+                self.assertFalse((self.vault / "Projects/Unsafe").exists())
+
+    def test_project_create_rejects_malformed_or_unresolved_templates(self):
+        template = self.vault / "Templates/Small project index.md"
+        variants = [
+            ("# {{title}}", "# No title token", "exactly one H1"),
+            ("## Goal", "### Goal", "exactly one '## Goal'"),
+            ("## Agent notes", "## Agent notes\n\n{{unknown}}", "unresolved template"),
+        ]
+        original = template.read_text(encoding="utf-8")
+        for old, new, expected in variants:
+            with self.subTest(expected=expected):
+                template.write_text(original.replace(old, new), encoding="utf-8")
+                proc = self.run_oaw(
+                    "project",
+                    "create",
+                    "--name",
+                    "Broken Project",
+                    "--alias",
+                    "BP",
+                    "--goal",
+                    "Goal",
+                )
+                self.assertEqual(proc.returncode, 1)
+                self.assertIn(expected, proc.stderr)
+                self.assertFalse((self.vault / "Projects/Broken Project").exists())
+        template.write_text(original, encoding="utf-8")
+
+    def test_project_create_rejects_duplicate_id_and_existing_folder(self):
+        duplicate = self.run_oaw(
+            "project",
+            "create",
+            "--name",
+            "Another OAW",
+            "--alias",
+            "OAW",
+            "--goal",
+            "Goal",
+        )
+        self.assertEqual(duplicate.returncode, 1)
+        self.assertIn("id 'OAW-index' is already in use", duplicate.stderr)
+        self.assertFalse((self.vault / "Projects/Another OAW").exists())
+
+        (self.vault / "Projects/Existing").mkdir()
+        existing = self.run_oaw(
+            "project",
+            "create",
+            "--name",
+            "Existing",
+            "--alias",
+            "EX",
+            "--goal",
+            "Goal",
+        )
+        self.assertEqual(existing.returncode, 1)
+        self.assertIn("project folder already exists", existing.stderr)
+
+    def test_project_create_removes_empty_folder_after_transaction_failure(self, monkeypatch):
+        class FailingTransaction:
+            def __init__(self):
+                self.destination = None
+
+            def stage(self, path, _text):
+                self.destination = path
+
+            def commit(self):
+                assert self.destination is not None
+                self.destination.parent.mkdir(parents=True)
+                raise OawError("simulated transaction failure")
+
+        monkeypatch.setenv("OAW_VAULT", str(self.vault))
+        monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
+        monkeypatch.setattr(cli, "VaultTransaction", FailingTransaction)
+        result = cli.main(
+            [
+                "project",
+                "create",
+                "--name",
+                "Rollback Project",
+                "--alias",
+                "RP",
+                "--goal",
+                "Verify cleanup.",
+            ]
+        )
+        self.assertEqual(result, 1)
+        self.assertFalse((self.vault / "Projects/Rollback Project").exists())
 
     def test_research_scaffold_renders_template_with_audience_boundary(self):
         proc = self.run_oaw(
@@ -387,8 +628,16 @@ id: X-index
 
     def test_research_scaffold_force_preserves_existing_synthesis(self):
         args = (
-            "research", "scaffold", "--project", "obs:OAW", "--track", "topic",
-            "--title", "Topic", "--date", "2026-07-12",
+            "research",
+            "scaffold",
+            "--project",
+            "obs:OAW",
+            "--track",
+            "topic",
+            "--title",
+            "Topic",
+            "--date",
+            "2026-07-12",
         )
         self.assertEqual(self.run_oaw(*args).returncode, 0)
         synthesis = self.vault / "Projects/Obsidian Agent Workflow/Research/topic/Synthesis.md"
@@ -399,13 +648,29 @@ id: X-index
 
     def test_research_start_creates_one_running_result_and_updates_prompt(self):
         scaffold = self.run_oaw(
-            "research", "scaffold", "--project", "obs:OAW", "--track", "topic",
-            "--title", "Topic", "--date", "2026-07-12",
+            "research",
+            "scaffold",
+            "--project",
+            "obs:OAW",
+            "--track",
+            "topic",
+            "--title",
+            "Topic",
+            "--date",
+            "2026-07-12",
         )
         self.assertEqual(scaffold.returncode, 0, scaffold.stderr)
         proc = self.run_oaw(
-            "research", "start", "--project", "obs:OAW", "--track", "topic",
-            "--source", "ChatGPT Pro", "--url", "https://chatgpt.com/share/example",
+            "research",
+            "start",
+            "--project",
+            "obs:OAW",
+            "--track",
+            "topic",
+            "--source",
+            "ChatGPT Pro",
+            "--url",
+            "https://chatgpt.com/share/example",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         packet = self.vault / "Projects/Obsidian Agent Workflow/Research/topic"
@@ -419,17 +684,24 @@ id: X-index
         self.assertIn("- ChatGPT Pro: [running](https://chatgpt.com/share/example)", prompt)
 
     def test_research_start_rejects_unsafe_duplicate_and_non_http_sources(self):
-        self.assertEqual(self.run_oaw(
-            "research", "scaffold", "--project", "obs:OAW", "--track", "topic",
-            "--title", "Topic",
-        ).returncode, 0)
+        self.assertEqual(
+            self.run_oaw(
+                "research",
+                "scaffold",
+                "--project",
+                "obs:OAW",
+                "--track",
+                "topic",
+                "--title",
+                "Topic",
+            ).returncode,
+            0,
+        )
         common = ("research", "start", "--project", "obs:OAW", "--track", "topic")
         unsafe = self.run_oaw(*common, "--source", "../ChatGPT", "--url", "https://example.com")
         self.assertEqual(unsafe.returncode, 1)
         self.assertIn("safe --source label", unsafe.stderr)
-        reserved = self.run_oaw(
-            *common, "--source", "ChatGPT: Pro", "--url", "https://example.com"
-        )
+        reserved = self.run_oaw(*common, "--source", "ChatGPT: Pro", "--url", "https://example.com")
         self.assertEqual(reserved.returncode, 1)
         self.assertIn("safe --source label", reserved.stderr)
         bad_url = self.run_oaw(*common, "--source", "ChatGPT", "--url", "file:///tmp/report")
@@ -445,8 +717,16 @@ id: X-index
         packet = self.vault / "Projects/Obsidian Agent Workflow/Research/topic"
         write(packet / "Prompt.md", "---\ntitle: Topic\n---\n\n## Running research sessions\n")
         proc = self.run_oaw(
-            "research", "start", "--project", "obs:OAW", "--track", "topic",
-            "--source", "ChatGPT", "--url", "https://example.com",
+            "research",
+            "start",
+            "--project",
+            "obs:OAW",
+            "--track",
+            "topic",
+            "--source",
+            "ChatGPT",
+            "--url",
+            "https://example.com",
         )
         self.assertEqual(proc.returncode, 1)
         self.assertFalse((packet / "Results - ChatGPT.md").exists())
@@ -1578,7 +1858,7 @@ lookup-duplicate-session
         rollout = codex_root / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
         rollout.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(FIXTURES / "session_lookup/codex-missing.jsonl", rollout)
-        write(claude_root / "project" / f"{session_id}.jsonl", '{}\n')
+        write(claude_root / "project" / f"{session_id}.jsonl", "{}\n")
 
         proc = self.run_oaw(
             "session",
