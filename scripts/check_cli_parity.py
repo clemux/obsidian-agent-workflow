@@ -7,13 +7,13 @@ import argparse
 import difflib
 import hashlib
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 from collections import deque
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CHECKOUT = ROOT / "bin" / "oaw"
@@ -36,8 +36,7 @@ def help_result(prefix: list[str], path: tuple[str, ...]) -> subprocess.Complete
     return subprocess.run(
         [*prefix, *path, "--help"],
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
 
@@ -67,7 +66,13 @@ def source_path(prefix: list[str]) -> Path:
         launcher = executable.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise SystemExit(f"cannot read CLI source candidate {executable}: {exc}") from exc
-    if len(prefix) == 1 and "from oaw_cli import main" in launcher:
+    launcher_match = re.search(
+        r"^from\s+(oaw_cli|oaw\.cli)\s+import\s+main(?:\s|#|$)",
+        launcher,
+        re.MULTILINE,
+    )
+    if len(prefix) == 1 and launcher_match:
+        module_name = launcher_match.group(1)
         first_line = launcher.splitlines()[0] if launcher.splitlines() else ""
         if not first_line.startswith("#!"):
             raise SystemExit(f"installed oaw launcher has no interpreter: {executable}")
@@ -78,16 +83,32 @@ def source_path(prefix: list[str]) -> Path:
             [
                 *interpreter,
                 "-c",
-                "import inspect, oaw_cli; print(inspect.getsourcefile(oaw_cli) or oaw_cli.__file__)",
+                (
+                    "import importlib.util; "
+                    f"spec = importlib.util.find_spec({module_name!r}); "
+                    "print(spec.origin if spec and spec.origin else '')"
+                ),
             ],
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
+            env={
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join(
+                    filter(
+                        None,
+                        [
+                            str(executable.parent.parent / "src"),
+                            os.environ.get("PYTHONPATH", ""),
+                        ],
+                    )
+                ),
+            },
         )
         if proc.returncode != 0 or not proc.stdout.strip():
             raise SystemExit(
-                f"cannot locate installed oaw_cli source via {executable}: {proc.stderr.strip()}"
+                f"cannot locate installed {module_name} source via {executable}: "
+                f"{proc.stderr.strip()}"
             )
         executable = Path(proc.stdout.strip()).resolve()
     return executable

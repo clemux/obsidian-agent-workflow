@@ -1,12 +1,12 @@
-import json
 import hashlib
+import json
 import os
 import subprocess
 import sys
 import tempfile
-import unittest
 from pathlib import Path
 
+from .assertions import Assertions
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "bin" / "oaw"
@@ -17,8 +17,8 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-class OawTests(unittest.TestCase):
-    def setUp(self):
+class TestOaw(Assertions):
+    def setup_method(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.vault = Path(self.tmp.name)
         self.env = os.environ.copy()
@@ -179,7 +179,7 @@ aliases:
 """,
         )
 
-    def tearDown(self):
+    def teardown_method(self):
         self.tmp.cleanup()
 
     def run_oaw(self, *args, env=None):
@@ -190,8 +190,7 @@ aliases:
             [sys.executable, str(BIN), *args],
             env=merged,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
 
@@ -302,7 +301,9 @@ id: AGT-TSK-obsidian-task-ids
         )
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("Updated: Projects/Obsidian Agent Workflow/Tasks/Archived task.md", proc.stdout)
+        self.assertIn(
+            "Updated: Projects/Obsidian Agent Workflow/Tasks/Archived task.md", proc.stdout
+        )
         self.assertIn("Status: archived", proc.stdout)
         self.assertIn("Board: unchanged", proc.stdout)
         task = task_path.read_text(encoding="utf-8")
@@ -561,9 +562,7 @@ Later.
 
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("id 'AGT-TSK-obsidian-task-ids' is already in use", proc.stderr)
-        self.assertFalse(
-            (self.vault / "Agents/Retrospectives/2026-07-09 duplicate id.md").exists()
-        )
+        self.assertFalse((self.vault / "Agents/Retrospectives/2026-07-09 duplicate id.md").exists())
 
     def test_retro_create_rejects_whitespace_only_id(self):
         proc = self.run_oaw(
@@ -658,7 +657,9 @@ Run this at work.
             manifest["source"]["path"],
             "Projects/Obsidian Agent Workflow/Tasks/Work export.md",
         )
-        self.assertEqual(manifest["artifacts"][0]["path"], artifact_path.relative_to(bundle).as_posix())
+        self.assertEqual(
+            manifest["artifacts"][0]["path"], artifact_path.relative_to(bundle).as_posix()
+        )
 
         valid = self.run_oaw("export", "validate", str(bundle))
         self.assertEqual(valid.returncode, 0, valid.stderr)
@@ -805,7 +806,9 @@ export-scope: work
                 manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
                 proc = self.run_oaw("export", "validate", str(bundle))
                 self.assertNotEqual(proc.returncode, 0)
-                self.assertRegex(proc.stderr, r"manifest path (escapes bundle|must be bundle-relative)")
+                self.assertRegex(
+                    proc.stderr, r"manifest path (escapes bundle|must be bundle-relative)"
+                )
 
     def test_list_capture_hides_archived_by_default(self):
         proc = self.run_oaw(
@@ -894,8 +897,7 @@ export-scope: work
     def test_board_move_fails_on_ambiguous_match(self):
         path = self.vault / "Projects/Next steps.md"
         path.write_text(
-            path.read_text()
-            + "- [ ] [[Other|Other]] - duplicate reminder (OAW-TSK-cli)\n",
+            path.read_text() + "- [ ] [[Other|Other]] - duplicate reminder (OAW-TSK-cli)\n",
             encoding="utf-8",
         )
         proc = self.run_oaw("board", "move", "OAW-TSK-cli", "--column", "Queued")
@@ -989,9 +991,17 @@ project: private
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("Mode: dry-run", proc.stdout)
-        self.assertIn("ACCEPT safe.md [export-scope: personal] -> Imports/Handoff/safe.md; dry-run", proc.stdout)
-        self.assertIn("ACCEPT legacy.md [tag: safe-export-personal] -> Imports/Handoff/legacy.md; dry-run", proc.stdout)
-        self.assertIn("REJECT unsafe.md [missing safe export marker] -> quarantine; dry-run", proc.stdout)
+        self.assertIn(
+            "ACCEPT safe.md [export-scope: personal] -> Imports/Handoff/safe.md; dry-run",
+            proc.stdout,
+        )
+        self.assertIn(
+            "ACCEPT legacy.md [tag: safe-export-personal] -> Imports/Handoff/legacy.md; dry-run",
+            proc.stdout,
+        )
+        self.assertIn(
+            "REJECT unsafe.md [missing safe export marker] -> quarantine; dry-run", proc.stdout
+        )
         self.assertTrue(safe.exists())
         self.assertTrue(legacy.exists())
         self.assertTrue(unsafe.exists())
@@ -1228,17 +1238,10 @@ lookup-duplicate-session
         session_id = "019f43c9-e93a-7052-bac7-1789a6de1df7"
         codex_root = self.vault / "harness/codex/sessions"
         claude_root = self.vault / "harness/claude/projects"
-        rollout = (
-            codex_root
-            / "2026/07/09"
-            / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
-        )
+        rollout = codex_root / "2026/07/09" / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
         parent = claude_root / "-tmp-project" / f"{session_id}.jsonl"
         subagent = (
-            claude_root
-            / "-tmp-project"
-            / "parent-session/subagents"
-            / f"agent-{session_id}.jsonl"
+            claude_root / "-tmp-project" / "parent-session/subagents" / f"agent-{session_id}.jsonl"
         )
         write(
             rollout,
@@ -1380,7 +1383,9 @@ aliases:
             "--write",
         )
         self.assertEqual(written.returncode, 0, written.stderr)
-        self.assertIn("Updated: Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md", written.stdout)
+        self.assertIn(
+            "Updated: Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md", written.stdout
+        )
         task = task_path.read_text(encoding="utf-8")
         self.assertIn("## Related", task)
         self.assertEqual(
@@ -1504,8 +1509,7 @@ aliases:
     def test_link_commands_ignore_wikilinks_inside_fenced_code(self):
         task = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
         task.write_text(
-            task.read_text(encoding="utf-8")
-            + "\n```markdown\n[[OAW-TSK-cli]]\n```\n",
+            task.read_text(encoding="utf-8") + "\n```markdown\n[[OAW-TSK-cli]]\n```\n",
             encoding="utf-8",
         )
 
@@ -1535,17 +1539,11 @@ aliases:
             'plugin job task-mrb5j4y9-7k3yjy"}}\n',
         )
         write(
-            claude_root
-            / "-tmp-project"
-            / session_id
-            / "subagents/agent-a8fbf333b1df5e1e9.jsonl",
+            claude_root / "-tmp-project" / session_id / "subagents/agent-a8fbf333b1df5e1e9.jsonl",
             '{"timestamp":"2026-07-07T21:19:00.413Z","content":"delegated"}\n',
         )
         write(
-            claude_root
-            / "-tmp-project"
-            / session_id
-            / "subagents/nested/agent-nested.jsonl",
+            claude_root / "-tmp-project" / session_id / "subagents/nested/agent-nested.jsonl",
             '{"content":"nested delegated transcript"}\n',
         )
         write(
@@ -1553,17 +1551,11 @@ aliases:
             f"background transcript references codex_thread={task_codex_thread}\n",
         )
         write(
-            claude_root
-            / "-tmp-project"
-            / session_id
-            / "subagents/workflows/wf-123/run.jsonl",
+            claude_root / "-tmp-project" / session_id / "subagents/workflows/wf-123/run.jsonl",
             '{"content":"workflow run journal"}\n',
         )
         write(
-            claude_root
-            / "-tmp-project"
-            / session_id
-            / "workflows/scripts/nightly.md",
+            claude_root / "-tmp-project" / session_id / "workflows/scripts/nightly.md",
             "# Workflow script\n",
         )
         fork_parent = claude_root / "-tmp-project" / f"{fork_session_id}.jsonl"
@@ -1573,15 +1565,11 @@ aliases:
             '"content":"forked context"}}\n',
         )
         matching_rollout = (
-            codex_root
-            / "2026/07/07"
-            / f"rollout-2026-07-07T23-19-12-{codex_thread}.jsonl"
+            codex_root / "2026/07/07" / f"rollout-2026-07-07T23-19-12-{codex_thread}.jsonl"
         )
         write(matching_rollout, '{"event":"turn_aborted"}\n')
         task_rollout = (
-            codex_root
-            / "2026/07/07"
-            / f"rollout-2026-07-07T23-30-00-{task_codex_thread}.jsonl"
+            codex_root / "2026/07/07" / f"rollout-2026-07-07T23-30-00-{task_codex_thread}.jsonl"
         )
         write(task_rollout, '{"content":"referenced from task output"}\n')
         grep_rollout = (
@@ -1591,8 +1579,7 @@ aliases:
         )
         write(grep_rollout, '{"content":"session-inspection-claude-codex other"}\n')
         write(
-            plugin_root
-            / "codex-openai-codex/state/example/jobs/task-mrb5j4y9-7k3yjy.log",
+            plugin_root / "codex-openai-codex/state/example/jobs/task-mrb5j4y9-7k3yjy.log",
             "running\n",
         )
 
@@ -1660,10 +1647,7 @@ aliases:
             '"content":"first"}}\n',
         )
         nested_subagent = (
-            claude_root
-            / "-tmp-project"
-            / session_id
-            / "subagents/nested/agent-nested.jsonl"
+            claude_root / "-tmp-project" / session_id / "subagents/nested/agent-nested.jsonl"
         )
         write(nested_subagent, '{"content":"nested"}\n')
 
@@ -1734,25 +1718,16 @@ aliases:
         codex_root = self.vault / "harness/codex/sessions"
         plugin_root = self.vault / "harness/claude/plugins/data"
         output_root = self.vault / "attachments"
-        rollout = (
-            codex_root
-            / "2026/07/10"
-            / f"rollout-2026-07-10T00-00-00-{thread_id}.jsonl"
-        )
+        rollout = codex_root / "2026/07/10" / f"rollout-2026-07-10T00-00-00-{thread_id}.jsonl"
         child_rollout = (
-            codex_root
-            / "2026/07/10"
-            / f"rollout-2026-07-10T00-05-00-{child_thread}.jsonl"
+            codex_root / "2026/07/10" / f"rollout-2026-07-10T00-05-00-{child_thread}.jsonl"
         )
         grandchild_rollout = (
-            codex_root
-            / "2026/07/10"
-            / f"rollout-2026-07-10T00-10-00-{grandchild_thread}.jsonl"
+            codex_root / "2026/07/10" / f"rollout-2026-07-10T00-10-00-{grandchild_thread}.jsonl"
         )
         write(
             rollout,
-            '{"timestamp":"2026-07-10T00:00:00.000Z",'
-            f'"content":"codex_thread={child_thread}"}}\n',
+            f'{{"timestamp":"2026-07-10T00:00:00.000Z","content":"codex_thread={child_thread}"}}\n',
         )
         write(
             child_rollout,
@@ -1789,9 +1764,7 @@ aliases:
         self.assertTrue((snapshot / "codex" / rollout.name).exists())
         self.assertTrue((snapshot / "codex" / child_rollout.name).exists())
         self.assertTrue((snapshot / "codex" / grandchild_rollout.name).exists())
-        self.assertTrue(
-            (snapshot / "plugin-logs/task-abcd1234-efgh5678.log").exists()
-        )
+        self.assertTrue((snapshot / "plugin-logs/task-abcd1234-efgh5678.log").exists())
         manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["snapshot"]["mode"], "codex-only")
         self.assertIsNone(manifest["snapshot"]["parent_transcript"])
@@ -1799,9 +1772,7 @@ aliases:
         codex_entries = [
             entry for entry in manifest["files"] if entry["category"] == "codex-rollout"
         ]
-        self.assertTrue(
-            all(entry["completeness"] == "partial" for entry in codex_entries)
-        )
+        self.assertTrue(all(entry["completeness"] == "partial" for entry in codex_entries))
         self.assertIn("Transcript: partial", proc.stdout)
 
     def test_session_snapshot_codex_only_requires_the_primary_rollout(self):
@@ -1921,7 +1892,10 @@ aliases:
             "M",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("Created: Projects/Obsidian Agent Workflow/Tasks/Improve resolver errors.md", proc.stdout)
+        self.assertIn(
+            "Created: Projects/Obsidian Agent Workflow/Tasks/Improve resolver errors.md",
+            proc.stdout,
+        )
         self.assertIn("ID: OAW-TSK-improve-resolver-errors", proc.stdout)
         self.assertIn("Status: backlog", proc.stdout)
         self.assertIn("Board: updated", proc.stdout)
@@ -1965,19 +1939,19 @@ aliases:
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("ID: OAW-TSK-todo-task", proc.stdout)
         board_lines = (
-            self.vault / "Projects/Obsidian Agent Workflow/Board.md"
-        ).read_text(encoding="utf-8").splitlines()
+            (self.vault / "Projects/Obsidian Agent Workflow/Board.md")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
         todo_idx = board_lines.index("## Todo")
         done_idx = board_lines.index("## Done")
-        card_idx = next(
-            idx for idx, line in enumerate(board_lines) if "OAW-TSK-todo-task" in line
-        )
+        card_idx = next(idx for idx, line in enumerate(board_lines) if "OAW-TSK-todo-task" in line)
         self.assertTrue(todo_idx < card_idx < done_idx)
 
     def test_task_create_duplicate_id_fails_without_writes(self):
-        before_board = (
-            self.vault / "Projects/Obsidian Agent Workflow/Board.md"
-        ).read_text(encoding="utf-8")
+        before_board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
+            encoding="utf-8"
+        )
         proc = self.run_oaw(
             "task",
             "create",
@@ -1993,9 +1967,9 @@ aliases:
         self.assertFalse(
             (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Fresh title.md").exists()
         )
-        after_board = (
-            self.vault / "Projects/Obsidian Agent Workflow/Board.md"
-        ).read_text(encoding="utf-8")
+        after_board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
+            encoding="utf-8"
+        )
         self.assertEqual(before_board, after_board)
 
     def test_task_create_existing_path_fails(self):
@@ -2054,12 +2028,8 @@ aliases:
             env=env,
         )
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
-        note = (
-            self.vault / "Projects/Obsidian Agent Workflow/Tasks/No session task.md"
-        ).read_text(encoding="utf-8")
+        note = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/No session task.md").read_text(
+            encoding="utf-8"
+        )
         self.assertNotIn("session-ids:", note)
         self.assertIn("`session_id=unavailable`", note)
-
-
-if __name__ == "__main__":
-    unittest.main()

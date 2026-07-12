@@ -11,6 +11,11 @@ The `oaw` CLI resolves reference IDs against note frontmatter (`id` and `aliases
 
 Set `OAW_VAULT` when running against a non-default vault, tests, demos, or automation.
 
+For checkout development, shared errors, note splitting/reading, and the
+hand-rolled frontmatter parser/mutators are importable from `oaw.errors`,
+`oaw.notes`, and `oaw.frontmatter`. Keep direct unit coverage beside CLI
+contract tests when changing these helpers.
+
 ## Resolving IDs
 
 Treat `obs:<ID>` as a lookup trigger — `oaw` strips the `obs:` prefix automatically; it is not part of the stored ID. Matching is exact and case-sensitive.
@@ -102,8 +107,8 @@ oaw task create --project obs:OAW --title "Example task" --note "Initial problem
 oaw task backlog OAW-TSK-cli --note "Parked until the dependency is ready."
 oaw task promote OAW-TSK-cli --note "Selected for the next session."
 oaw task start OAW-TSK-cli --note "Started resolver implementation."
-oaw task complete OAW-TSK-cli --note "Finished and verified." --checks "python -m unittest"
-oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "python -m unittest"
+oaw task complete OAW-TSK-cli --note "Finished and verified." --checks "pytest"
+oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "pytest"
 ```
 
 - `create` makes a new task note under the project's `Tasks/` folder with standard frontmatter, a `Problem` section, a durable project-index link, an `## Agent sessions` trace, and a board card. `--project` takes a project alias (`obs:OAW`) or `Projects/` folder name; the ID defaults to `<ALIAS>-TSK-<slug>` (override with `--id`); status defaults to `backlog` (`--status todo` for selected work); optional `--priority 1|2|3`, `--effort S|M|L`, and repeatable `--tag`. Duplicate IDs or existing paths fail without writing. Use it instead of hand-writing task frontmatter.

@@ -18,7 +18,7 @@ uv tool install .
 ```
 
 This builds a snapshot into a uv-managed tool environment, so the installed
-`oaw` is decoupled from the checkout: switching branches or editing `bin/oaw`
+`oaw` is decoupled from the checkout: switching branches or editing `src/oaw/`
 does not change the installed command. After merging changes, refresh its recorded
 local source and verify the installed command surface with:
 
@@ -32,6 +32,26 @@ If `uv tool upgrade oaw` does not rebuild the local checkout source, use
 
 During development, run the checkout directly with `python bin/oaw ...`
 (preferably against a temp vault via `OAW_VAULT`).
+
+## Development checks
+
+The project uses a `src/` package layout. The executable `bin/oaw` is only a
+checkout shim; installed commands use the `oaw.cli:main` entry point.
+Shared error, note-boundary, and hand-rolled frontmatter helpers live in
+`src/oaw/errors.py`, `src/oaw/notes.py`, and `src/oaw/frontmatter.py`; their
+direct unit tests run without a CLI subprocess or vault fixture.
+
+Run the complete local gate with:
+
+```bash
+ruff check
+ruff format --check
+pyrefly check
+pytest
+```
+
+GitHub Actions runs the same four checks on pushes and pull requests. Tests
+continue to exercise the CLI through subprocesses and isolated temporary vaults.
 
 The default vault path is machine-specific legacy debt; override with `OAW_VAULT`.
 
@@ -103,8 +123,8 @@ otherwise archived notes are hidden.
 oaw task backlog OAW-TSK-cli --note "Parked until the dependency is ready."
 oaw task promote OAW-TSK-cli --note "Selected for the next session."
 oaw task start OAW-TSK-cli --note "Implemented resolver and lifecycle CLI."
-oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "python -m unittest"
-oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "python -m unittest"
+oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "pytest"
+oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "pytest"
 ```
 
 Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on the project `Board.md` when one exists. `backlog` sets `status: backlog`, `promote` sets `status: todo`, `start` sets `status: active`, and `complete` sets `status: done`. With a real harness ID, session-writing commands also append it as a quoted string to a deduplicated `session-ids` frontmatter block list while preserving existing entries, comments, and any legacy scalar `session-id`. Unsupported inline, mapping, or ambiguous non-string `session-ids` shapes fail before the note is written instead of being normalized lossily. They never invent a session ID; pass a real ID through a known harness env var such as `CODEX_THREAD_ID`, or use `--allow-missing-session-id` explicitly. The explicit missing-ID path records the body trace only and does not add `unavailable` to frontmatter.
@@ -581,7 +601,7 @@ CODEX_THREAD_ID=019f3b71-14db-7480-b0c5-8836714deacc \
 CODEX_THREAD_ID=019f3e36-ee4d-7220-8e5c-c26aa5d38893 \
   oaw task complete OAW-TSK-cli \
   --note "Added capture listing and updated skill docs." \
-  --checks "python -m unittest discover -s tests"
+  --checks "pytest"
 ```
 
 Example lifecycle output:

@@ -1,16 +1,17 @@
 import subprocess
 import sys
 import tempfile
-import unittest
 from pathlib import Path
+from shutil import copytree
 
+from .assertions import Assertions
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "check_cli_parity.py"
 BIN = ROOT / "bin" / "oaw"
 
 
-class CliParityTests(unittest.TestCase):
+class TestCliParity(Assertions):
     def run_check(self, installed: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
@@ -22,13 +23,33 @@ class CliParityTests(unittest.TestCase):
                 str(installed),
             ],
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
 
     def test_matching_cli_surfaces_pass(self):
         proc = self.run_check(BIN)
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertRegex(proc.stdout, r"Parity: ok \(\d+ help surfaces\)")
+
+    def test_current_installed_launcher_resolves_package_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed = root / "bin" / "oaw"
+            installed.parent.mkdir()
+            copytree(ROOT / "src", root / "src")
+            installed.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))\n"
+                "from oaw.cli import main\n"
+                "raise SystemExit(main())\n",
+                encoding="utf-8",
+            )
+            installed.chmod(0o755)
+            proc = self.run_check(installed)
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertRegex(proc.stdout, r"Parity: ok \(\d+ help surfaces\)")
@@ -49,11 +70,39 @@ class CliParityTests(unittest.TestCase):
         self.assertIn("Mismatch: oaw --help", proc.stderr)
         self.assertIn("Parity: failed", proc.stderr)
 
+    def test_wrong_launcher_entry_point_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            installed = Path(tmp) / "oaw"
+            installed.write_text(
+                "#!/usr/bin/env python3\nfrom oaw.missing import main\nraise SystemExit(main())\n",
+                encoding="utf-8",
+            )
+            installed.chmod(0o755)
+            proc = self.run_check(installed)
+
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("Mismatch: oaw --help", proc.stderr)
+        self.assertIn("Parity: failed", proc.stderr)
+
     def test_matching_help_with_stale_source_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
-            stale = Path(tmp) / "stale_oaw.py"
+            root = Path(tmp)
+            stale = root / "bin" / "oaw"
+            stale.parent.mkdir()
+            copytree(ROOT / "src", root / "src")
             stale.write_text(
-                BIN.read_text(encoding="utf-8") + "\n# stale installed source\n",
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))\n"
+                "from oaw.cli import main\n"
+                "raise SystemExit(main())\n",
+                encoding="utf-8",
+            )
+            stale.chmod(0o755)
+            cli = root / "src" / "oaw" / "cli.py"
+            cli.write_text(
+                cli.read_text(encoding="utf-8") + "\n# stale installed source\n",
                 encoding="utf-8",
             )
             proc = self.run_check(stale)
@@ -61,7 +110,3 @@ class CliParityTests(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("Source mismatch: installed artifact does not match checkout", proc.stderr)
         self.assertNotIn("Mismatch: oaw --help", proc.stderr)
-
-
-if __name__ == "__main__":
-    unittest.main()

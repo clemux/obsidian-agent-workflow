@@ -6,14 +6,37 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-oaw = "oaw_cli:main"
+oaw = "oaw.cli:main"
 
 [dependency-groups]
-dev = ["pyinstrument"]
+dev = [
+    "pyinstrument",
+    "pyrefly",
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-force-include = { "bin/oaw" = "oaw_cli.py" }
+packages = ["src/oaw"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pyrefly]
+project-includes = ["src", "tests"]
+python-version = "3.10"
+search-path = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
