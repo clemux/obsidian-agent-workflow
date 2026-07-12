@@ -178,6 +178,7 @@ The aggregate cross-project task Base lives at `Projects/Cross-project tasks.bas
 ```bash
 oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc
 oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc --codex-root /tmp/example-codex-sessions --claude-root /tmp/example-claude-projects
+oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc --verbose
 ```
 
 `oaw session lookup <id>` follows a two-step resolution strategy:
@@ -185,6 +186,16 @@ oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc --codex-root /tmp/exampl
 - First it scans the vault and prints matching note paths and frontmatter IDs for the literal ID.
 - If no vault match is found, it scans artifact roots and prints a synopsis of discovered session artifacts.
 - If no match is found anywhere, it exits `0` and prints a clear *not logged* message.
+
+Pass `--verbose` to add best-effort metrics for each harness artifact. For Codex rollout
+JSONL, `Started` and `Ended` are the earliest and latest valid record timestamps and
+`Duration` is their elapsed wall-clock interval (`HH:MM:SS`). `Turns` counts JSONL
+message records whose role is `user` or `assistant`; injected instructions are therefore
+included when they are stored as user messages. `Tokens` uses the latest cumulative
+`total_token_usage` snapshot, rather than summing cumulative snapshots. Metrics that the
+artifact does not record are printed as `unavailable`. Other harness formats currently
+report unavailable metrics, leaving room for provider-specific parsers later. Without
+`--verbose`, output is unchanged.
 
 ### Session snapshots
 

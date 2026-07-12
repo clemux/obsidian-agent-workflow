@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,7 @@ from .assertions import Assertions
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "bin" / "oaw"
+FIXTURES = ROOT / "tests" / "fixtures"
 
 
 def write(path: Path, text: str) -> None:
@@ -1278,6 +1280,79 @@ lookup-duplicate-session
         self.assertIn(
             "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md",
             proc.stdout,
+        )
+
+    def test_session_lookup_verbose_reports_codex_metrics(self):
+        session_id = "019f43c9-e93a-7052-bac7-1789a6de1df7"
+        codex_root = self.vault / "harness/codex/sessions"
+        rollout = codex_root / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
+        rollout.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(FIXTURES / "session_lookup/codex-complete.jsonl", rollout)
+
+        default_proc = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--codex-root",
+            str(codex_root),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+        )
+        verbose_proc = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--verbose",
+            "--codex-root",
+            str(codex_root),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+        )
+
+        self.assertEqual(default_proc.returncode, 0, default_proc.stderr)
+        self.assertNotIn("Started:", default_proc.stdout)
+        self.assertNotIn("Turns:", default_proc.stdout)
+        self.assertNotIn("Tokens:", default_proc.stdout)
+        self.assertEqual(verbose_proc.returncode, 0, verbose_proc.stderr)
+        self.assertIn("Started: 2026-07-09T12:00:00Z", verbose_proc.stdout)
+        self.assertIn("Ended: 2026-07-09T12:02:05Z", verbose_proc.stdout)
+        self.assertIn("Duration: 00:02:05", verbose_proc.stdout)
+        self.assertIn("Turns: user=2, assistant=2", verbose_proc.stdout)
+        self.assertIn(
+            "Tokens: input=250, output=80, cached=75, total=330",
+            verbose_proc.stdout,
+        )
+
+    def test_session_lookup_verbose_marks_missing_and_unsupported_metrics_unavailable(self):
+        session_id = "019f43c9-e93a-7052-bac7-1789a6de1df7"
+        codex_root = self.vault / "harness/codex/sessions"
+        claude_root = self.vault / "harness/claude/projects"
+        rollout = codex_root / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
+        rollout.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(FIXTURES / "session_lookup/codex-missing.jsonl", rollout)
+        write(claude_root / "project" / f"{session_id}.jsonl", '{}\n')
+
+        proc = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--verbose",
+            "--codex-root",
+            str(codex_root),
+            "--claude-root",
+            str(claude_root),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.count("Started: unavailable"), 2)
+        self.assertEqual(proc.stdout.count("Ended: unavailable"), 2)
+        self.assertEqual(proc.stdout.count("Duration: unavailable"), 2)
+        self.assertEqual(proc.stdout.count("Turns: user=unavailable, assistant=unavailable"), 2)
+        self.assertEqual(
+            proc.stdout.count(
+                "Tokens: input=unavailable, output=unavailable, cached=unavailable, total=unavailable"
+            ),
+            2,
         )
 
     def test_session_lookup_unknown_exits_successfully(self):

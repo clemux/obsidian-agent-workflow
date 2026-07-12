@@ -1154,6 +1154,33 @@ def session_lookup(args: argparse.Namespace) -> None:
                 print(f"    - {vault_path}")
         else:
             print("  vault paths: (none)")
+        if args.verbose:
+            from .session_metrics import (
+                SessionMetrics,
+                codex_rollout_metrics,
+                format_duration,
+                format_timestamp,
+                format_tokens,
+            )
+
+            metrics = (
+                codex_rollout_metrics(artifact.path)
+                if artifact.kind == "codex-rollout"
+                else SessionMetrics()
+            )
+            user_turns = (
+                str(metrics.user_turns) if metrics.user_turns is not None else "unavailable"
+            )
+            assistant_turns = (
+                str(metrics.assistant_turns)
+                if metrics.assistant_turns is not None
+                else "unavailable"
+            )
+            print(f"  Started: {format_timestamp(metrics.started)}")
+            print(f"  Ended: {format_timestamp(metrics.ended)}")
+            print(f"  Duration: {format_duration(metrics.duration)}")
+            print(f"  Turns: user={user_turns}, assistant={assistant_turns}")
+            print(f"  Tokens: {format_tokens(metrics)}")
 
 
 def note_from_path(path: Path, root: Path, matched_by: str = "path") -> NoteMatch:
@@ -2342,6 +2369,11 @@ def build_parser() -> argparse.ArgumentParser:
     session_sub = session.add_subparsers(dest="session_command", required=True)
     lookup = session_sub.add_parser("lookup", help="find notes or artifacts for a session ID")
     lookup.add_argument("session_id")
+    lookup.add_argument(
+        "--verbose",
+        action="store_true",
+        help="show timestamps, duration, message turn counts, and cumulative token totals",
+    )
     lookup.add_argument(
         "--codex-root",
         type=Path,

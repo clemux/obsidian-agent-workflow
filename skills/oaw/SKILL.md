@@ -46,7 +46,15 @@ Use `oaw session lookup <id>` when you need to trace a literal session/thread id
 ```bash
 oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc
 oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc --codex-root /tmp/example-codex-sessions --claude-root /tmp/example-claude-projects
+oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc --verbose
 ```
+
+`--verbose` adds best-effort per-artifact metadata. For Codex rollout JSONL, timestamps
+are the earliest and latest valid record timestamps, duration is their elapsed wall-clock
+interval, turns count message records by `user` and `assistant` role (including injected
+instructions stored as user messages), and tokens come from the latest cumulative
+`total_token_usage` snapshot. Missing metrics and unsupported harness formats are shown
+as `unavailable`; default output remains unchanged.
 
 Override the harness roots for demo and tests with flags or the shared `OAW_CODEX_SESSIONS_ROOT` and `OAW_CLAUDE_PROJECTS_ROOT` environment variables; fallback roots are `~/.codex/sessions` and `~/.claude/projects`.
 
