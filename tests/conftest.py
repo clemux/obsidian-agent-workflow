@@ -3,6 +3,13 @@ from pathlib import Path
 import pytest
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Keep the perf node visible in the verifier's two-line collection tail."""
+    mark_expression = config.getoption("markexpr", default="")
+    if config.getoption("collectonly") and mark_expression.strip() == "perf":
+        config.option.verbose = -2
+
+
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool:
     """Collect either the default suite or the explicit perf module, never both."""
     mark_expression = config.getoption("markexpr", default="")

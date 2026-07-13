@@ -61,8 +61,13 @@ def frontmatter_may_match(frontmatter: str, target: str) -> bool:
     return target in frontmatter
 
 
-def read_frontmatter_text(path: Path) -> str:
-    """Read only the YAML frontmatter body, bounded to avoid pathological notes."""
+def read_frontmatter_text(
+    path: Path,
+    *,
+    max_bytes: int | None = FRONTMATTER_READ_LIMIT,
+    require_closed: bool = True,
+) -> str:
+    """Read only the YAML frontmatter body with configurable safety behavior."""
     with path.open("r", encoding="utf-8") as handle:
         first = handle.readline()
         if first.strip() != "---":
@@ -71,12 +76,14 @@ def read_frontmatter_text(path: Path) -> str:
         lines: list[str] = []
         for line in handle:
             total += len(line.encode("utf-8"))
-            if total > FRONTMATTER_READ_LIMIT:
+            if max_bytes is not None and total > max_bytes:
                 raise OawError(f"frontmatter too large or not closed before safety limit: {path}")
             if line.strip() == "---":
                 return "".join(lines)
             lines.append(line)
-    raise OawError(f"frontmatter is not closed: {path}")
+    if require_closed:
+        raise OawError(f"frontmatter is not closed: {path}")
+    return ""
 
 
 def read_frontmatter_only(path: Path) -> tuple[str, dict[str, object]]:

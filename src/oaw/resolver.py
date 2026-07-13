@@ -95,7 +95,7 @@ def note_match_raw_prefilter(path: Path, root: Path, target: str) -> NoteMatch |
 def note_match(path: Path, root: Path, target: str) -> NoteMatch | None:
     """Use frontmatter-only reads before parsing and read a body only for a match."""
     try:
-        frontmatter = read_frontmatter_text(path)
+        frontmatter = read_frontmatter_text(path, max_bytes=None, require_closed=False)
         if not frontmatter_may_match(frontmatter, target):
             return None
         data = parse_frontmatter(frontmatter)
@@ -108,7 +108,7 @@ def note_match(path: Path, root: Path, target: str) -> NoteMatch | None:
         else:
             return None
         _, _, body = split_note(path.read_text(encoding="utf-8"))
-    except (OawError, UnicodeDecodeError):
+    except UnicodeDecodeError:
         return None
     return NoteMatch(
         path=path,
