@@ -9,7 +9,7 @@ from pathlib import Path
 from .errors import OawError
 
 NEXT_BOARD = Path("Projects/Next steps.md")
-PROJECT_BOARD_COLUMNS = ("Backlog", "Todo", "Active", "Done")
+PROJECT_BOARD_COLUMNS = ("Backlog", "Todo", "Active", "Review", "Done")
 
 
 class ColumnEngine:
@@ -84,6 +84,47 @@ class ColumnEngine:
 _COLUMNS = ColumnEngine()
 
 
+def canonicalize_project_board_columns(lines: list[str]) -> list[str]:
+    """Order known project columns while preserving unknown heading blocks in place."""
+    heading_indices = [
+        index for index, line in enumerate(lines) if re.match(r"^##\s+(.+?)\s*$", line)
+    ]
+    if not heading_indices:
+        return lines
+    blocks = [
+        lines[
+            start : heading_indices[position + 1] if position + 1 < len(heading_indices) else None
+        ]
+        for position, start in enumerate(heading_indices)
+    ]
+
+    def known_column(block: list[str]) -> str | None:
+        heading = re.match(r"^##\s+(.+?)\s*$", block[0])
+        column = heading.group(1) if heading else None
+        return column if column in PROJECT_BOARD_COLUMNS else None
+
+    columns = [known_column(block) for block in blocks]
+    ordered = iter(
+        block
+        for column, block in sorted(
+            (
+                (column, block)
+                for column, block in zip(columns, blocks, strict=True)
+                if column is not None
+            ),
+            key=lambda item: PROJECT_BOARD_COLUMNS.index(item[0]),
+        )
+    )
+    canonical = [
+        next(ordered) if column is not None else block
+        for column, block in zip(columns, blocks, strict=True)
+    ]
+    rendered = list(lines[: heading_indices[0]])
+    for block in canonical:
+        rendered.extend(block)
+    return rendered
+
+
 def project_card_line(task_path: Path, project_root: Path, title: str, note_id: str | None) -> str:
     rel_no_ext = task_path.relative_to(project_root).with_suffix("").as_posix()
     suffix = f" - {note_id}" if note_id else ""
@@ -95,6 +136,7 @@ def project_column_for_status(status: str) -> str:
         "backlog": "Backlog",
         "todo": "Todo",
         "active": "Active",
+        "review": "Review",
         "done": "Done",
     }[status]
 
@@ -121,12 +163,14 @@ def render_project_board(
         if existing_cards
         else project_card_line(task_path, project_root, title, note_id)
     )
-    rendered = _COLUMNS.insert_card(
-        lines,
-        project_column_for_status(status),
-        card,
-        ordered_columns=PROJECT_BOARD_COLUMNS,
-        target_last=True,
+    rendered = canonicalize_project_board_columns(
+        _COLUMNS.insert_card(
+            lines,
+            project_column_for_status(status),
+            card,
+            ordered_columns=PROJECT_BOARD_COLUMNS,
+            target_last=True,
+        )
     )
     return "\n".join(rendered) + "\n"
 

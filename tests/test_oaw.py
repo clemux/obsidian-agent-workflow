@@ -10,7 +10,10 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
+import pytest
+
 from oaw import cli, lifecycle, resolver
+from oaw.boards import render_project_board
 from oaw.errors import OawError
 
 from .assertions import Assertions
@@ -882,7 +885,129 @@ aliases:
         self.assertIn("status: active", task)
         self.assertIn("CODEX_THREAD_ID=test-thread", task)
         self.assertIn('session-ids:\n  - "test-thread"\n', task)
-        self.assertLess(board.index("OAW-TSK-cli"), board.index("## Todo"))
+        self.assertGreater(board.index("OAW-TSK-cli"), board.index("## Active"))
+        self.assertLess(board.index("OAW-TSK-cli"), board.index("## Done"))
+
+    def test_task_review_requires_checks(self):
+        missing = self.run_oaw("task", "review", "OAW-TSK-cli", "--note", "Ready for review.")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("--checks", missing.stderr)
+
+    @pytest.mark.parametrize(
+        ("note", "checks", "expected"),
+        [
+            ("", "pytest", "non-empty --note"),
+            (" \t", "pytest", "non-empty --note"),
+            ("Ready for review.", "", "non-empty --checks"),
+            ("Ready for review.", " \t", "non-empty --checks"),
+        ],
+    )
+    def test_task_review_rejects_blank_note_or_checks_without_writes(self, note, checks, expected):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        before = (task_path.read_bytes(), board_path.read_bytes())
+        proc = self.run_oaw("task", "review", "OAW-TSK-cli", "--note", note, "--checks", checks)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn(expected, proc.stderr)
+        self.assertEqual(before, (task_path.read_bytes(), board_path.read_bytes()))
+
+    def test_task_review_domain_rejects_blank_values_before_transaction(self, monkeypatch):
+        match = resolver.resolve_id("OAW-TSK-cli", self.vault)
+
+        class UnexpectedTransaction:
+            def __init__(self):
+                raise AssertionError("validation must happen before transaction construction")
+
+        monkeypatch.setattr(lifecycle, "VaultTransaction", UnexpectedTransaction)
+        for note, checks, expected in (
+            ("", "pytest", "non-empty --note"),
+            (" \t", "pytest", "non-empty --note"),
+            ("Ready for review.", "", "non-empty --checks"),
+            ("Ready for review.", " \t", "non-empty --checks"),
+        ):
+            with pytest.raises(OawError, match=expected):
+                lifecycle.update_task(match, self.vault, "review", note, checks, allow_missing=True)
+
+    @pytest.mark.parametrize("initial_status", ["backlog", "todo", "active", "review", "done"])
+    def test_task_review_accepts_every_lifecycle_source_status(self, initial_status):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace(
+                "status: todo", f"status: {initial_status}"
+            ),
+            encoding="utf-8",
+        )
+        board_path.write_text(
+            render_project_board(
+                board_path.read_text(encoding="utf-8"),
+                task_path=task_path,
+                project_root=task_path.parents[1],
+                title="Resolver CLI",
+                note_id="OAW-TSK-cli",
+                status=initial_status,
+            ),
+            encoding="utf-8",
+        )
+
+        proc = self.run_oaw(
+            "task",
+            "review",
+            "OAW-TSK-cli",
+            "--note",
+            "Ready for review.",
+            "--checks",
+            "pytest",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        task = task_path.read_text(encoding="utf-8")
+        board = board_path.read_text(encoding="utf-8")
+        self.assertIn("status: review", task)
+        self.assertIn("Ready for review.; checks: pytest", task)
+        self.assertIn("CODEX_THREAD_ID=test-thread", task)
+        card = "- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli"
+        self.assertEqual(board.count(card), 1)
+        self.assertGreater(board.index(card), board.index("## Review"))
+        self.assertLess(board.index(card), board.index("## Done"))
+
+    def test_task_review_transaction_failure_restores_task_and_board_bytes(self, monkeypatch):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        before = (task_path.read_bytes(), board_path.read_bytes())
+        original_commit = lifecycle.VaultTransaction.commit
+
+        def fail_second_replace(transaction):
+            calls = 0
+
+            def replace(source, destination):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError("injected board replacement failure")
+                Path(source).replace(destination)
+
+            return original_commit(transaction, replace=replace)
+
+        monkeypatch.setenv("OAW_VAULT", str(self.vault))
+        monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
+        monkeypatch.setattr(lifecycle.VaultTransaction, "commit", fail_second_replace)
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            result = cli.main(
+                [
+                    "task",
+                    "review",
+                    "OAW-TSK-cli",
+                    "--note",
+                    "Ready for review.",
+                    "--checks",
+                    "pytest",
+                ]
+            )
+
+        self.assertEqual(result, 1)
+        self.assertIn("transaction failed and was rolled back", stderr.getvalue())
+        self.assertEqual(before, (task_path.read_bytes(), board_path.read_bytes()))
 
     def test_task_lifecycle_resolves_once_per_write(self, monkeypatch):
         monkeypatch.setenv("OAW_VAULT", str(self.vault))
@@ -2809,9 +2934,7 @@ aliases:
         note = (
             self.vault / "Projects/Obsidian Agent Workflow/Tasks/Timestamped task.md"
         ).read_text(encoding="utf-8")
-        created_line = next(
-            line for line in note.splitlines() if line.startswith("created:")
-        )
+        created_line = next(line for line in note.splitlines() if line.startswith("created:"))
         created_value = created_line.split(":", 1)[1].strip()
         parsed = dt.datetime.fromisoformat(created_value.replace("Z", "+00:00"))
 

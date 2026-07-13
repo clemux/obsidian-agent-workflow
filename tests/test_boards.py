@@ -8,7 +8,7 @@ from oaw.boards import (
 )
 
 
-def test_project_board_card_format_and_rendering_contract():
+def test_project_board_reorders_misordered_columns_when_adding_review():
     text = """---
 kanban-plugin: board
 type: board
@@ -34,7 +34,7 @@ aliases:
         project_root=Path("/vault/Projects/Obsidian Agent Workflow"),
         title="Resolver CLI",
         note_id="OAW-TSK-cli",
-        status="active",
+        status="review",
     )
 
     assert (
@@ -48,16 +48,49 @@ aliases:
   - OAW-board
 ---
 
-## Active
-
-- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli
 ## Todo
 
+
+## Active
+
+## Review
+
+- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli
 
 ## Done
 
 """
     )
+
+
+def test_project_board_preserves_unknown_heading_block_while_ordering_known_columns():
+    rendered = render_project_board(
+        """## Active
+
+- [ ] [[Tasks/Active|Active]] - OAW-TSK-active
+
+## Notes
+
+- Keep this custom card here.
+
+## Todo
+
+- [ ] [[Tasks/Todo|Todo]] - OAW-TSK-todo
+
+## Done
+""",
+        task_path=Path("/vault/Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"),
+        project_root=Path("/vault/Projects/Obsidian Agent Workflow"),
+        title="Resolver CLI",
+        note_id="OAW-TSK-cli",
+        status="review",
+    )
+
+    headings = [line for line in rendered.splitlines() if line.startswith("## ")]
+    assert headings == ["## Todo", "## Notes", "## Active", "## Review", "## Done"]
+    assert "## Notes\n\n- Keep this custom card here." in rendered
+    assert rendered.count("OAW-TSK-active") == 1
+    assert rendered.count("OAW-TSK-todo") == 1
 
 
 def test_next_steps_board_card_format_and_rendering_contract():

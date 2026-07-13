@@ -61,7 +61,7 @@ USAGE_BY_COMMAND = {
     "                             [--force]\n",
     "oaw research start": "usage: oaw research start [-h] --project PROJECT --track TRACK --source SOURCE\n"
     "                          --url URL\n",
-    "oaw task": "usage: oaw task [-h] {backlog,promote,start,complete,note,create} ...\n",
+    "oaw task": "usage: oaw task [-h] {backlog,promote,start,review,complete,note,create} ...\n",
     "oaw task backlog": "usage: oaw task backlog [-h] --note NOTE [--checks CHECKS]\n"
     "                        [--allow-missing-session-id]\n"
     "                        id\n",
@@ -86,6 +86,9 @@ USAGE_BY_COMMAND = {
     "oaw note session": "usage: oaw note session [-h] --note NOTE [--checks CHECKS]\n"
     "                        [--allow-missing-session-id]\n"
     "                        id\n",
+    "oaw task review": "usage: oaw task review [-h] --note NOTE --checks CHECKS\n"
+    "                      [--allow-missing-session-id]\n"
+    "                      id\n",
     "oaw note observe": "usage: oaw note observe [-h] [--section SECTION] --title TITLE --body BODY id\n",
     "oaw board": "usage: oaw board [-h] {add,move,done,ensure-backlog} ...\n",
     "oaw board add": "usage: oaw board add [-h] --column COLUMN --link LINK --title TITLE --why WHY\n"
@@ -496,6 +499,16 @@ def task_start(
     allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
 ) -> None:
     _task_transition(note_id, note, checks, allow_missing_session_id, "active")
+
+
+@task_app.command("review")
+def task_review(
+    note_id: Annotated[str, typer.Argument()],
+    note: Annotated[str, typer.Option("--note")],
+    checks: Annotated[str, typer.Option("--checks")],
+    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
+) -> None:
+    _task_transition(note_id, note, checks, allow_missing_session_id, "review")
 
 
 @task_app.command("complete")

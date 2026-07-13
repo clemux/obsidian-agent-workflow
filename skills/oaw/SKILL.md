@@ -151,21 +151,22 @@ oaw task create --from-capture obs:OAW-CAP-urgent \
 oaw task backlog OAW-TSK-cli --note "Parked until the dependency is ready."
 oaw task promote OAW-TSK-cli --note "Selected for the next session."
 oaw task start OAW-TSK-cli --note "Started resolver implementation."
+oaw task review OAW-TSK-cli --note "Ready for review." --checks "pytest"
 oaw task complete OAW-TSK-cli --note "Finished and verified." --checks "pytest"
 oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "pytest"
 ```
 
 - `create` makes a new task note under the project's `Tasks/` folder with standard frontmatter, a `Problem` section, a durable project-index link, an `## Agent sessions` trace, and a board card. The generated `created` frontmatter value is a timezone-aware ISO 8601 creation datetime in UTC; `file.mtime` remains the separate source for the file's Modified timestamp. Existing historical task values that are date-only are intentionally left unchanged because their actual creation times cannot be recovered. `--project` takes a project alias (`obs:OAW`) or `Projects/` folder name; the ID defaults to `<ALIAS>-TSK-<slug>` (override with `--id`); status defaults to `backlog` (`--status todo` for selected work); optional `--priority 1|2|3`, `--effort S|M|L`, and repeatable `--tag`. Extra tags must be lowercase safe identifiers, are deduplicated in first-seen order, and precede `source-capture` on promoted tasks. Duplicate IDs or existing paths fail without writing. Use it instead of hand-writing task frontmatter.
 - An actionable request on an `obs:CAP-*` or project capture ID is a promotion trigger: before investigation, implementation, or other material work, run `task create --from-capture <CAP-ID>`. The project and title default from a capture under `Projects/<Project>/`, or may be explicit. Promotion preserves the capture note, body, stable ID, and expected-next-shape `Outcome`; records `source-capture` on the task; adds durable links in both directions; appends the task wikilink to the capture's `destinations` frontmatter; registers the project-board card; and changes the capture to `triaged` only when every write succeeds. Failure rolls all writes back. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent. `--start` does not relax session-ID requirements or invent provenance.
-- `backlog` sets `status: backlog`; `promote` sets `status: todo`; `start` sets `status: active`; `complete` sets `status: done`.
+- `backlog` sets `status: backlog`; `promote` sets `status: todo`; `start` sets `status: active`; `review` sets `status: review` and requires `--checks`; `complete` sets `status: done`.
 - `complete` requires `--checks` naming the verification actually run; do not fabricate checks.
 - `note` appends a dated entry under `## Agent sessions` without changing `status` or any board. Use it for delegation reviews, design notes, partial-progress records, and other trace entries on task notes in any status.
-- `backlog`, `promote`, `start`, and `complete` append a dated entry under `## Agent sessions` and move the task's card to the matching column when the project has a board (`Projects/<Project>/Board.md`) — creating the card and column heading if missing. Cards keep the `- [ ]` marker in every column; the column heading, not the checkbox, reflects status.
+- `backlog`, `promote`, `start`, `review`, and `complete` append a dated entry under `## Agent sessions` and move the task's card to the matching column when the project has a board (`Projects/<Project>/Board.md`) — creating the card and column heading if missing. Cards keep the `- [ ]` marker in every column; the column heading, not the checkbox, reflects status. Task and board writes are transactional, so a failed board update does not leave a partially updated task note.
 - The command's output (`Updated:` / `Status:` / `Board:`) confirms the write. To report resulting state, rely on that output plus `oaw resolve --meta` if needed — do not re-read the whole note with `--full`.
 - The session ID is read automatically from the harness environment; the first of `CODEX_THREAD_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `OPENCODE_SESSION_ID`, `GEMINI_SESSION_ID` that is set wins. `oaw` never invents one: with no session variable set, the command fails with a clear error (so there is no need to check the variables beforehand). Pass `--allow-missing-session-id` only when the user explicitly accepts an untraceable entry.
 - With a real harness ID, lifecycle and `task note` writes append it as a quoted string to a deduplicated `session-ids` frontmatter block list, preserving existing entries, comments, and any legacy scalar `session-id`. Unsupported inline, mapping, or ambiguous non-string `session-ids` shapes fail before the note is written. The explicit missing-ID path writes only the body trace; it does not add a synthetic list value.
 
-Project boards should use the column order `Backlog` → `Todo` → `Active` → `Done`. Keep `Todo` for near-term chosen work. Put unscheduled known work in `Backlog`, and when a session decides what should happen next, run `oaw task promote ...` so the board reflects the decision.
+Project boards should use the column order `Backlog` → `Todo` → `Active` → `Review` → `Done`. Keep `Todo` for near-term chosen work. Put unscheduled known work in `Backlog`, and when implementation is ready for verification, run `oaw task review ... --checks ...` so the board reflects the handoff.
 
 At wrap-up, check whether substantive work occurred. If it did and no task owns it, create or promote the source capture into a task before retrospective closeout. A retrospective may close only after that task is `done` via `oaw task complete ... --checks "<verification actually run>"`; link the retrospective primarily to the completed task and retain the source-capture link as provenance. Do not treat a capture `Outcome` as a completion report.
 
@@ -320,7 +321,7 @@ oaw board done OAW-TSK-next-board
 - `move` and `done` require exactly one matching card; a zero-match or duplicate match is an error.
 - `move` preserves card text and keeps the card unchecked.
 - `done` moves the card to `Done` and changes the checkbox to `- [x]`.
-- The command targets `Projects/Next steps.md`; project-local boards still use `oaw task start/complete`.
+- The command targets `Projects/Next steps.md`; project-local boards use `oaw task start/review/complete` for the implementation-to-verification handoff.
 
 ## Cross-project task Base
 

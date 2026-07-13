@@ -182,13 +182,14 @@ or edits to `Projects/Index.md`.
 oaw task backlog OAW-TSK-cli --note "Parked until the dependency is ready."
 oaw task promote OAW-TSK-cli --note "Selected for the next session."
 oaw task start OAW-TSK-cli --note "Implemented resolver and lifecycle CLI."
+oaw task review OAW-TSK-cli --note "Ready for review." --checks "pytest"
 oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "pytest"
 oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "pytest"
 ```
 
-Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on the project `Board.md` when one exists. `backlog` sets `status: backlog`, `promote` sets `status: todo`, `start` sets `status: active`, and `complete` sets `status: done`. With a real harness ID, session-writing commands also append it as a quoted string to a deduplicated `session-ids` frontmatter block list while preserving existing entries, comments, and any legacy scalar `session-id`. Unsupported inline, mapping, or ambiguous non-string `session-ids` shapes fail before the note is written instead of being normalized lossily. They never invent a session ID; pass a real ID through a known harness env var such as `CODEX_THREAD_ID`, or use `--allow-missing-session-id` explicitly. The explicit missing-ID path records the body trace only and does not add `unavailable` to frontmatter.
+Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on the project `Board.md` when one exists. The lifecycle order is `Backlog` -> `Todo` -> `Active` -> `Review` -> `Done`: `backlog` sets `status: backlog`, `promote` sets `status: todo`, `start` sets `status: active`, `review` sets `status: review` (and requires `--checks`), and `complete` sets `status: done`. Task status and board-card changes are committed together, so a failed board write leaves the task note unchanged. With a real harness ID, session-writing commands also append it as a quoted string to a deduplicated `session-ids` frontmatter block list while preserving existing entries, comments, and any legacy scalar `session-id`. Unsupported inline, mapping, or ambiguous non-string `session-ids` shapes fail before the note is written instead of being normalized lossily. They never invent a session ID; pass a real ID through a known harness env var such as `CODEX_THREAD_ID`, or use `--allow-missing-session-id` explicitly. The explicit missing-ID path records the body trace only and does not add `unavailable` to frontmatter.
 
-Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It uses the same session-id handling as `start` and `complete`, accepts optional `--checks`, and works on task notes regardless of current status.
+Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It uses the same session-id handling as `start`, `review`, and `complete`, accepts optional `--checks`, and works on task notes regardless of current status.
 
 New task notes are created with `oaw task create` instead of hand-writing frontmatter:
 
@@ -237,7 +238,7 @@ Use the `obsidian-research` helper to preflight and print the exact fenced-block
 
 ## Boards
 
-Project boards use the column convention `Backlog` -> `Todo` -> `Active` -> `Done`. `Todo` is for near-term chosen work; `Backlog` is for unscheduled known work. When a session decides what should happen next, promote the matching task so the board reflects that decision.
+Project boards use the column convention `Backlog` -> `Todo` -> `Active` -> `Review` -> `Done`. `Todo` is for near-term chosen work; `Backlog` is for unscheduled known work. When implementation is ready for verification, review the matching task so the board reflects that handoff.
 
 Use `oaw board ensure-backlog --project "Project Name"` to add the `Backlog` column to an existing project board before `Todo` without rewriting cards.
 

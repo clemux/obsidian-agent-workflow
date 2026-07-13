@@ -106,21 +106,36 @@ def update_task(
 ) -> None:
     if not is_project_task(match.path, root):
         raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
-    if status == "done" and not checks:
-        raise OawError("task complete requires --checks")
+    action = {
+        "backlog": "backlog",
+        "todo": "promote",
+        "active": "start",
+        "review": "review",
+        "done": "complete",
+    }[status]
+    if not note.strip():
+        raise OawError(f"task {action} requires non-empty --note")
+    if status in {"review", "done"} and checks is None:
+        raise OawError(f"task {action} requires --checks")
+    if status in {"review", "done"} and checks is not None and not checks.strip():
+        raise OawError(f"task {action} requires non-empty --checks")
+    if checks is not None and not checks.strip():
+        raise OawError(f"task {action} requires non-empty --checks when provided")
     provider, session_ref = detect_session(allow_missing)
     text = match.path.read_text(encoding="utf-8")
     text = set_frontmatter_scalar(text, "status", status)
     text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
-    match.path.write_text(text, encoding="utf-8")
-    moved = move_project_board_card(
-        project_root_for_task(match.path, root),
-        match.path,
-        match.title,
-        match.note_id,
-        status,
+    project_root = project_root_for_task(match.path, root)
+    board, board_text = updated_project_board_text(
+        project_root, match.path, match.title, match.note_id, status
     )
+    transaction = VaultTransaction()
+    transaction.stage(match.path, text)
+    if board and board_text:
+        transaction.stage(board, board_text)
+    transaction.commit()
+    moved = board is not None
     print(f"Updated: {match.relpath}")
     print(f"Status: {status}")
     print(f"Board: {'updated' if moved else 'not found'}")
