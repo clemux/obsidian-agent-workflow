@@ -22,6 +22,7 @@ EXPECTED_COMMAND_PATHS = {
     ("task", "backlog"),
     ("task", "promote"),
     ("task", "start"),
+    ("task", "review"),
     ("task", "complete"),
     ("task", "note"),
     ("task", "create"),
