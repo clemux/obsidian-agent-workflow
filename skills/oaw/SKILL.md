@@ -352,7 +352,7 @@ oaw session snapshot "$CODEX_THREAD_ID" --codex-only --partial --slug codex-dogf
 - It writes `manifest.json` with each source path, destination path, copy time, size, hash, category, mode, and completeness. Use the manifest instead of hand-writing provenance.
 - Use `--partial` while the session is still live. Re-run the same command later to refresh the transcript, preserve nested artifacts, pick up new artifacts, and remove stale files listed in the previous manifest.
 - Use `--complete` to override current-session detection, `--date` to override the folder date, and `--output-root`, `--claude-root`, `--codex-root`, or `--plugin-data-root` for controlled test/demo locations.
-- For real vault snapshots, use the installed `oaw session snapshot ...` command. Reserve `python bin/oaw session snapshot ...` for repo-development checks, temp-vault fixtures, or deliberately testing the checkout copy.
+- For real vault snapshots, use the installed `oaw session snapshot ...` command. Reserve `uv run python bin/oaw session snapshot ...` for repo-development checks, temp-vault fixtures, or deliberately testing the checkout copy.
 
 ## Rules
 
@@ -360,7 +360,7 @@ oaw session snapshot "$CODEX_THREAD_ID" --codex-only --partial --slug codex-dogf
 - When changing `NEXT-board`, prefer `oaw board add/move/done`; edit the markdown directly only for convention text, bulk cleanup, or cases the command cannot express.
 - Keep durable written links as path links with the ID as display text, e.g. `[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]` — the link target is the vault-relative path without the `.md` extension. Reuse the path from resolve output already in hand; run `oaw resolve --path` only when no resolve has been done yet.
 - When `oaw` lacks a needed capability, capture a new OAW task describing the gap, then do the minimal manual workaround and keep moving.
-- For real vault writes, prefer stable installed commands: `oaw task ...`, `oaw board ...`, `oaw session snapshot ...`, or `obsidian ...` for note/metadata writes. Use `python bin/oaw ...` only for CLI development, temp-vault fixtures, or deliberately testing the checkout copy. This follows the approval-scope lesson from [[Agents/Feedback/2026-07-08 allow-listed skill scripts for vault writes|AGT-FDBK-allow-listed-skill-scripts]].
+- For real vault writes, prefer stable installed commands: `oaw task ...`, `oaw board ...`, `oaw session snapshot ...`, or `obsidian ...` for note/metadata writes. Use `uv run python bin/oaw ...` only for CLI development, temp-vault fixtures, or deliberately testing the checkout copy (the CLI depends on `typer`, so bare `python bin/oaw` fails). This follows the approval-scope lesson from [[Agents/Feedback/2026-07-08 allow-listed skill scripts for vault writes|AGT-FDBK-allow-listed-skill-scripts]].
 - If a needed capability is not documented here, check `oaw --help` before reaching for filesystem search.
 - For `PMX-*` IDs, prefer the dedicated `pmx` skill and CLI.
 
@@ -382,4 +382,4 @@ Do not persist broad interpreter or shell prefixes for OAW work, such as:
 ["bash"]
 ```
 
-Use repo-local `python bin/oaw ...` for development and temp-vault tests. For real vault writes, prefer installed `oaw ...` commands so the approval scope stays tied to the operation rather than to an arbitrary script runner.
+Use repo-local `uv run python bin/oaw ...` for development and temp-vault tests (the CLI depends on `typer`, so bare `python bin/oaw` fails). For real vault writes, prefer installed `oaw ...` commands so the approval scope stays tied to the operation rather than to an arbitrary script runner.

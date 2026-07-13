@@ -16,15 +16,18 @@ Keep small workflow changes close to `bin/oaw` and mirror behavior changes in te
 
 - `uv run pytest` runs the full test suite.
 - `uv run pytest tests/test_oaw.py` runs only the current CLI tests.
-- `python bin/oaw --help` shows top-level CLI commands.
-- `python bin/oaw resolve --json OAW-TSK-cli` exercises vault resolution.
-- `OAW_VAULT=/tmp/example-vault python bin/oaw ...` points the CLI at a non-default vault for manual testing.
+- `uv run python bin/oaw --help` shows top-level CLI commands.
+- `uv run python bin/oaw resolve --json OAW-TSK-cli` exercises vault resolution.
+- `OAW_VAULT=/tmp/example-vault uv run python bin/oaw ...` points the CLI at a non-default vault for manual testing.
 
-There is no build step or dependency installation; the project uses only the Python standard library.
+The CLI has one runtime dependency, `typer`, so the checkout must be run inside the
+project environment: use `uv run python bin/oaw ...`, not bare `python bin/oaw ...`
+(which fails with `ModuleNotFoundError: No module named 'typer'`). The installed
+`oaw` command carries its own dependencies and needs no prefix.
 
 ## CLI Dogfooding
 
-When changing `bin/oaw`, use the updated CLI from the active checkout or worktree for subsequent OAW operations: run `python bin/oaw ...` instead of the separately installed `oaw` until the change is integrated. This prevents an older installed version from hiding integration problems and continuously exercises argument parsing, output, resolution, and lifecycle behavior.
+When changing the CLI, use the updated version from the active checkout or worktree for subsequent OAW operations: run `uv run python bin/oaw ...` instead of the separately installed `oaw` until the change is integrated. This prevents an older installed version from hiding integration problems and continuously exercises argument parsing, output, resolution, and lifecycle behavior.
 
 - Exercise changed or newly combined behavior against a temporary vault with `OAW_VAULT` before any real-vault write.
 - When the operation is safe and relevant, use the checkout CLI for the current task's real-vault resolution and lifecycle bookkeeping too. Do not dogfood experimental or destructive writes against the real vault; prefer dry-run modes and temporary fixtures.

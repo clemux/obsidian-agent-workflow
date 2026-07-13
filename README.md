@@ -30,8 +30,45 @@ python scripts/check_cli_parity.py
 If `uv tool upgrade oaw` does not rebuild the local checkout source, use
 `uv tool install --reinstall .` and rerun the parity check.
 
-During development, run the checkout directly with `python bin/oaw ...`
-(preferably against a temp vault via `OAW_VAULT`).
+During development, run the checkout through the project environment with
+`uv run python bin/oaw ...` (preferably against a temp vault via `OAW_VAULT`).
+The CLI depends on `typer` at runtime, so bare `python bin/oaw ...` fails with
+`ModuleNotFoundError: No module named 'typer'`. The installed `oaw` command
+carries its own dependencies and needs no prefix.
+
+### Shell completion
+
+The CLI is built with Typer, so completion is available from Click:
+
+```bash
+# bash — add to ~/.bashrc
+eval "$(_OAW_COMPLETE=bash_source oaw)"
+# zsh — add to ~/.zshrc
+eval "$(_OAW_COMPLETE=zsh_source oaw)"
+# fish — add to ~/.config/fish/completions/oaw.fish
+_OAW_COMPLETE=fish_source oaw | source
+```
+
+Completion covers commands and option names. It does not complete vault IDs or
+project aliases; dynamic completion for those is tracked separately as
+`OAW-TSK-add-dynamic-completion-for-oaw-ids-and-project-aliases`.
+
+### Migration note: argparse → Typer
+
+The CLI moved from `argparse` to Typer. Commands, options, exit codes (0 success,
+1 domain error, 2 usage error), stdout contract lines, and error phrasing for
+domain errors are unchanged. Three usage-error behaviors deliberately differ:
+
+- **Usage-error wording.** Click phrases usage errors in its own words and prints
+  its own usage block. The exit code (2) and the set of accepted values are
+  unchanged; only the prose differs.
+- **No option abbreviations.** argparse expanded unambiguous prefixes
+  (`--verb` → `--verbose`); Typer requires full option names. An abbreviation now
+  exits 2 instead of running.
+- **`--help` on an already-invalid command line.** argparse validated
+  left-to-right and errored before reaching `--help` (so `task create --priority 9
+  --help` exited 2); Typer honors help eagerly and prints help with exit 0. This
+  only affects command lines that were already going to fail.
 
 ## Development checks
 
@@ -384,7 +421,7 @@ display text.
 
 ## Installed vs checkout CLI
 
-Use installed `oaw ...` commands for operational vault writes such as task lifecycle updates, board moves, and session snapshots. Reserve `python bin/oaw ...` for development checks against this checkout, preferably with temp vaults. This keeps approval prompts scoped to stable commands instead of broad interpreter entrypoints; see `AGT-FDBK-allow-listed-skill-scripts`.
+Use installed `oaw ...` commands for operational vault writes such as task lifecycle updates, board moves, and session snapshots. Reserve `uv run python bin/oaw ...` for development checks against this checkout, preferably with temp vaults. This keeps approval prompts scoped to stable commands instead of broad interpreter entrypoints; see `AGT-FDBK-allow-listed-skill-scripts`.
 
 After refreshing the uv-managed installation, run `python scripts/check_cli_parity.py`.
 It recursively compares every checkout and installed `--help` surface, including
@@ -396,6 +433,10 @@ nested commands and options, and fails with a diff when the installed artifact i
 <summary><strong>From the 2026-07-10 integration session</strong></summary>
 
 The following commands and outputs come from the session that reviewed, fixed, and integrated the overnight branches. Because the checkout itself was changing, the session deliberately ran `python bin/oaw ...` to dogfood the active version before it reached `main`.
+
+> These transcripts are kept verbatim as a record of that session. They predate the
+> Typer migration, when the CLI was dependency-free; today the equivalent checkout
+> invocation is `uv run python bin/oaw ...`.
 
 Trace the current Codex thread back to every vault note that recorded it:
 
