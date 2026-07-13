@@ -73,8 +73,13 @@ cli.py
   → command domains: lifecycle, links, snapshot, exports, ingest, retro
       → shared services: resolver, boards, sessions
           → note model: notes, frontmatter
+          → leaf utilities: session_metrics
               → errors (+ stdlib)
 ```
+
+`session_metrics` is a leaf: it imports only stdlib and is imported by
+`sessions` (rollout metrics for `session --verbose`). It sits beside the note
+model rather than under it — nothing in the note-model layer depends on it.
 
 `cli.py` additionally dispatches straight to shared-service command
 entrypoints for the stable `resolve`, `list`, `board`, and `session`
