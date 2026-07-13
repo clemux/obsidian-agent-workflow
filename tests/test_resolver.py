@@ -80,3 +80,18 @@ def test_scanned_project_alias_ignores_nested_projects_directory(tmp_path: Path)
         real.parent,
         "REAL",
     )
+
+
+def test_scanned_project_alias_matches_are_sorted(tmp_path: Path):
+    for project in ("Zulu", "Alpha"):
+        index = tmp_path / "Projects" / project / "Index.md"
+        index.parent.mkdir(parents=True)
+        index.write_text("---\nid: DUP-index\n---\n", encoding="utf-8")
+    references = list(reversed(scan_note_references(tmp_path)))
+
+    matches = resolver.project_alias_matches_from_references("DUP", references)
+
+    assert [match.relpath for match in matches] == [
+        "Projects/Alpha/Index.md",
+        "Projects/Zulu/Index.md",
+    ]

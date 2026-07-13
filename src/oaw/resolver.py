@@ -199,7 +199,7 @@ def project_alias_matches_from_references(
         return []
     index_id = f"{target}-index"
     matches: list[NoteMatch] = []
-    for reference in references:
+    for reference in sorted(references, key=lambda item: item.relpath):
         parts = Path(reference.relpath).parts
         if len(parts) != 3 or parts[0] != "Projects" or parts[2] != "Index.md":
             continue
