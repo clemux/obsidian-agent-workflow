@@ -31,14 +31,11 @@ class NoteMatch:
 
 @dataclass(frozen=True)
 class NoteReference:
-    """Frontmatter-only note identity data collected during one vault walk."""
+    """Raw frontmatter collected during one vault walk for deferred matching."""
 
     path: Path
     relpath: str
-    note_id: str | None
-    aliases: tuple[str, ...]
     frontmatter_text: str
-    frontmatter: dict[str, object]
 
 
 def strip_obs_prefix(raw_id: str) -> str:
@@ -140,38 +137,35 @@ def note_match(path: Path, root: Path, target: str) -> NoteMatch | None:
 
 
 def note_reference(path: Path, root: Path) -> NoteReference | None:
-    """Return identity metadata for a note without reading its body."""
+    """Return raw frontmatter for a note without parsing it or reading its body."""
     try:
         frontmatter = read_frontmatter_text(path, max_bytes=None, require_closed=False)
     except UnicodeDecodeError:
         return None
     if not frontmatter:
         return None
-    data = parse_frontmatter(frontmatter)
-    note_id = data.get("id")
-    aliases = data.get("aliases", [])
     return NoteReference(
         path=path,
         relpath=path.relative_to(root).as_posix(),
-        note_id=note_id if isinstance(note_id, str) else None,
-        aliases=tuple(alias for alias in aliases if isinstance(alias, str))
-        if isinstance(aliases, list)
-        else (),
         frontmatter_text=frontmatter.rstrip(),
-        frontmatter=data,
     )
 
 
 def scan_note_references(root: Path) -> list[NoteReference]:
-    """Walk a vault once and collect frontmatter identity data for each Markdown note."""
+    """Walk a vault once and cache raw frontmatter for deferred pre-filtered matching."""
     return [reference for path in iter_markdown(root) if (reference := note_reference(path, root))]
 
 
 def note_match_from_reference(reference: NoteReference, target: str) -> NoteMatch | None:
-    """Resolve one target from a frontmatter-only reference, loading its body on a match."""
-    if reference.note_id == target:
+    """Pre-filter and resolve one target, loading its body only on a parsed match."""
+    if not frontmatter_may_match(reference.frontmatter_text, target):
+        return None
+    data = parse_frontmatter(reference.frontmatter_text)
+    note_id = data.get("id")
+    aliases = data.get("aliases", [])
+    if isinstance(note_id, str) and note_id == target:
         matched_by = "id"
-    elif target in reference.aliases:
+    elif isinstance(aliases, list) and target in aliases:
         matched_by = "aliases"
     else:
         return None
@@ -182,11 +176,11 @@ def note_match_from_reference(reference: NoteReference, target: str) -> NoteMatc
     return NoteMatch(
         path=reference.path,
         relpath=reference.relpath,
-        note_id=reference.note_id,
+        note_id=note_id if isinstance(note_id, str) else None,
         matched_by=matched_by,
         title=title_from_body(reference.path, body),
         frontmatter_text=reference.frontmatter_text,
-        frontmatter=reference.frontmatter,
+        frontmatter=data,
     )
 
 
@@ -206,7 +200,8 @@ def project_alias_matches_from_references(
     index_id = f"{target}-index"
     matches: list[NoteMatch] = []
     for reference in references:
-        if reference.path.parent.parent.name != "Projects" or reference.path.name != "Index.md":
+        parts = Path(reference.relpath).parts
+        if len(parts) != 3 or parts[0] != "Projects" or parts[2] != "Index.md":
             continue
         match = note_match_from_reference(reference, index_id)
         if match:

@@ -2,9 +2,10 @@ from pathlib import Path
 
 import pytest
 
+from oaw import resolver
 from oaw.errors import OawError
 from oaw.frontmatter import FRONTMATTER_READ_LIMIT
-from oaw.resolver import resolve_id
+from oaw.resolver import resolve_id, resolve_project_root_from_references, scan_note_references
 
 
 def large_frontmatter_note(note_id: str) -> str:
@@ -39,3 +40,43 @@ def test_resolver_large_frontmatter_participates_in_duplicate_detection(tmp_path
 
     with pytest.raises(OawError, match="id 'duplicate' is not unique"):
         resolve_id("duplicate", tmp_path)
+
+
+def test_scanned_references_prefilter_before_parsing(tmp_path: Path, monkeypatch):
+    (tmp_path / "Unrelated.md").write_text(
+        "---\nid: unrelated\nmarker: must-not-parse\n---\n", encoding="utf-8"
+    )
+    (tmp_path / "Target.md").write_text("---\nid: target\n---\n\n# Target\n", encoding="utf-8")
+    original = resolver.parse_frontmatter
+    parsed: list[str] = []
+
+    def recording_parse(frontmatter: str):
+        parsed.append(frontmatter)
+        return original(frontmatter)
+
+    monkeypatch.setattr(resolver, "parse_frontmatter", recording_parse)
+
+    references = scan_note_references(tmp_path)
+    matches = resolver.matches_from_references("target", references)
+
+    assert len(matches) == 1
+    assert matches[0].title == "Target"
+    assert len(parsed) == 1
+    assert "id: target" in parsed[0]
+    assert "must-not-parse" not in parsed[0]
+
+
+def test_scanned_project_alias_ignores_nested_projects_directory(tmp_path: Path):
+    real = tmp_path / "Projects/Real/Index.md"
+    real.parent.mkdir(parents=True)
+    real.write_text("---\nid: REAL-index\n---\n\n# Real\n", encoding="utf-8")
+    nested = tmp_path / "Archive/Projects/Unrelated/Index.md"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("---\nid: REAL-index\n---\n\n# Unrelated\n", encoding="utf-8")
+
+    references = scan_note_references(tmp_path)
+
+    assert resolve_project_root_from_references("REAL", tmp_path, references) == (
+        real.parent,
+        "REAL",
+    )
