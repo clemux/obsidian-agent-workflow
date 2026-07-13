@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare every argparse help surface in the checkout and installed OAW CLIs."""
+"""Compare every Typer help surface in the checkout and installed OAW CLIs."""
 
 from __future__ import annotations
 
@@ -12,14 +12,19 @@ import shlex
 import shutil
 import subprocess
 import sys
-from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
+
+from typer.main import get_command
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CHECKOUT = ROOT / "bin" / "oaw"
 PYTHON_INTERPRETER = re.compile(r"^(?:python|python3)(?:\d+(?:\.\d+)*)?$")
 MAX_HELP_WORKERS = 8
+
+sys.path.insert(0, str(ROOT / "src"))
+from oaw import typer_cli  # noqa: E402
 
 
 def command_prefix(value: str, label: str) -> list[str]:
@@ -85,22 +90,22 @@ def help_result(prefix: list[str], path: tuple[str, ...]) -> subprocess.Complete
         text=True,
         capture_output=True,
         check=False,
+        env={**os.environ, "COLUMNS": "80", "TERM": "dumb"},
     )
 
 
-def subcommands(help_text: str) -> list[str]:
-    in_positionals = False
-    for line in help_text.splitlines():
-        stripped = line.strip()
-        if stripped == "positional arguments:":
-            in_positionals = True
-            continue
-        if in_positionals and stripped.endswith(":"):
-            break
-        if in_positionals and stripped.startswith("{") and "}" in stripped:
-            choices = stripped[1 : stripped.index("}")]
-            return [choice for choice in choices.split(",") if choice]
-    return []
+def checkout_command_paths() -> list[tuple[str, ...]]:
+    """Walk the checkout Typer/Click tree without parsing rendered help text."""
+    paths: list[tuple[str, ...]] = [()]
+
+    def visit(command: Any, parent: tuple[str, ...]) -> None:
+        for name, child in getattr(command, "commands", {}).items():
+            path = (*parent, name)
+            paths.append(path)
+            visit(child, path)
+
+    visit(get_command(typer_cli.app), ())
+    return paths
 
 
 def display_path(path: tuple[str, ...]) -> str:
@@ -175,54 +180,47 @@ def source_failure(checkout: list[str], installed: list[str]) -> str | None:
     )
 
 
-def compare_surfaces(checkout: list[str], installed: list[str]) -> tuple[int, list[str]]:
-    queue: deque[tuple[str, ...]] = deque([()])
-    seen: set[tuple[str, ...]] = set()
+def compare_surfaces(
+    checkout: list[str],
+    installed: list[str],
+    paths: list[tuple[str, ...]] | None = None,
+) -> tuple[int, list[str]]:
+    """Byte-compare help output for every checkout Typer command path."""
+    paths = checkout_command_paths() if paths is None else paths
     failures: list[str] = []
     checked = 0
     with ThreadPoolExecutor(max_workers=MAX_HELP_WORKERS) as executor:
-        while queue:
-            paths: list[tuple[str, ...]] = []
-            while queue:
-                path = queue.popleft()
-                if path not in seen:
-                    seen.add(path)
-                    paths.append(path)
-
-            results = [
-                (
-                    path,
-                    executor.submit(help_result, checkout, path),
-                    executor.submit(help_result, installed, path),
+        results = [
+            (
+                path,
+                executor.submit(help_result, checkout, path),
+                executor.submit(help_result, installed, path),
+            )
+            for path in paths
+        ]
+        for path, checkout_future, installed_future in results:
+            checkout_result = checkout_future.result()
+            installed_result = installed_future.result()
+            checked += 1
+            checkout_output = checkout_result.stdout + checkout_result.stderr
+            installed_output = installed_result.stdout + installed_result.stderr
+            if (
+                checkout_result.returncode != installed_result.returncode
+                or checkout_output != installed_output
+            ):
+                diff = "".join(
+                    difflib.unified_diff(
+                        installed_output.splitlines(keepends=True),
+                        checkout_output.splitlines(keepends=True),
+                        fromfile="installed",
+                        tofile="checkout",
+                    )
                 )
-                for path in paths
-            ]
-            for path, checkout_future, installed_future in results:
-                checkout_result = checkout_future.result()
-                installed_result = installed_future.result()
-                checked += 1
-                checkout_output = checkout_result.stdout + checkout_result.stderr
-                installed_output = installed_result.stdout + installed_result.stderr
-                if (
-                    checkout_result.returncode != installed_result.returncode
-                    or checkout_output != installed_output
-                ):
-                    diff = "".join(
-                        difflib.unified_diff(
-                            installed_output.splitlines(keepends=True),
-                            checkout_output.splitlines(keepends=True),
-                            fromfile="installed",
-                            tofile="checkout",
-                        )
-                    )
-                    failures.append(
-                        f"Mismatch: {display_path(path)} "
-                        f"(installed rc={installed_result.returncode}, "
-                        f"checkout rc={checkout_result.returncode})\n{diff}"
-                    )
-                if checkout_result.returncode == 0:
-                    for child in subcommands(checkout_result.stdout):
-                        queue.append((*path, child))
+                failures.append(
+                    f"Mismatch: {display_path(path)} "
+                    f"(installed rc={installed_result.returncode}, "
+                    f"checkout rc={checkout_result.returncode})\n{diff}"
+                )
     return checked, failures
 
 
