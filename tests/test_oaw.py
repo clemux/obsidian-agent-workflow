@@ -866,6 +866,10 @@ aliases:
         cli.main(["task", "note", "OAW-TSK-cli", "--note", "Noted once."])
         self.assertEqual(resolved, ["OAW-TSK-cli"])
 
+        resolved.clear()
+        cli.main(["note", "session", "OAW-TSK-cli", "--note", "Traced once."])
+        self.assertEqual(resolved, ["OAW-TSK-cli"])
+
     def test_complete_requires_checks(self):
         proc = self.run_oaw("task", "complete", "OAW-TSK-cli", "--note", "Done.")
         self.assertNotEqual(proc.returncode, 0)

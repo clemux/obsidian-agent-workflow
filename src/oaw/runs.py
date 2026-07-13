@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import re
-import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -260,52 +259,6 @@ def append_session_id(text: str, session_id: str) -> str:
             insert += 1
         lines.insert(insert, f"  - {yaml_quote(session_id)}\n")
     return "".join(lines)
-
-
-class VaultTransaction:
-    """Atomically replace a group of files, restoring all originals on failure."""
-
-    def __init__(self) -> None:
-        self.changes: dict[Path, str] = {}
-
-    def stage(self, path: Path, text: str) -> None:
-        self.changes[path] = text
-
-    def commit(self, replace: Callable[[str, str], None] = os.replace) -> None:
-        originals = {path: path.read_bytes() if path.exists() else None for path in self.changes}
-        written: list[Path] = []
-        temps: list[Path] = []
-        try:
-            for path, text in self.changes.items():
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with tempfile.NamedTemporaryFile(
-                    "w", encoding="utf-8", dir=path.parent, delete=False
-                ) as handle:
-                    handle.write(text)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                    temp = Path(handle.name)
-                temps.append(temp)
-                replace(str(temp), str(path))
-                written.append(path)
-            touched_dirs = {path.parent for path in self.changes}
-            for directory in touched_dirs:
-                fd = os.open(directory, os.O_RDONLY)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-        except Exception as exc:
-            for path in reversed(written):
-                original = originals[path]
-                if original is None:
-                    path.unlink(missing_ok=True)
-                else:
-                    path.write_bytes(original)
-            raise OawError(f"transaction failed and was rolled back: {exc}") from exc
-        finally:
-            for temp in temps:
-                temp.unlink(missing_ok=True)
 
 
 def audit_runs(root: Path, resolve_task: Callable[[str], Any], now: dt.datetime) -> list[str]:

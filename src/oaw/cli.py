@@ -20,29 +20,36 @@ from pathlib import Path
 
 from .boards import (
     ensure_project_backlog_column,
-    move_project_board_card,
     next_steps_card,
     update_next_steps_board,
-    updated_project_board_text,
 )
 from .errors import OawError
-from .frontmatter import (
-    append_frontmatter_list_value,
-    parse_frontmatter,
-    read_frontmatter_only,
-    set_frontmatter_scalar,
+from .frontmatter import parse_frontmatter, read_frontmatter_only
+from .lifecycle import (
+    SESSION_ENV,
+    append_note_session,
+    append_task_note,
+    create_task,
+    detect_session,
+    update_task,
 )
-from .notes import read_note, split_note
+from .notes import (
+    VaultTransaction,
+    append_markdown_block_to_section,
+    fence_delimiter,
+    normalize_heading,
+    read_note,
+    split_note,
+)
 from .resolver import (
     NoteMatch,
     iter_markdown,
     note_match,
-    project_alias_matches,
     resolve_id,
+    resolve_project_root,
     strip_obs_prefix,
     title_from_body,
 )
-from .runs import VaultTransaction
 
 DEFAULT_VAULT = Path("/path/to/vault")
 RETRO_ATTACHMENTS = Path("Agents/Retrospectives/attachments")
@@ -56,13 +63,6 @@ DEEP_RESEARCH_HEADING = "## Deep research prompt"
 RUNNING_RESEARCH_HEADING = "## Running research sessions"
 RESEARCH_PACKET_BASE = Path("Bases/Research packet.base")
 DEFAULT_EXPORT_ROOT = Path("~/obsidian-export")
-SESSION_ENV = [
-    ("Codex", "CODEX_THREAD_ID"),
-    ("Claude Code", "CLAUDE_SESSION_ID"),
-    ("Claude Code", "CLAUDE_CODE_SESSION_ID"),
-    ("OpenCode", "OPENCODE_SESSION_ID"),
-    ("Gemini", "GEMINI_SESSION_ID"),
-]
 
 
 @dataclass(frozen=True)
@@ -594,143 +594,6 @@ def output_resolve(match: NoteMatch, args: argparse.Namespace) -> None:
     print("\n".join(outline(match.path)))
 
 
-def is_project_task(path: Path, root: Path) -> bool:
-    try:
-        rel = path.relative_to(root)
-    except ValueError:
-        return False
-    parts = rel.parts
-    return len(parts) >= 4 and parts[0] == "Projects" and parts[-2] == "Tasks"
-
-
-def project_root_for_task(path: Path, root: Path) -> Path:
-    if not is_project_task(path, root):
-        raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
-    rel = path.relative_to(root)
-    return root / rel.parts[0] / rel.parts[1]
-
-
-def detect_session(allow_missing: bool) -> tuple[str, str]:
-    for provider, env_name in SESSION_ENV:
-        value = os.environ.get(env_name)
-        if value:
-            return provider, f"{env_name}={value}"
-    if allow_missing:
-        return "Unknown", "session_id=unavailable"
-    raise OawError(
-        "no stable session ID found; set CODEX_THREAD_ID or pass --allow-missing-session-id"
-    )
-
-
-def append_session_id_frontmatter(text: str, session_ref: str) -> str:
-    name, separator, value = session_ref.partition("=")
-    if not separator or (name == "session_id" and value == "unavailable"):
-        return text
-    return append_frontmatter_list_value(text, "session-ids", value)
-
-
-def append_session_entry(
-    text: str, provider: str, session_ref: str, note: str, checks: str | None
-) -> str:
-    today = _dt.date.today().isoformat()
-    detail = note.strip()
-    if checks:
-        detail = f"{detail}; checks: {checks.strip()}"
-    entry = f"- {today} - {provider} - `{session_ref}` - {detail}\n"
-    if "## Agent sessions" not in text:
-        suffix = "" if text.endswith("\n") else "\n"
-        return f"{text}{suffix}\n## Agent sessions\n\n{entry}"
-    marker = "## Agent sessions"
-    idx = text.index(marker)
-    after = text.index("\n", idx) + 1
-    if after >= len(text):
-        return f"{text}\n\n{entry}"
-    next_heading = re.search(r"\n## ", text[after:])
-    if not next_heading:
-        suffix = "" if text.endswith("\n") else "\n"
-        return f"{text}{suffix}{entry}"
-    insert_at = after + next_heading.start() + 1
-    before = text[:insert_at]
-    after_text = text[insert_at:]
-    if not before.endswith("\n"):
-        before += "\n"
-    return before + entry + after_text
-
-
-def heading_level(line: str) -> int | None:
-    match = re.match(r"^(#{1,6})\s+\S", line)
-    return len(match.group(1)) if match else None
-
-
-def fence_delimiter(line: str) -> str | None:
-    match = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
-    return match.group(1)[0] if match else None
-
-
-def normalize_heading(section: str) -> str:
-    value = section.strip()
-    if not value:
-        raise OawError("section heading must not be empty")
-    if value.startswith("#"):
-        if not heading_level(value):
-            raise OawError("section heading must look like a Markdown heading")
-        return value
-    return f"## {value}"
-
-
-def append_markdown_block_to_section(text: str, section: str, block: str) -> str:
-    heading = normalize_heading(section)
-    block = block.strip()
-    if not block:
-        raise OawError("block content must not be empty")
-    lines = text.splitlines()
-    target_idx: int | None = None
-    target_level = heading_level(heading)
-    if target_level is None:
-        raise OawError("section heading must look like a Markdown heading")
-    active_fence: str | None = None
-    for idx, line in enumerate(lines):
-        delimiter = fence_delimiter(line)
-        if delimiter:
-            if active_fence is None:
-                active_fence = delimiter
-            elif active_fence == delimiter:
-                active_fence = None
-            continue
-        if active_fence is None and line.strip() == heading:
-            target_idx = idx
-            break
-    if target_idx is None:
-        prefix = "" if text.endswith("\n") else "\n"
-        return f"{text}{prefix}\n{heading}\n\n{block}\n"
-
-    insert_at = len(lines)
-    active_fence = None
-    for idx in range(target_idx + 1, len(lines)):
-        delimiter = fence_delimiter(lines[idx])
-        if delimiter:
-            if active_fence is None:
-                active_fence = delimiter
-            elif active_fence == delimiter:
-                active_fence = None
-            continue
-        if active_fence is not None:
-            continue
-        level = heading_level(lines[idx])
-        if level is not None and level <= target_level:
-            insert_at = idx
-            break
-
-    before = lines[:insert_at]
-    after = lines[insert_at:]
-    while before and before[-1] == "":
-        before.pop()
-    new_lines = [*before, "", block, ""]
-    if after:
-        new_lines.extend(after)
-    return "\n".join(new_lines).rstrip() + "\n"
-
-
 def append_observation_entry(text: str, section: str, title: str, body: str) -> str:
     clean_title = title.strip()
     clean_body = body.strip()
@@ -746,23 +609,6 @@ def append_observation_entry(text: str, section: str, title: str, body: str) -> 
     )
 
 
-def update_note_session(
-    raw_id: str,
-    note: str,
-    checks: str | None,
-    allow_missing: bool,
-) -> None:
-    root = vault_root()
-    match = resolve_id(raw_id, root)
-    provider, session_ref = detect_session(allow_missing)
-    text = match.path.read_text(encoding="utf-8")
-    text = append_session_id_frontmatter(text, session_ref)
-    text = append_session_entry(text, provider, session_ref, note, checks)
-    match.path.write_text(text, encoding="utf-8")
-    print(f"Updated: {match.relpath}")
-    print("Section: Agent sessions")
-
-
 def update_note_observation(raw_id: str, section: str, title: str, body: str) -> None:
     root = vault_root()
     match = resolve_id(raw_id, root)
@@ -771,207 +617,6 @@ def update_note_observation(raw_id: str, section: str, title: str, body: str) ->
     match.path.write_text(text, encoding="utf-8")
     print(f"Updated: {match.relpath}")
     print(f"Section: {normalize_heading(section)}")
-
-
-def update_task(
-    match: NoteMatch,
-    root: Path,
-    status: str,
-    note: str,
-    checks: str | None,
-    allow_missing: bool,
-) -> None:
-    if not is_project_task(match.path, root):
-        raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
-    if status == "done" and not checks:
-        raise OawError("task complete requires --checks")
-    provider, session_ref = detect_session(allow_missing)
-    text = match.path.read_text(encoding="utf-8")
-    text = set_frontmatter_scalar(text, "status", status)
-    text = append_session_id_frontmatter(text, session_ref)
-    text = append_session_entry(text, provider, session_ref, note, checks)
-    match.path.write_text(text, encoding="utf-8")
-    moved = move_project_board_card(
-        project_root_for_task(match.path, root),
-        match.path,
-        match.title,
-        match.note_id,
-        status,
-    )
-    print(f"Updated: {match.relpath}")
-    print(f"Status: {status}")
-    print(f"Board: {'updated' if moved else 'not found'}")
-
-
-def append_task_note(
-    match: NoteMatch, root: Path, note: str, checks: str | None, allow_missing: bool
-) -> None:
-    if not is_project_task(match.path, root):
-        raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
-    provider, session_ref = detect_session(allow_missing)
-    text = match.path.read_text(encoding="utf-8")
-    text = append_session_id_frontmatter(text, session_ref)
-    text = append_session_entry(text, provider, session_ref, note, checks)
-    match.path.write_text(text, encoding="utf-8")
-    status = match.frontmatter.get("status", "")
-    print(f"Updated: {match.relpath}")
-    print(f"Status: {status}")
-    print("Board: unchanged")
-
-
-def resolve_project_root(raw: str, root: Path) -> tuple[Path, str | None]:
-    """Resolve a project alias or folder name to (project folder, alias prefix)."""
-    target = strip_obs_prefix(raw.strip())
-    if not target:
-        raise OawError("task create requires a non-empty --project")
-    matches = project_alias_matches(target, root)
-    if len(matches) > 1:
-        paths = "\n".join(f"  {match.relpath}" for match in matches)
-        raise OawError(f"project alias '{target}' is ambiguous:\n{paths}")
-    if matches:
-        return matches[0].path.parent, target
-    candidate = root / "Projects" / target
-    if candidate.is_dir():
-        prefix = None
-        index = candidate / "Index.md"
-        if index.exists():
-            _, data = read_frontmatter_only(index)
-            index_id = str(data.get("id") or "")
-            if index_id.endswith("-index"):
-                prefix = index_id.removesuffix("-index")
-        return candidate, prefix
-    raise OawError(f"project not found: {raw}")
-
-
-def create_task(args: argparse.Namespace) -> None:
-    root = vault_root()
-    capture = resolve_id(args.from_capture, root) if args.from_capture else None
-    if capture:
-        if capture.frontmatter.get("type") != "capture":
-            raise OawError(f"from-capture source is not a capture note: {capture.relpath}")
-        if not capture.note_id:
-            raise OawError("from-capture source must have a stable frontmatter id")
-        if capture.frontmatter.get("status") == "triaged":
-            raise OawError(f"capture is already triaged: {capture.note_id}")
-    elif args.start:
-        raise OawError("--start is only supported with --from-capture")
-    title = (args.title or (capture.title if capture else "")).strip()
-    if not title:
-        raise OawError("task create requires a non-empty --title")
-    if "/" in title or title.startswith("."):
-        raise OawError("task title must not contain '/' or start with '.'")
-    raw_project = args.project
-    if not raw_project and capture:
-        try:
-            relative = capture.path.relative_to(root / "Projects")
-            raw_project = relative.parts[0]
-        except (ValueError, IndexError) as exc:
-            raise OawError("--project is required when the capture is outside Projects/") from exc
-    if not raw_project:
-        raise OawError(
-            "task create requires --project unless --from-capture identifies a project capture"
-        )
-    project_root, alias = resolve_project_root(raw_project, root)
-    provider, session_ref = detect_session(args.allow_missing_session_id)
-    if args.id is not None:
-        note_id = args.id.strip()
-        if not note_id:
-            raise OawError("task create requires a non-empty --id")
-    elif alias:
-        note_id = f"{alias}-TSK-{slugify(title)}"
-    else:
-        raise OawError(
-            "cannot derive a task ID: project index has no '<ALIAS>-index' id; pass --id"
-        )
-    path = project_root / "Tasks" / f"{title}.md"
-    relpath = path.relative_to(root)
-    conflicts = [
-        match
-        for candidate in iter_markdown(root)
-        if (match := note_match(candidate, root, note_id))
-    ]
-    if conflicts:
-        paths = "\n".join(f"  {match.relpath} ({match.matched_by})" for match in conflicts)
-        raise OawError(f"id '{note_id}' is already in use:\n{paths}")
-    if path.exists():
-        raise OawError(f"task note already exists: {relpath.as_posix()}")
-    today = _dt.date.today().isoformat()
-    project_slug = slugify(project_root.name)
-    status = "active" if args.start else args.status
-    lines = [
-        "---",
-        "type: task",
-        f"project: {project_slug}",
-        f"status: {status}",
-        f"created: {today}",
-    ]
-    if args.priority is not None:
-        lines.append(f"priority: {args.priority}")
-    if args.effort:
-        lines.append(f"effort: {args.effort}")
-    lines += [
-        f"id: {note_id}",
-        "aliases:",
-        f"  - {note_id}",
-        "tags:",
-        "  - projects",
-        f"  - {project_slug}",
-        "  - task",
-    ]
-    if capture:
-        lines.append(f"source-capture: {capture.note_id}")
-    for tag in args.tag or []:
-        cleaned = tag.strip()
-        if cleaned:
-            lines.append(f"  - {cleaned}")
-    session_id = session_ref.split("=", 1)[1] if "=" in session_ref else ""
-    if session_id and session_id != "unavailable":
-        lines += ["session-ids:", f"  - {session_id}"]
-    lines += ["---", "", f"# {title}", "", "## Problem", ""]
-    lines.append(args.note.strip() if args.note else "_To be defined._")
-    lines += ["", "## Related", ""]
-    index = project_root / "Index.md"
-    if alias and index.exists():
-        index_rel = index.relative_to(root).with_suffix("").as_posix()
-        lines.append(f"- [[{index_rel}|{alias}-index]]")
-        lines.append("")
-    if capture:
-        lines.append(f"- {durable_wikilink(capture, capture.note_id)}")
-        lines.append("")
-    lines += [
-        "## Agent sessions",
-        "",
-        f"- {today} - {provider} - `{session_ref}` - Created task note.",
-    ]
-    task_text = "\n".join(lines) + "\n"
-    if capture:
-        task_link = f"[[{relpath.with_suffix('').as_posix()}|{note_id}]]"
-        capture_text = capture.path.read_text(encoding="utf-8")
-        capture_text = append_to_section(
-            capture_text,
-            "Related",
-            task_link,
-        )
-        capture_text = append_frontmatter_list_value(capture_text, "destinations", task_link)
-        capture_text = set_frontmatter_scalar(capture_text, "status", "triaged")
-        board, board_text = updated_project_board_text(project_root, path, title, note_id, status)
-        transaction = VaultTransaction()
-        transaction.stage(path, task_text)
-        if board and board_text:
-            transaction.stage(board, board_text)
-        transaction.stage(capture.path, capture_text)  # transition is deliberately last
-        transaction.commit()
-        moved = board is not None
-    else:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(task_text, encoding="utf-8")
-        moved = move_project_board_card(project_root, path, title, note_id, status)
-    print(f"Created: {relpath.as_posix()}")
-    print(f"ID: {note_id}")
-    print(f"Status: {status}")
-    print(f"Board: {'updated' if moved else 'not found'}")
-    if capture:
-        print(f"Capture: {capture.note_id} -> triaged")
 
 
 def note_type_matches(data: dict[str, object], note_type: str) -> bool:
@@ -2795,7 +2440,20 @@ def main(argv: list[str] | None = None) -> int:
                     args.allow_missing_session_id,
                 )
             elif args.task_command == "create":
-                create_task(args)
+                create_task(
+                    root,
+                    args.project,
+                    args.title,
+                    resolve_id(args.from_capture, root) if args.from_capture else None,
+                    args.start,
+                    args.id,
+                    args.status,
+                    args.priority,
+                    args.effort,
+                    args.note,
+                    args.tag,
+                    args.allow_missing_session_id,
+                )
             else:
                 update_task(
                     resolve_id(args.id, root),
@@ -2807,8 +2465,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
         elif args.command == "note":
             if args.note_command == "session":
-                update_note_session(
-                    args.id,
+                append_note_session(
+                    resolve_id(args.id, vault_root()),
                     args.note,
                     args.checks,
                     args.allow_missing_session_id,

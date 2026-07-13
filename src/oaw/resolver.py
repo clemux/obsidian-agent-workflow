@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import OawError
-from .frontmatter import frontmatter_may_match, parse_frontmatter, read_frontmatter_text
+from .frontmatter import (
+    frontmatter_may_match,
+    parse_frontmatter,
+    read_frontmatter_only,
+    read_frontmatter_text,
+)
 from .notes import split_note
 
 
@@ -169,3 +174,27 @@ def project_alias_matches(target: str, root: Path, matcher=note_match) -> list[N
                 )
             )
     return matches
+
+
+def resolve_project_root(raw: str, root: Path) -> tuple[Path, str | None]:
+    """Resolve a project alias or folder name to its folder and alias prefix."""
+    target = strip_obs_prefix(raw.strip())
+    if not target:
+        raise OawError("task create requires a non-empty --project")
+    matches = project_alias_matches(target, root)
+    if len(matches) > 1:
+        paths = "\n".join(f"  {match.relpath}" for match in matches)
+        raise OawError(f"project alias '{target}' is ambiguous:\n{paths}")
+    if matches:
+        return matches[0].path.parent, target
+    candidate = root / "Projects" / target
+    if candidate.is_dir():
+        prefix = None
+        index = candidate / "Index.md"
+        if index.exists():
+            _, data = read_frontmatter_only(index)
+            index_id = str(data.get("id") or "")
+            if index_id.endswith("-index"):
+                prefix = index_id.removesuffix("-index")
+        return candidate, prefix
+    raise OawError(f"project not found: {raw}")

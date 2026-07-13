@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from oaw.errors import OawError
-from oaw.runs import Identity, Run, VaultTransaction, is_stale, run_id
+from oaw.notes import VaultTransaction
+from oaw.runs import Identity, Run, is_stale, run_id
 
 
 def test_run_id_is_deterministic_and_session_scoped():
