@@ -22,9 +22,19 @@ from .errors import OawError
 from .frontmatter import (
     append_frontmatter_list_value,
     parse_frontmatter,
+    read_frontmatter_only,
     set_frontmatter_scalar,
 )
 from .notes import read_note, split_note
+from .resolver import (
+    NoteMatch,
+    iter_markdown,
+    note_match,
+    project_alias_matches,
+    resolve_id,
+    strip_obs_prefix,
+    title_from_body,
+)
 from .runs import VaultTransaction
 
 DEFAULT_VAULT = Path("/path/to/vault")
@@ -40,7 +50,6 @@ PROJECT_INDEX_TEMPLATE = Path("Templates/Small project index.md")
 DEEP_RESEARCH_HEADING = "## Deep research prompt"
 RUNNING_RESEARCH_HEADING = "## Running research sessions"
 RESEARCH_PACKET_BASE = Path("Bases/Research packet.base")
-FRONTMATTER_READ_LIMIT = 64 * 1024
 DEFAULT_EXPORT_ROOT = Path("~/obsidian-export")
 SESSION_ENV = [
     ("Codex", "CODEX_THREAD_ID"),
@@ -49,17 +58,6 @@ SESSION_ENV = [
     ("OpenCode", "OPENCODE_SESSION_ID"),
     ("Gemini", "GEMINI_SESSION_ID"),
 ]
-
-
-@dataclass(frozen=True)
-class NoteMatch:
-    path: Path
-    relpath: str
-    note_id: str | None
-    matched_by: str
-    title: str
-    frontmatter_text: str
-    frontmatter: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -536,136 +534,8 @@ def start_research_run(args: argparse.Namespace) -> None:
     print("Prompt: updated")
 
 
-def strip_obs_prefix(raw_id: str) -> str:
-    value = raw_id.strip()
-    if value.startswith("obs:"):
-        value = value[4:]
-    if not value:
-        raise OawError("empty ID")
-    return value
-
-
-def read_frontmatter_only(path: Path) -> tuple[str, dict[str, object]]:
-    with path.open("r", encoding="utf-8") as handle:
-        first = handle.readline()
-        if first.strip() != "---":
-            return "", {}
-        total = len(first.encode("utf-8"))
-        lines: list[str] = []
-        for line in handle:
-            total += len(line.encode("utf-8"))
-            if total > FRONTMATTER_READ_LIMIT:
-                raise OawError(f"frontmatter too large or not closed before safety limit: {path}")
-            if line.strip() == "---":
-                return "".join(lines), parse_frontmatter("".join(lines))
-            lines.append(line)
-    raise OawError(f"frontmatter is not closed: {path}")
-
-
-def title_from_body(path: Path, body: str) -> str:
-    for line in body.splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
-    return path.stem
-
-
-def iter_markdown(root: Path):
-    skip = {".git", ".obsidian", ".trash", "node_modules", ".venv", "__pycache__"}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in skip]
-        directory = Path(dirpath)
-        for filename in filenames:
-            if filename.endswith(".md"):
-                yield directory / filename
-
-
-def read_matching_note(path: Path, target: str) -> tuple[str, str, dict[str, object], str] | None:
-    with path.open("r", encoding="utf-8") as handle:
-        if handle.readline().strip() != "---":
-            return None
-        lines: list[str] = []
-        for line in handle:
-            if line.strip() == "---":
-                break
-            lines.append(line)
-        else:
-            return None
-        fm = "".join(lines)
-        if target not in fm:
-            return None
-        data = parse_frontmatter(fm)
-        note_id = data.get("id")
-        aliases = data.get("aliases", [])
-        if isinstance(note_id, str) and note_id == target:
-            matched_by = "id"
-        elif isinstance(aliases, list) and target in aliases:
-            matched_by = "aliases"
-        else:
-            return None
-        return fm, handle.read(), data, matched_by
-
-
-def note_match(path: Path, root: Path, target: str) -> NoteMatch | None:
-    try:
-        matched = read_matching_note(path, target)
-    except UnicodeDecodeError:
-        return None
-    if matched is None:
-        return None
-    fm, body, data, matched_by = matched
-    note_id = data.get("id")
-    rel = path.relative_to(root).as_posix()
-    return NoteMatch(
-        path=path,
-        relpath=rel,
-        note_id=note_id if isinstance(note_id, str) else None,
-        matched_by=matched_by,
-        title=title_from_body(path, body),
-        frontmatter_text=fm.rstrip(),
-        frontmatter=data,
-    )
-
-
-def resolve_id(raw_id: str, root: Path) -> NoteMatch:
-    target = strip_obs_prefix(raw_id)
-    matches = [m for p in iter_markdown(root) if (m := note_match(p, root, target))]
-    if not matches:
-        matches = project_alias_matches(target, root)
-    if not matches:
-        raise OawError(f"no note with frontmatter id or alias '{target}' under {root}")
-    if len(matches) > 1:
-        paths = "\n".join(f"  {m.relpath} ({m.matched_by})" for m in matches)
-        raise OawError(f"id '{target}' is not unique:\n{paths}")
-    return matches[0]
-
-
-def project_alias_matches(target: str, root: Path) -> list[NoteMatch]:
-    if not re.fullmatch(r"[A-Z][A-Z0-9]{1,7}", target):
-        return []
-    index_id = f"{target}-index"
-    matches: list[NoteMatch] = []
-    projects = root / "Projects"
-    if not projects.exists():
-        return []
-    for path in sorted(projects.glob("*/Index.md")):
-        match = note_match(path, root, index_id)
-        if match:
-            matches.append(
-                NoteMatch(
-                    path=match.path,
-                    relpath=match.relpath,
-                    note_id=match.note_id,
-                    matched_by="project-alias",
-                    title=match.title,
-                    frontmatter_text=match.frontmatter_text,
-                    frontmatter=match.frontmatter,
-                )
-            )
-    return matches
-
-
 def outline(path: Path) -> list[str]:
-    _, _, body, _ = read_note(path)
+    _, _, body = read_note(path)
     lines: list[str] = []
     in_fence = False
     for number, line in enumerate(body.splitlines(), start=1):
@@ -1109,10 +979,13 @@ def update_next_board(
 
 
 def update_task(
-    raw_id: str, status: str, note: str, checks: str | None, allow_missing: bool
+    match: NoteMatch,
+    root: Path,
+    status: str,
+    note: str,
+    checks: str | None,
+    allow_missing: bool,
 ) -> None:
-    root = vault_root()
-    match = resolve_id(raw_id, root)
     if not is_project_task(match.path, root):
         raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
     if status == "done" and not checks:
@@ -1135,9 +1008,9 @@ def update_task(
     print(f"Board: {'updated' if moved else 'not found'}")
 
 
-def append_task_note(raw_id: str, note: str, checks: str | None, allow_missing: bool) -> None:
-    root = vault_root()
-    match = resolve_id(raw_id, root)
+def append_task_note(
+    match: NoteMatch, root: Path, note: str, checks: str | None, allow_missing: bool
+) -> None:
     if not is_project_task(match.path, root):
         raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
     provider, session_ref = detect_session(allow_missing)
@@ -1550,11 +1423,12 @@ def notes_containing_literal(root: Path, literal: str) -> list[NoteMatch]:
     matches: list[NoteMatch] = []
     for path in iter_markdown(root):
         try:
-            text, fm, body, data = read_note(path)
+            text, fm, body = read_note(path)
         except UnicodeDecodeError:
             continue
         if literal not in text:
             continue
+        data = parse_frontmatter(fm)
         note_id = data.get("id")
         rel = path.relative_to(root).as_posix()
         matches.append(
@@ -1766,7 +1640,8 @@ def session_lookup(args: argparse.Namespace) -> None:
 
 def note_from_path(path: Path, root: Path, matched_by: str = "path") -> NoteMatch:
     try:
-        _, fm, body, data = read_note(path)
+        _, fm, body = read_note(path)
+        data = parse_frontmatter(fm)
     except UnicodeDecodeError as exc:
         raise OawError(f"note is not valid UTF-8: {path}") from exc
     rel = path.relative_to(root).as_posix()
@@ -2125,7 +2000,7 @@ def resolve_export_artifact(root: Path, note_path: Path, raw_value: str) -> Path
 
 
 def export_note_text(match: NoteMatch, target: str) -> str:
-    text, _, body, _ = read_note(match.path)
+    text, _, body = read_note(match.path)
     frontmatter_block, _, _ = split_note(text)
     relpath = match.relpath
     banner = (
@@ -2259,7 +2134,8 @@ def validate_export_bundle(args: argparse.Namespace) -> None:
         raise OawError(f"exported note not found: {note_path}")
     if note.get("sha256") != sha256_file(note_path):
         raise OawError("exported note checksum mismatch")
-    _, _, _, data = read_note(note_path)
+    _, frontmatter, _ = read_note(note_path)
+    data = parse_frontmatter(frontmatter)
     temp_match = NoteMatch(
         path=note_path,
         relpath=note["path"],
@@ -3114,9 +2990,11 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 parser.error("unknown research command")
         elif args.command == "task":
+            root = vault_root()
             if args.task_command == "note":
                 append_task_note(
-                    args.id,
+                    resolve_id(args.id, root),
+                    root,
                     args.note,
                     args.checks,
                     args.allow_missing_session_id,
@@ -3125,7 +3003,8 @@ def main(argv: list[str] | None = None) -> int:
                 create_task(args)
             else:
                 update_task(
-                    args.id,
+                    resolve_id(args.id, root),
+                    root,
                     args.status,
                     args.note,
                     args.checks,

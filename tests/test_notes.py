@@ -18,14 +18,9 @@ def test_split_note_leaves_plain_or_unclosed_notes_untouched():
         assert split_note(text) == ("", "", text)
 
 
-def test_read_note_returns_text_sections_and_parsed_frontmatter(tmp_path: Path):
+def test_read_note_returns_text_sections(tmp_path: Path):
     path = tmp_path / "Example.md"
     text = "---\nid: example\naliases:\n  - one\n---\nBody\n"
     path.write_text(text, encoding="utf-8")
 
-    assert read_note(path) == (
-        text,
-        "id: example\naliases:\n  - one\n",
-        "Body\n",
-        {"id": "example", "aliases": ["one"]},
-    )
+    assert read_note(path) == (text, "id: example\naliases:\n  - one\n", "Body\n")

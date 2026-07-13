@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from oaw import cli
+from oaw import cli, resolver
 from oaw.errors import OawError
 
 from .assertions import Assertions
@@ -822,14 +822,14 @@ aliases:
 # Performance target
 """,
         )
-        original = cli.parse_frontmatter
+        original = resolver.parse_frontmatter
         parsed: list[str] = []
 
         def recording_parse(frontmatter: str):
             parsed.append(frontmatter)
             return original(frontmatter)
 
-        monkeypatch.setattr(cli, "parse_frontmatter", recording_parse)
+        monkeypatch.setattr(resolver, "parse_frontmatter", recording_parse)
 
         match = cli.resolve_id("PERF-TARGET", self.vault)
 
@@ -859,11 +859,11 @@ aliases:
 
         monkeypatch.setattr(cli, "resolve_id", recording_resolve)
 
-        cli.update_task("OAW-TSK-cli", "active", "Started once.", None, False)
+        cli.main(["task", "start", "OAW-TSK-cli", "--note", "Started once."])
         self.assertEqual(resolved, ["OAW-TSK-cli"])
 
         resolved.clear()
-        cli.append_task_note("OAW-TSK-cli", "Noted once.", None, False)
+        cli.main(["task", "note", "OAW-TSK-cli", "--note", "Noted once."])
         self.assertEqual(resolved, ["OAW-TSK-cli"])
 
     def test_complete_requires_checks(self):

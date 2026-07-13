@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .frontmatter import parse_frontmatter
-
 
 def split_note(text: str) -> tuple[str, str, str]:
     lines = text.splitlines(keepends=True)
@@ -20,7 +18,7 @@ def split_note(text: str) -> tuple[str, str, str]:
     return "", "", text
 
 
-def read_note(path: Path) -> tuple[str, str, str, dict[str, object]]:
+def read_note(path: Path) -> tuple[str, str, str]:
     text = path.read_text(encoding="utf-8")
     _, fm, body = split_note(text)
-    return text, fm, body, parse_frontmatter(fm)
+    return text, fm, body

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 from .errors import OawError
+
+FRONTMATTER_READ_LIMIT = 64 * 1024
 
 
 def unquote_scalar(value: str) -> str:
@@ -47,6 +50,39 @@ def parse_frontmatter(fm: str) -> dict[str, object]:
         else:
             data[key] = unquote_scalar(value)
     return data
+
+
+def frontmatter_may_match(frontmatter: str, target: str) -> bool:
+    """Return whether raw frontmatter might contain an ID or alias match.
+
+    This deliberately permits false positives.  Resolver performs the authoritative
+    parsed comparison after this inexpensive check.
+    """
+    return target in frontmatter
+
+
+def read_frontmatter_text(path: Path) -> str:
+    """Read only the YAML frontmatter body, bounded to avoid pathological notes."""
+    with path.open("r", encoding="utf-8") as handle:
+        first = handle.readline()
+        if first.strip() != "---":
+            return ""
+        total = len(first.encode("utf-8"))
+        lines: list[str] = []
+        for line in handle:
+            total += len(line.encode("utf-8"))
+            if total > FRONTMATTER_READ_LIMIT:
+                raise OawError(f"frontmatter too large or not closed before safety limit: {path}")
+            if line.strip() == "---":
+                return "".join(lines)
+            lines.append(line)
+    raise OawError(f"frontmatter is not closed: {path}")
+
+
+def read_frontmatter_only(path: Path) -> tuple[str, dict[str, object]]:
+    """Read and parse a note's frontmatter without reading its body."""
+    frontmatter = read_frontmatter_text(path)
+    return frontmatter, parse_frontmatter(frontmatter)
 
 
 def set_frontmatter_scalar(text: str, key: str, value: str) -> str:
