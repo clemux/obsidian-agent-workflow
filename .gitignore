@@ -4,7 +4,6 @@ __pycache__/
 .worktrees/
 .claude/settings.local.json
 tmp-goals/
-uv.lock
 .idea/
 .claude/workflows
 .claude/settings.local.json
