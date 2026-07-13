@@ -153,24 +153,21 @@ class TestCliParity(Assertions):
     def test_matching_help_with_stale_source_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            stale = self.write_package_launcher(root, "#!/usr/bin/env python3")
-            cli = root / "src" / "oaw" / "cli.py"
-            cli.write_text(
-                cli.read_text(encoding="utf-8") + "\n# stale installed source\n",
+            checkout = self.write_minimal_cli(root / "checkout_oaw.py", "")
+            stale = self.write_minimal_cli(root / "stale_oaw.py", "")
+            stale.write_text(
+                stale.read_text(encoding="utf-8") + "\n# stale installed source\n",
                 encoding="utf-8",
             )
-            checkout_prefix = parity.command_prefix(str(BIN), "checkout")
-            installed_prefix = parity.command_prefix(str(stale), "installed")
-            checkout_prefix = parity.align_checkout_interpreter(
-                checkout_prefix,
-                installed_prefix,
-            )
-            checkout_help = parity.help_result(checkout_prefix, ())
-            installed_help = parity.help_result(installed_prefix, ())
-            mismatch = parity.source_failure(checkout_prefix, installed_prefix)
+            stderr = StringIO()
+            with redirect_stderr(stderr):
+                returncode = parity.main(
+                    ["--checkout", str(checkout), "--installed", str(stale)]
+                )
 
-        self.assertEqual(checkout_help.returncode, installed_help.returncode)
-        self.assertEqual(checkout_help.stdout, installed_help.stdout)
-        self.assertEqual(checkout_help.stderr, installed_help.stderr)
-        self.assertTrue(mismatch)
-        self.assertIn("Source mismatch: installed artifact does not match checkout", mismatch or "")
+        self.assertNotEqual(returncode, 0)
+        self.assertIn(
+            "Source mismatch: installed artifact does not match checkout",
+            stderr.getvalue(),
+        )
+        self.assertNotIn("Mismatch: oaw --help", stderr.getvalue())
