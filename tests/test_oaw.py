@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
@@ -276,6 +276,15 @@ aliases:
             stdout.getvalue(),
             f"{self.vault / 'Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md'}\n",
         )
+
+    def test_cli_main_translates_usage_exit_to_status_code(self):
+        stderr = StringIO()
+
+        with redirect_stderr(stderr):
+            returncode = cli.main([])
+
+        self.assertEqual(returncode, 2)
+        self.assertIn("the following arguments are required: command", stderr.getvalue())
 
     def test_no_command_is_usage_error_on_stderr(self):
         proc = self.run_oaw()

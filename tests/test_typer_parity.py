@@ -12,7 +12,7 @@ from shutil import copytree
 import pytest
 from typer.testing import CliRunner
 
-from oaw import cli, snapshot, typer_cli
+from oaw import cli, snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / ".codex-evidence" / "t1-command-inventory.txt"
@@ -604,7 +604,7 @@ def run_argparse(
 
 def run_typer(arguments: list[str], vault: Path) -> FrontendResult:
     result = CliRunner().invoke(
-        typer_cli.app,
+        cli.app,
         arguments,
         prog_name="oaw",
         env={"OAW_VAULT": str(vault), **SESSION_ENVIRONMENT},

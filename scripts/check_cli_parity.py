@@ -24,7 +24,7 @@ PYTHON_INTERPRETER = re.compile(r"^(?:python|python3)(?:\d+(?:\.\d+)*)?$")
 MAX_HELP_WORKERS = 8
 
 sys.path.insert(0, str(ROOT / "src"))
-from oaw import typer_cli  # noqa: E402
+from oaw import cli  # noqa: E402
 
 
 def command_prefix(value: str, label: str) -> list[str]:
@@ -104,7 +104,7 @@ def checkout_command_paths() -> list[tuple[str, ...]]:
             paths.append(path)
             visit(child, path)
 
-    visit(get_command(typer_cli.app), ())
+    visit(get_command(cli.app), ())
     return paths
 
 

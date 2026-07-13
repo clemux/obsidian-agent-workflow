@@ -6,7 +6,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from oaw import cli, typer_cli
+from oaw import cli
 
 
 def write(path: Path, text: str) -> None:
@@ -31,18 +31,11 @@ def imported_targets(source: str) -> set[str]:
 
 def is_forbidden_cli_dependency(target: str) -> bool:
     normalized = target.lstrip(".")
-    return (
-        normalized == "argparse"
-        or normalized.startswith("argparse.")
-        or normalized == "cli"
-        or normalized.startswith("cli.")
-        or normalized == "oaw.cli"
-        or normalized.startswith("oaw.cli.")
-    )
+    return normalized == "argparse" or normalized.startswith("argparse.")
 
 
 def test_typer_frontend_has_no_argparse_or_cli_dependency() -> None:
-    targets = imported_targets(inspect.getsource(typer_cli))
+    targets = imported_targets(inspect.getsource(cli))
 
     assert not {target for target in targets if is_forbidden_cli_dependency(target)}
 
@@ -52,12 +45,6 @@ def test_typer_frontend_has_no_argparse_or_cli_dependency() -> None:
     [
         "import argparse",
         "from argparse import ArgumentParser",
-        "import oaw.cli as parser_cli",
-        "from oaw.cli import build_parser",
-        "from oaw import cli",
-        "from . import cli",
-        "from .cli import build_parser",
-        "from .. import cli",
     ],
 )
 def test_typer_dependency_guard_recognizes_forbidden_import_forms(statement: str) -> None:
@@ -66,7 +53,7 @@ def test_typer_dependency_guard_recognizes_forbidden_import_forms(statement: str
 
 @pytest.mark.parametrize("help_flag", ["-h", "--help"])
 def test_typer_help_wins_over_an_unknown_option(help_flag: str) -> None:
-    result = CliRunner().invoke(typer_cli.app, ["resolve", "--bogus", help_flag])
+    result = CliRunner().invoke(cli.app, ["resolve", "--bogus", help_flag])
 
     assert result.exit_code == 0, result.stderr
     assert result.stderr == ""
@@ -75,7 +62,7 @@ def test_typer_help_wins_over_an_unknown_option(help_flag: str) -> None:
 
 @pytest.mark.parametrize("help_flag", ["-h", "--help"])
 def test_typer_help_in_a_known_option_value_slot_is_a_usage_error(help_flag: str) -> None:
-    result = CliRunner().invoke(typer_cli.app, ["list", "--project", help_flag])
+    result = CliRunner().invoke(cli.app, ["list", "--project", help_flag])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -83,7 +70,7 @@ def test_typer_help_in_a_known_option_value_slot_is_a_usage_error(help_flag: str
 
 
 def test_typer_option_token_does_not_fill_a_pending_option_value() -> None:
-    result = CliRunner().invoke(typer_cli.app, ["list", "--project", "--status", "--help"])
+    result = CliRunner().invoke(cli.app, ["list", "--project", "--status", "--help"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -91,7 +78,7 @@ def test_typer_option_token_does_not_fill_a_pending_option_value() -> None:
 
 
 def test_typer_separator_does_not_fill_a_pending_option_value() -> None:
-    result = CliRunner().invoke(typer_cli.app, ["list", "--project", "--", "--help"])
+    result = CliRunner().invoke(cli.app, ["list", "--project", "--", "--help"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -99,7 +86,7 @@ def test_typer_separator_does_not_fill_a_pending_option_value() -> None:
 
 
 def test_typer_help_after_separator_is_a_positional_token() -> None:
-    result = CliRunner().invoke(typer_cli.app, ["resolve", "note-id", "--", "--help"])
+    result = CliRunner().invoke(cli.app, ["resolve", "note-id", "--", "--help"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -118,7 +105,7 @@ def test_typer_help_after_separator_is_a_positional_token() -> None:
 def test_typer_help_preserves_command_path_parsing_order(
     arguments: list[str], exit_code: int, output_prefix: str
 ) -> None:
-    result = CliRunner().invoke(typer_cli.app, arguments)
+    result = CliRunner().invoke(cli.app, arguments)
 
     assert result.exit_code == exit_code
     assert result.output.startswith(output_prefix)
@@ -140,12 +127,12 @@ aliases:
     runner = CliRunner()
 
     result = runner.invoke(
-        typer_cli.app,
+        cli.app,
         ["resolve", "--path", "EXM-TSK-resolver"],
         env={"OAW_VAULT": str(tmp_path)},
     )
 
-    assert isinstance(typer_cli.app, typer.Typer)
+    assert isinstance(cli.app, typer.Typer)
     assert result.exit_code == 0, result.output
     assert result.output == f"{tmp_path / 'Projects/Example/Tasks/Resolver CLI.md'}\n"
 
@@ -183,18 +170,11 @@ aliases:
 def test_typer_conflicts_preserve_argparse_diagnostics(
     arguments: list[str],
     error_line: str,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("COLUMNS", "80")
-    with pytest.raises(SystemExit) as expected_exit:
-        cli.build_parser().parse_args(arguments)
-    expected = capsys.readouterr()
-    result = CliRunner().invoke(typer_cli.app, arguments, env={"COLUMNS": "80"})
+    result = CliRunner().invoke(cli.app, arguments, env={"COLUMNS": "80"})
 
-    assert expected_exit.value.code == result.exit_code == 2
-    assert expected.out == result.stdout == ""
-    assert result.stderr == expected.err
+    assert result.exit_code == 2
+    assert result.stdout == ""
     assert result.stderr.endswith(error_line)
 
 
@@ -209,34 +189,20 @@ def test_typer_conflicts_preserve_argparse_diagnostics(
 def test_typer_task_create_validates_every_choice_occurrence(
     arguments: list[str],
     invalid_value: str,
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     full_arguments = ["task", "create", *arguments]
-    monkeypatch.setenv("COLUMNS", "80")
-    with pytest.raises(SystemExit) as expected_exit:
-        cli.build_parser().parse_args(full_arguments)
-    expected = capsys.readouterr()
-    result = CliRunner().invoke(typer_cli.app, full_arguments, env={"COLUMNS": "80"})
+    result = CliRunner().invoke(cli.app, full_arguments, env={"COLUMNS": "80"})
 
-    assert expected_exit.value.code == result.exit_code == 2
-    assert expected.out == result.stdout == ""
-    assert result.stderr == expected.err
+    assert result.exit_code == 2
+    assert result.stdout == ""
     assert invalid_value in result.stderr
 
 
 @pytest.mark.parametrize("arguments", [[], ["resolve"], ["unknown-command"]])
 def test_typer_ordinary_usage_errors_preserve_argparse_diagnostics(
     arguments: list[str],
-    capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("COLUMNS", "80")
-    with pytest.raises(SystemExit) as expected_exit:
-        cli.build_parser().parse_args(arguments)
-    expected = capsys.readouterr()
-    result = CliRunner().invoke(typer_cli.app, arguments, env={"COLUMNS": "80"})
+    result = CliRunner().invoke(cli.app, arguments, env={"COLUMNS": "80"})
 
-    assert expected_exit.value.code == result.exit_code == 2
-    assert expected.out == result.stdout == ""
-    assert result.stderr == expected.err
+    assert result.exit_code == 2
+    assert result.stdout == ""

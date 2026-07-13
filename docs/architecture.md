@@ -40,7 +40,7 @@ src/oaw/
     exports.py       # safe outbound export + validate
     ingest.py        # safe-export ingestion
     retro.py         # retro create, note observe/session intake
-    cli.py           # argparse assembly + dispatch, thin
+    cli.py           # Typer composition root + dispatch, thin
 bin/oaw              # shim for checkout dogfooding: imports src/oaw, calls cli.main
 tests/
 ```
