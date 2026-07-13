@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import hashlib
 import json
-from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
-from io import StringIO
 from pathlib import Path
 from shutil import copytree
 
@@ -16,6 +15,7 @@ from oaw import cli, snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / ".codex-evidence" / "t1-command-inventory.txt"
+GOLDEN = ROOT / "tests" / "fixtures" / "cli_parity_golden.json"
 SESSION_ENVIRONMENT = {
     "CODEX_THREAD_ID": "",
     "CLAUDE_SESSION_ID": "",
@@ -31,6 +31,12 @@ class FixedDateTime(dt.datetime):
     def now(cls, tz: dt.tzinfo | None = None) -> FixedDateTime:
         value = cls(2026, 7, 13, 12, 0, tzinfo=dt.timezone.utc)
         return value if tz is not None else value.replace(tzinfo=None)
+
+
+class FixedDate(dt.date):
+    @classmethod
+    def today(cls) -> FixedDate:
+        return cls(2026, 7, 13)
 
 
 @dataclass(frozen=True)
@@ -359,6 +365,25 @@ PARITY_CASES = (
     ),
 )
 
+ACCEPTED_VALUE_CASES = (
+    ("--status", "backlog"),
+    ("--status", "todo"),
+    ("--priority", "1"),
+    ("--priority", "2"),
+    ("--priority", "3"),
+    ("--effort", "S"),
+    ("--effort", "M"),
+    ("--effort", "L"),
+)
+DOMAIN_ERROR_TOKENS = (
+    "task",
+    "start",
+    "PRT-TSK-missing",
+    "--note",
+    "Must not write",
+    "--allow-missing-session-id",
+)
+
 
 def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -586,22 +611,6 @@ def render_arguments(tokens: tuple[str, ...], vault: Path) -> list[str]:
     return [token.format(vault=vault) for token in tokens]
 
 
-def run_argparse(
-    arguments: list[str], vault: Path, monkeypatch: pytest.MonkeyPatch
-) -> FrontendResult:
-    stdout = StringIO()
-    stderr = StringIO()
-    with monkeypatch.context() as environment, redirect_stdout(stdout), redirect_stderr(stderr):
-        environment.setenv("OAW_VAULT", str(vault))
-        for name, value in SESSION_ENVIRONMENT.items():
-            environment.setenv(name, value)
-        try:
-            returncode = cli.main(arguments)
-        except SystemExit as exc:
-            returncode = exc.code if isinstance(exc.code, int) else 1
-    return FrontendResult(returncode, stdout.getvalue(), stderr.getvalue())
-
-
 def run_typer(arguments: list[str], vault: Path) -> FrontendResult:
     result = CliRunner().invoke(
         cli.app,
@@ -626,91 +635,41 @@ def normalized_file_bytes(path: Path, vault: Path) -> bytes:
     return text.replace(str(vault), "$VAULT").encode()
 
 
-def filesystem_state(vault: Path) -> tuple[tuple[Path, ...], dict[Path, bytes]]:
+def filesystem_state(vault: Path) -> dict[str, object]:
     paths = sorted(vault.rglob("*"))
-    directories = tuple(path.relative_to(vault) for path in paths if path.is_dir())
+    directories = [path.relative_to(vault).as_posix() for path in paths if path.is_dir()]
     files = {
-        path.relative_to(vault): normalized_file_bytes(path, vault)
+        path.relative_to(vault).as_posix(): base64.b64encode(
+            normalized_file_bytes(path, vault)
+        ).decode("ascii")
         for path in paths
         if path.is_file()
     }
-    return directories, files
+    return {"directories": directories, "files_base64": files}
 
 
 def normalized(value: str, vault: Path) -> str:
     return value.replace(str(vault), "$VAULT")
 
 
-def assert_frontend_parity(
-    tokens: tuple[str, ...],
-    fixture: Path,
-    work_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    expected_exit_class: int,
-    expected_stderr_prefix: str | None = None,
-) -> None:
-    argparse_vault = work_root / "argparse"
-    typer_vault = work_root / "typer"
-    copytree(fixture, argparse_vault)
-    copytree(fixture, typer_vault)
-
-    argparse_result = run_argparse(
-        render_arguments(tokens, argparse_vault), argparse_vault, monkeypatch
-    )
-    typer_result = run_typer(render_arguments(tokens, typer_vault), typer_vault)
-
-    assert exit_class(argparse_result.returncode) == expected_exit_class
-    assert exit_class(typer_result.returncode) == expected_exit_class
-    assert normalized(argparse_result.stdout, argparse_vault) == normalized(
-        typer_result.stdout, typer_vault
-    )
+def recorded_result(result: FrontendResult, vault: Path) -> dict[str, object]:
+    record: dict[str, object] = {
+        "exit_class": exit_class(result.returncode),
+        "stdout": normalized(result.stdout, vault),
+        "filesystem": filesystem_state(vault),
+    }
     # Accepted delta (a): Click usage-error prose (including the usage block,
     # invalid-value wording, and mutual-exclusion option order) is deliberately
-    # not compared. Accepted delta (b): no abbreviated options appear here.
-    # Accepted delta (c): no help flag appears on an already-invalid command line.
-    if argparse_result.returncode != 2:
-        assert normalized(argparse_result.stderr, argparse_vault) == normalized(
-            typer_result.stderr, typer_vault
-        )
-    if expected_stderr_prefix is not None:
-        assert argparse_result.stderr.startswith(expected_stderr_prefix)
-        assert typer_result.stderr.startswith(expected_stderr_prefix)
-    assert filesystem_state(argparse_vault) == filesystem_state(typer_vault)
+    # not recorded or compared. Accepted delta (b): no abbreviated options
+    # appear in the corpus. Accepted delta (c): no help flag appears on an
+    # already-invalid command line.
+    if result.returncode != 2:
+        record["stderr"] = normalized(result.stderr, vault)
+    return record
 
 
-def test_parity_corpus_covers_every_t1_inventory_path() -> None:
-    inventory = {
-        line.strip() for line in INVENTORY.read_text(encoding="utf-8").splitlines() if line.strip()
-    }
-    cases = {case.path for case in PARITY_CASES}
-
-    assert cases == inventory
-    assert all(case.representative and case.error_shape for case in PARITY_CASES)
-
-
-@pytest.mark.parametrize(
-    ("option", "value"),
-    (
-        ("--status", "backlog"),
-        ("--status", "todo"),
-        ("--priority", "1"),
-        ("--priority", "2"),
-        ("--priority", "3"),
-        ("--effort", "S"),
-        ("--effort", "M"),
-        ("--effort", "L"),
-    ),
-)
-def test_task_create_accepted_value_sets_match(
-    option: str,
-    value: str,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(snapshot.dt, "datetime", FixedDateTime)
-    fixture = tmp_path / "fixture"
-    build_vault(fixture)
-    tokens = (
+def accepted_value_tokens(option: str, value: str) -> tuple[str, ...]:
+    return (
         "task",
         "create",
         "--project",
@@ -722,12 +681,78 @@ def test_task_create_accepted_value_sets_match(
         "--allow-missing-session-id",
     )
 
-    assert_frontend_parity(
-        tokens,
+
+def accepted_value_key(option: str, value: str) -> str:
+    return f"{option}={value}"
+
+
+def freeze_parity_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Each implementation module imports the shared datetime module as ``dt``.
+    # Patching it once freezes all date-bearing parity outputs and manifests.
+    monkeypatch.setattr(snapshot.dt, "date", FixedDate)
+    monkeypatch.setattr(snapshot.dt, "datetime", FixedDateTime)
+
+
+def load_golden() -> dict[str, object]:
+    return json.loads(GOLDEN.read_text(encoding="utf-8"))
+
+
+def assert_golden_parity(
+    tokens: tuple[str, ...],
+    fixture: Path,
+    vault: Path,
+    expected: object,
+) -> None:
+    copytree(fixture, vault)
+    result = run_typer(render_arguments(tokens, vault), vault)
+    assert recorded_result(result, vault) == expected
+
+
+def test_parity_corpus_covers_every_t1_inventory_path() -> None:
+    inventory = {
+        line.strip() for line in INVENTORY.read_text(encoding="utf-8").splitlines() if line.strip()
+    }
+    cases = {case.path for case in PARITY_CASES}
+    golden = load_golden()
+    golden_cases = golden["cases"]
+
+    assert cases == inventory
+    assert all(case.representative and case.error_shape for case in PARITY_CASES)
+    assert isinstance(golden_cases, dict)
+    assert set(golden_cases) == cases
+    assert all(set(entry) == {"representative", "error_shape"} for entry in golden_cases.values())
+    assert all(
+        "stderr" not in shape
+        for entry in golden_cases.values()
+        for shape in entry.values()
+        if shape["exit_class"] == 2
+    )
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    ACCEPTED_VALUE_CASES,
+)
+def test_task_create_accepted_value_sets_match(
+    option: str,
+    value: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    freeze_parity_time(monkeypatch)
+    fixture = tmp_path / "fixture"
+    build_vault(fixture)
+    golden = load_golden()
+    supplemental = golden["supplemental"]
+    assert isinstance(supplemental, dict)
+    accepted_values = supplemental["accepted_values"]
+    assert isinstance(accepted_values, dict)
+
+    assert_golden_parity(
+        accepted_value_tokens(option, value),
         fixture,
         tmp_path / "accepted-value",
-        monkeypatch,
-        expected_exit_class=0,
+        accepted_values[accepted_value_key(option, value)],
     )
 
 
@@ -735,49 +760,43 @@ def test_domain_oaw_error_stderr_exit_and_failure_state_match(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(snapshot.dt, "datetime", FixedDateTime)
+    freeze_parity_time(monkeypatch)
     fixture = tmp_path / "fixture"
     build_vault(fixture)
-    tokens = (
-        "task",
-        "start",
-        "PRT-TSK-missing",
-        "--note",
-        "Must not write",
-        "--allow-missing-session-id",
-    )
+    golden = load_golden()
+    supplemental = golden["supplemental"]
+    assert isinstance(supplemental, dict)
 
-    assert_frontend_parity(
-        tokens,
+    assert_golden_parity(
+        DOMAIN_ERROR_TOKENS,
         fixture,
         tmp_path / "domain-error",
-        monkeypatch,
-        expected_exit_class=1,
-        expected_stderr_prefix=(
-            "oaw: no note with frontmatter id or alias 'PRT-TSK-missing' under "
-        ),
+        supplemental["domain_error"],
     )
 
 
 @pytest.mark.parametrize("case", PARITY_CASES, ids=lambda case: case.path.removeprefix("oaw "))
-def test_argparse_and_typer_parity_corpus(
+def test_typer_matches_argparse_golden_corpus(
     case: ParityCase, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(snapshot.dt, "datetime", FixedDateTime)
+    freeze_parity_time(monkeypatch)
     fixture = tmp_path / "fixture"
     build_vault(fixture)
+    golden = load_golden()
+    golden_cases = golden["cases"]
+    assert isinstance(golden_cases, dict)
+    expected = golden_cases[case.path]
+    assert isinstance(expected, dict)
 
-    assert_frontend_parity(
+    assert_golden_parity(
         case.representative,
         fixture,
         tmp_path / "representative",
-        monkeypatch,
-        expected_exit_class=0,
+        expected["representative"],
     )
-    assert_frontend_parity(
+    assert_golden_parity(
         case.error_shape,
         fixture,
-        tmp_path / "error",
-        monkeypatch,
-        expected_exit_class=2,
+        tmp_path / "error-shape",
+        expected["error_shape"],
     )
