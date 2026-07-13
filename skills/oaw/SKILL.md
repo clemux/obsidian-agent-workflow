@@ -168,6 +168,13 @@ Project boards should use the column order `Backlog` → `Todo` → `Active` →
 
 At wrap-up, check whether substantive work occurred. If it did and no task owns it, create or promote the source capture into a task before retrospective closeout. A retrospective may close only after that task is `done` via `oaw task complete ... --checks "<verification actually run>"`; link the retrospective primarily to the completed task and retain the source-capture link as provenance. Do not treat a capture `Outcome` as a completion report.
 
+For any project tracked through OAW, keep pre-implementation architecture,
+designs, and proposals on the owning task note by default. Do not create a
+tracked repository design document until implementation makes it part of the
+project's durable documentation, unless the user explicitly asks for a tracked
+artifact. This keeps proposals from looking like shipped behavior and leaves
+the working tree clean for a fresh implementation session.
+
 Use `oaw board ensure-backlog --project "Project Name"` to add a missing `Backlog` column before `Todo` on an existing project board without rewriting cards.
 
 ## Research packet lifecycle
