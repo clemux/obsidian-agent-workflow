@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from oaw import cli, resolver
+from oaw import cli, lifecycle, resolver
 from oaw.errors import OawError
 
 from .assertions import Assertions
@@ -466,7 +466,7 @@ Retained.
 
         monkeypatch.setenv("OAW_VAULT", str(self.vault))
         monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
-        monkeypatch.setattr(cli, "VaultTransaction", FailingTransaction)
+        monkeypatch.setattr(lifecycle, "VaultTransaction", FailingTransaction)
         result = cli.main(
             [
                 "project",

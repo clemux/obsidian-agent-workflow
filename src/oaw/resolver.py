@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Sequence
@@ -15,7 +16,13 @@ from .frontmatter import (
     read_frontmatter_only,
     read_frontmatter_text,
 )
-from .notes import split_note
+from .notes import read_note, split_note
+
+DEFAULT_VAULT = Path("/path/to/vault")
+
+
+def vault_root() -> Path:
+    return Path(os.environ.get("OAW_VAULT", DEFAULT_VAULT)).expanduser().resolve()
 
 
 @dataclass(frozen=True)
@@ -307,6 +314,68 @@ def resolve_project_root(raw: str, root: Path) -> tuple[Path, str | None]:
                 prefix = index_id.removesuffix("-index")
         return candidate, prefix
     raise OawError(f"project not found: {raw}")
+
+
+def outline(path: Path) -> list[str]:
+    _, _, body = read_note(path)
+    lines: list[str] = []
+    in_fence = False
+    for number, line in enumerate(body.splitlines(), start=1):
+        if line.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence and re.match(r"^#{1,6} ", line):
+            lines.append(f"{number}: {line}")
+    return lines
+
+
+def output_resolve(
+    match: NoteMatch,
+    full: bool,
+    path_only: bool,
+    meta: bool,
+    show_outline: bool,
+    json_output: bool,
+) -> None:
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "id": match.note_id,
+                    "path": str(match.path),
+                    "relative_path": match.relpath,
+                    "title": match.title,
+                    "matched_by": match.matched_by,
+                    "frontmatter": match.frontmatter,
+                    "outline": outline(match.path),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if path_only:
+        print(match.path)
+        return
+    if meta:
+        print(match.frontmatter_text)
+        return
+    if show_outline:
+        print("\n".join(outline(match.path)))
+        return
+    if full:
+        print(match.path.read_text(encoding="utf-8"), end="")
+        return
+    print(f"ID: {match.note_id}")
+    print(f"Path: {match.path}")
+    print(f"Title: {match.title}")
+    print(f"Matched by: {match.matched_by}")
+    print()
+    print("Frontmatter:")
+    print(match.frontmatter_text)
+    print()
+    print("Outline:")
+    print("\n".join(outline(match.path)))
 
 
 def resolve_project_root_from_references(

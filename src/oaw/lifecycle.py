@@ -3,30 +3,34 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import re
 import unicodedata
+import urllib.parse
 from pathlib import Path
 
 from .boards import move_project_board_card, updated_project_board_text
 from .errors import OawError
-from .frontmatter import append_frontmatter_list_value, set_frontmatter_scalar
-from .notes import VaultTransaction, append_markdown_block_to_section
+from .frontmatter import append_frontmatter_list_value, parse_frontmatter, set_frontmatter_scalar
+from .notes import VaultTransaction, append_markdown_block_to_section, split_note
 from .resolver import (
     NoteMatch,
+    iter_markdown,
     matches_from_references,
+    note_match,
     resolve_id_from_references,
+    resolve_project_root,
     resolve_project_root_from_references,
     scan_note_references,
 )
+from .sessions import detect_session
 
-SESSION_ENV = (
-    ("Codex", "CODEX_THREAD_ID"),
-    ("Claude Code", "CLAUDE_SESSION_ID"),
-    ("Claude Code", "CLAUDE_CODE_SESSION_ID"),
-    ("OpenCode", "OPENCODE_SESSION_ID"),
-    ("Gemini", "GEMINI_SESSION_ID"),
-)
+RESEARCH_PACKET_TEMPLATE = Path("Templates/Research packet.md")
+PROJECT_INDEX_TEMPLATE = Path("Templates/Small project index.md")
+DEEP_RESEARCH_HEADING = "## Deep research prompt"
+RUNNING_RESEARCH_HEADING = "## Running research sessions"
+RESEARCH_PACKET_BASE = Path("Bases/Research packet.base")
 
 
 def is_project_task(path: Path, root: Path) -> bool:
@@ -43,18 +47,6 @@ def project_root_for_task(path: Path, root: Path) -> Path:
         raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
     rel = path.relative_to(root)
     return root / rel.parts[0] / rel.parts[1]
-
-
-def detect_session(allow_missing: bool) -> tuple[str, str]:
-    for provider, env_name in SESSION_ENV:
-        value = os.environ.get(env_name)
-        if value:
-            return provider, f"{env_name}={value}"
-    if allow_missing:
-        return "Unknown", "session_id=unavailable"
-    raise OawError(
-        "no stable session ID found; set CODEX_THREAD_ID or pass --allow-missing-session-id"
-    )
 
 
 def append_session_id_frontmatter(text: str, session_ref: str) -> str:
@@ -303,3 +295,542 @@ def create_task(
     print(f"Board: {'updated' if moved else 'not found'}")
     if capture:
         print(f"Capture: {capture.note_id} -> triaged")
+
+
+def safe_relative_path(raw: str, label: str) -> Path:
+    path = Path(raw.strip())
+    if not raw.strip() or path.is_absolute() or ".." in path.parts:
+        raise OawError(f"{label} must be a non-empty vault-relative path without '..'")
+    return path
+
+
+def single_line_value(raw: str | None, label: str, *, required: bool = True) -> str | None:
+    if raw is None:
+        if required:
+            raise OawError(f"project create requires {label}")
+        return None
+    value = raw.strip()
+    if (required and not value) or "\n" in raw or "\r" in raw:
+        qualifier = "non-empty, " if required else ""
+        raise OawError(f"project create {label} must be a {qualifier}single-line value")
+    return value or None
+
+
+def safe_project_name(raw: str) -> str:
+    name = single_line_value(raw, "--name")
+    assert name is not None
+    if (
+        name != raw
+        or name in {".", ".."}
+        or name.startswith(".")
+        or name.endswith((".", " "))
+        or any(character in name for character in '/\\:*?"<>|')
+        or any(unicodedata.category(character).startswith("C") for character in name)
+        or Path(name).name != name
+    ):
+        raise OawError(
+            "project create --name must be a safe one-segment folder name without "
+            "surrounding whitespace, separators, traversal, or reserved characters"
+        )
+    return name
+
+
+def safe_project_tag(raw: str) -> str:
+    tag = single_line_value(raw, "--tag")
+    assert tag is not None
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_/-]*", tag) or "//" in tag:
+        raise OawError(
+            "project create --tag must use letters, numbers, underscores, hyphens, or slashes"
+        )
+    return tag
+
+
+def replace_h2_body(text: str, heading: str, body: str) -> str:
+    matches = list(re.finditer(rf"(?m)^## {re.escape(heading)}[ \t]*$", text))
+    if len(matches) != 1:
+        raise OawError(f"project template must contain exactly one '## {heading}' heading")
+    match = matches[0]
+    next_heading = re.search(r"(?m)^#{1,2} \S.*$", text[match.end() :])
+    end = match.end() + (next_heading.start() if next_heading else len(text[match.end() :]))
+    return f"{text[: match.end()]}\n\n{body.strip()}\n\n{text[end:].lstrip()}"
+
+
+def project_frontmatter(
+    project: str,
+    alias: str,
+    repo: str | None,
+    tags: list[str],
+    session_ref: str,
+    preserved: str,
+) -> str:
+    note_id = f"{alias}-index"
+    lines = [
+        "---",
+        "type: project",
+        f"project: {json.dumps(project, ensure_ascii=False)}",
+        "status: active",
+    ]
+    if repo is not None:
+        lines.append(f"repo: {json.dumps(repo, ensure_ascii=False)}")
+    lines += [
+        f"id: {json.dumps(note_id, ensure_ascii=False)}",
+        "aliases:",
+        f"  - {json.dumps(note_id, ensure_ascii=False)}",
+        "tags:",
+    ]
+    for tag in tags:
+        lines.append(f"  - {json.dumps(tag, ensure_ascii=False)}")
+    session_id = session_ref.partition("=")[2]
+    if session_id and session_id != "unavailable":
+        lines += ["session-ids:", f"  - {json.dumps(session_id, ensure_ascii=False)}"]
+    if preserved.strip():
+        lines.extend(preserved.strip().splitlines())
+    return "\n".join([*lines, "---"]) + "\n"
+
+
+def preserve_unmanaged_project_frontmatter(frontmatter: str) -> str:
+    managed = {"type", "project", "status", "repo", "id", "aliases", "tags", "session-ids"}
+    kept: list[str] = []
+    skipping = False
+    for line in frontmatter.splitlines():
+        key = re.match(r"^([A-Za-z0-9_-]+)\s*:", line)
+        if key:
+            skipping = key.group(1) in managed
+        if not skipping:
+            kept.append(line)
+    return "\n".join(kept).strip()
+
+
+def render_project_index(
+    template_text: str,
+    name: str,
+    alias: str,
+    goal: str,
+    repo: str | None,
+    tags: list[str],
+    session_ref: str,
+) -> str:
+    h1_lines = re.findall(r"(?m)^# (.+?)\s*$", template_text)
+    if len(h1_lines) != 1 or "{{title}}" not in h1_lines[0]:
+        raise OawError("project template must contain exactly one H1 containing {{title}}")
+    for heading in ("Goal", "Current state"):
+        if len(re.findall(rf"(?m)^## {re.escape(heading)}[ \t]*$", template_text)) != 1:
+            raise OawError(f"project template must contain exactly one '## {heading}' heading")
+
+    rendered = template_text.replace("{{title}}", name).replace(
+        "{{date}}", dt.date.today().isoformat()
+    )
+    before, template_frontmatter, template_body = split_note(rendered)
+    if not before:
+        raise OawError("project template must contain closed YAML frontmatter")
+    parse_frontmatter(template_frontmatter)
+    current_state = ["- Status: active"]
+    if repo is not None:
+        current_state.append(f"- Repo: {repo}")
+    current_state.append("- Next action: create or select the first task when work is selected.")
+    template_body = replace_h2_body(template_body, "Goal", goal)
+    template_body = replace_h2_body(template_body, "Current state", "\n".join(current_state))
+    preserved = preserve_unmanaged_project_frontmatter(template_frontmatter)
+    rendered = project_frontmatter(
+        _slugify(name), alias, repo, tags, session_ref, preserved
+    ) + template_body.lstrip("\n")
+    if re.search(r"{{[^{}\n]+}}", rendered):
+        raise OawError("rendered project index contains unresolved template expressions")
+    _, frontmatter, body = split_note(rendered)
+    metadata = parse_frontmatter(frontmatter)
+    note_id = f"{alias}-index"
+    if (
+        metadata.get("type") != "project"
+        or metadata.get("status") != "active"
+        or metadata.get("id") != note_id
+        or metadata.get("aliases") != [note_id]
+        or len(re.findall(r"(?m)^## Goal[ \t]*$", body)) != 1
+        or len(re.findall(r"(?m)^## Current state[ \t]*$", body)) != 1
+    ):
+        raise OawError("rendered project index failed structural validation")
+    return rendered.rstrip() + "\n"
+
+
+def create_project(
+    root: Path,
+    name: str,
+    goal: str,
+    alias: str,
+    repo: str | None,
+    tags_value: list[str] | None,
+    template: str,
+    allow_missing_session_id: bool,
+) -> None:
+    root = root
+    name = safe_project_name(name)
+    clean_goal = single_line_value(goal, "--goal")
+    assert clean_goal is not None
+    clean_alias = single_line_value(alias, "--alias")
+    assert clean_alias is not None
+    if not re.fullmatch(r"[A-Z][A-Z0-9]{1,7}", clean_alias):
+        raise OawError("project create --alias must match [A-Z][A-Z0-9]{1,7}")
+    repo = single_line_value(repo, "--repo", required=False)
+    extra_tags = [safe_project_tag(tag) for tag in tags_value or []]
+    project_slug = _slugify(name)
+    tags = list(dict.fromkeys(["projects", project_slug, *extra_tags]))
+    template_rel = safe_relative_path(template, "template")
+    template_path = root / template_rel
+    if not template_path.is_file():
+        raise OawError(f"project template not found: {template_rel.as_posix()}")
+
+    project_root = root / "Projects" / name
+    destination = project_root / "Index.md"
+    if project_root.exists():
+        raise OawError(f"project folder already exists: Projects/{name}")
+    note_id = f"{clean_alias}-index"
+    conflicts = [
+        match
+        for candidate in iter_markdown(root)
+        if (match := note_match(candidate, root, note_id))
+    ]
+    if conflicts:
+        paths = "\n".join(f"  {match.relpath} ({match.matched_by})" for match in conflicts)
+        raise OawError(f"id '{note_id}' is already in use:\n{paths}")
+    provider, session_ref = detect_session(allow_missing_session_id)
+    del provider  # The project index records stable session provenance in frontmatter.
+    template_text = template_path.read_text(encoding="utf-8")
+    rendered = render_project_index(
+        template_text, name, clean_alias, clean_goal, repo, tags, session_ref
+    )
+
+    transaction = VaultTransaction()
+    transaction.stage(destination, rendered)
+    try:
+        transaction.commit()
+    except OawError:
+        if project_root.exists() and not any(project_root.iterdir()):
+            project_root.rmdir()
+        raise
+    print(f"Created: {destination.relative_to(root).as_posix()}")
+    print(f"ID: {note_id}")
+    print("Status: active")
+
+
+def create_research_packet(
+    root: Path,
+    project: str,
+    track_value: str,
+    title_value: str,
+    date_value: str | None,
+    template: str,
+    force: bool,
+) -> None:
+    root = root
+    project_root, _ = resolve_project_root(project, root)
+    track = safe_relative_path(track_value, "track")
+    title = title_value.strip()
+    if not title or "\n" in title or "\r" in title:
+        raise OawError("research scaffold requires a non-empty, single-line --title")
+    try:
+        date = dt.date.fromisoformat(date_value) if date_value else dt.date.today()
+    except ValueError as exc:
+        raise OawError("--date must use YYYY-MM-DD") from exc
+    template_rel = safe_relative_path(template, "template")
+    template_path = root / template_rel
+    if not template_path.is_file():
+        raise OawError(f"research packet template not found: {template_rel.as_posix()}")
+
+    template_text = template_path.read_text(encoding="utf-8")
+    boundary_matches = list(
+        re.finditer(rf"(?m)^{re.escape(DEEP_RESEARCH_HEADING)}[ \t]*$", template_text)
+    )
+    if len(boundary_matches) != 1:
+        raise OawError(
+            f"research packet template must contain exactly one '{DEEP_RESEARCH_HEADING}' heading"
+        )
+    boundary = boundary_matches[0]
+    provider_template = template_text[boundary.end() :]
+    local_tokens = [token for token in ("{{project}}", "{{track}}") if token in provider_template]
+    if local_tokens:
+        raise OawError(
+            "research packet template places local-only fields after "
+            f"'{DEEP_RESEARCH_HEADING}': {', '.join(local_tokens)}"
+        )
+    rendered = template_text
+    fields = {
+        "{{project}}": _slugify(project_root.name),
+        "{{track}}": track.as_posix(),
+        "{{title}}": title,
+        "{{date}}": date.isoformat(),
+    }
+    for token, value in fields.items():
+        if token not in rendered:
+            raise OawError(f"research packet template is missing required field {token}")
+        rendered = rendered.replace(token, value)
+    rendered_boundary = re.search(rf"(?m)^{re.escape(DEEP_RESEARCH_HEADING)}[ \t]*$", rendered)
+    if rendered_boundary is None:
+        raise OawError(f"rendered research prompt is missing '{DEEP_RESEARCH_HEADING}' heading")
+    rendered_provider = rendered[rendered_boundary.end() :]
+    leaked_fields = [
+        name
+        for name in ("project", "track")
+        if re.search(
+            rf"(?<!\w){re.escape(fields[f'{{{{{name}}}}}'])}(?!\w)",
+            rendered_provider,
+        )
+    ]
+    if leaked_fields:
+        raise OawError(
+            "rendered research prompt places local-only metadata after "
+            f"'{DEEP_RESEARCH_HEADING}': {', '.join(leaked_fields)}"
+        )
+    provider_prompt_from_text(rendered)
+    packet_dir = project_root / "Research" / track
+    destination = packet_dir / "Prompt.md"
+    if destination.exists() and not force:
+        raise OawError(
+            f"research prompt already exists: {destination.relative_to(root).as_posix()}"
+        )
+    synthesis = packet_dir / "Synthesis.md"
+    base = root / RESEARCH_PACKET_BASE
+    transaction = VaultTransaction()
+    transaction.stage(destination, rendered)
+    if not synthesis.exists():
+        transaction.stage(
+            synthesis,
+            research_synthesis_text(
+                _slugify(project_root.name), track.as_posix(), title, date.isoformat()
+            ),
+        )
+    if not base.exists():
+        transaction.stage(base, research_packet_base_text())
+    transaction.commit()
+    print(f"Created: {destination.relative_to(root).as_posix()}")
+    print(f"Synthesis: {synthesis.relative_to(root).as_posix()}")
+    print(f"Base: {RESEARCH_PACKET_BASE.as_posix()}")
+    print(f"Template: {template_rel.as_posix()}")
+    print("Deep research prompt: self-contained provider-visible body")
+
+
+def provider_prompt_from_text(text: str) -> str:
+    matches = list(re.finditer(rf"(?m)^{re.escape(DEEP_RESEARCH_HEADING)}[ \t]*$", text))
+    if len(matches) != 1:
+        raise OawError(
+            f"research prompt must contain exactly one '{DEEP_RESEARCH_HEADING}' heading"
+        )
+    remainder = text[matches[0].end() :]
+    block = re.fullmatch(r"\s*```text[ \t]*\n(.*?)\n```[ \t]*\s*", remainder, re.DOTALL)
+    if block is None or not block.group(1).strip():
+        raise OawError(
+            f"'{DEEP_RESEARCH_HEADING}' must contain exactly one non-empty fenced text block"
+        )
+    return block.group(1).strip() + "\n"
+
+
+def research_synthesis_text(project: str, track: str, title: str, date: str) -> str:
+    return (
+        "---\n"
+        "type: research-synthesis\n"
+        f"project: {project}\n"
+        f"track: {track}\n"
+        f"title: {json.dumps(title, ensure_ascii=False)}\n"
+        "status: todo\n"
+        f"created: {date}\n"
+        "tags:\n"
+        "  - projects\n"
+        f"  - {project}\n"
+        "  - research-synthesis\n"
+        "---\n\n"
+        f"# Synthesis - {title}\n\n"
+        "## Source reports\n\n"
+        "![[Bases/Research packet.base#Source reports]]\n\n"
+        "## Synthesis\n\n"
+    )
+
+
+def research_packet_base_text() -> str:
+    return (
+        "filters:\n"
+        "  and:\n"
+        '    - type == "research-result"\n'
+        "    - file.folder == this.file.folder\n"
+        "views:\n"
+        "  - type: table\n"
+        "    name: Source reports\n"
+        "    order:\n"
+        "      - file.name\n"
+        "      - source\n"
+        "      - status\n"
+        "      - url\n"
+        "      - created\n"
+    )
+
+
+def safe_research_source(raw: str) -> str:
+    source = raw.strip()
+    if (
+        not source
+        or source in {".", ".."}
+        or source != raw
+        or any(ch in source for ch in '/\\:*?"<>|')
+        or any(unicodedata.category(ch).startswith("C") for ch in source)
+        or Path(source).name != source
+    ):
+        raise OawError(
+            "research start requires a safe --source label without surrounding whitespace, "
+            "path separators, traversal components, or control characters"
+        )
+    return source
+
+
+def http_url(raw: str) -> str:
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+    except ValueError as exc:
+        raise OawError("research start --url must be an absolute HTTP(S) URL") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise OawError("research start --url must be an absolute HTTP(S) URL")
+    return raw
+
+
+def start_research_run(
+    root: Path, project: str, track_value: str, source_value: str, url_value: str
+) -> None:
+    root = root
+    project_root, _ = resolve_project_root(project, root)
+    track = safe_relative_path(track_value, "track")
+    source = safe_research_source(source_value)
+    url = http_url(url_value)
+    packet_dir = project_root / "Research" / track
+    prompt_path = packet_dir / "Prompt.md"
+    if not prompt_path.is_file():
+        raise OawError(f"research prompt not found: {prompt_path.relative_to(root).as_posix()}")
+    prompt = prompt_path.read_text(encoding="utf-8")
+    provider_prompt_from_text(prompt)
+    if len(re.findall(rf"(?m)^{re.escape(RUNNING_RESEARCH_HEADING)}[ \t]*$", prompt)) != 1:
+        raise OawError(
+            f"research prompt must contain exactly one '{RUNNING_RESEARCH_HEADING}' heading"
+        )
+    result = packet_dir / f"Results - {source}.md"
+    if result.exists():
+        raise OawError(f"research source already exists: {result.relative_to(root).as_posix()}")
+    _, frontmatter, _ = split_note(prompt)
+    metadata = parse_frontmatter(frontmatter)
+    title = metadata.get("title")
+    if not isinstance(title, str) or not title.strip():
+        raise OawError("research prompt frontmatter requires a non-empty title")
+    project = _slugify(project_root.name)
+    created = dt.date.today().isoformat()
+    entry = f"{source}: [running]({url})"
+    updated_prompt = _append_to_section(prompt, RUNNING_RESEARCH_HEADING[3:], entry)
+    result_text = (
+        "---\n"
+        "type: research-result\n"
+        f"source: {json.dumps(source, ensure_ascii=False)}\n"
+        f"url: {json.dumps(url, ensure_ascii=False)}\n"
+        "status: running\n"
+        f"project: {project}\n"
+        f"track: {track.as_posix()}\n"
+        f"created: {created}\n"
+        "tags:\n"
+        "  - projects\n"
+        f"  - {project}\n"
+        "  - research-result\n"
+        "---\n\n"
+        f"# Results - {source}\n\n"
+        f"Topic: {title}\n\n"
+        "The provider run is in progress. Ingest the completed report with the "
+        "obsidian-research helper.\n"
+    )
+    synthesis = packet_dir / "Synthesis.md"
+    base = root / RESEARCH_PACKET_BASE
+    transaction = VaultTransaction()
+    transaction.stage(result, result_text)
+    transaction.stage(prompt_path, updated_prompt)
+    if not synthesis.exists():
+        transaction.stage(
+            synthesis,
+            research_synthesis_text(project, track.as_posix(), title, created),
+        )
+    if not base.exists():
+        transaction.stage(base, research_packet_base_text())
+    transaction.commit()
+    print(f"Created: {result.relative_to(root).as_posix()}")
+    print("Status: running")
+    print("Prompt: updated")
+
+
+def note_type_matches(data: dict[str, object], note_type: str) -> bool:
+    value = data.get("type")
+    return isinstance(value, str) and value == note_type
+
+
+def note_status(data: dict[str, object]) -> str:
+    value = data.get("status", "")
+    return str(value) if value is not None else ""
+
+
+def read_project_note_row(
+    path: Path,
+    note_type: str,
+    status: str | None,
+    include_archived: bool,
+) -> tuple[str, str, str] | None:
+    with path.open("r", encoding="utf-8") as handle:
+        if handle.readline().strip() != "---":
+            return None
+        lines: list[str] = []
+        for line in handle:
+            if line.strip() == "---":
+                break
+            lines.append(line)
+        else:
+            return None
+        data = parse_frontmatter("".join(lines))
+        if not note_type_matches(data, note_type):
+            return None
+        current_status = note_status(data)
+        if status and current_status != status:
+            return None
+        if not status and current_status == "archived" and not include_archived:
+            return None
+        title = path.stem
+        for line in handle:
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+        return str(data.get("id", "")), current_status, title
+
+
+def project_note_rows(
+    project_root: Path,
+    root: Path,
+    note_type: str,
+    status: str | None,
+    include_archived: bool,
+) -> list[tuple[str, str, str, str]]:
+    rows = []
+    root_prefix_length = len(root.as_posix().rstrip("/") + "/")
+    for path in sorted(project_root.rglob("*.md"), key=os.fspath):
+        row = read_project_note_row(path, note_type, status, include_archived)
+        if row is None:
+            continue
+        relative_path = path.as_posix()[root_prefix_length:]
+        rows.append((*row, relative_path))
+    return rows
+
+
+def list_project(
+    root: Path,
+    project: str,
+    note_type: str,
+    status: str | None,
+    include_archived: bool,
+) -> None:
+    project_root = root / "Projects" / project
+    if not project_root.exists():
+        raise OawError(f"project not found: {project_root}")
+    if note_type == "task":
+        tasks = project_root / "Tasks"
+        if not tasks.exists():
+            raise OawError(f"project tasks folder not found: {tasks}")
+        rows = project_note_rows(tasks, root, note_type, status, True)
+    else:
+        rows = project_note_rows(project_root, root, note_type, status, include_archived)
+    for row in rows:
+        print("\t".join(row))
