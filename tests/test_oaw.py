@@ -870,6 +870,23 @@ aliases:
         cli.main(["note", "session", "OAW-TSK-cli", "--note", "Traced once."])
         self.assertEqual(resolved, ["OAW-TSK-cli"])
 
+    def test_task_create_from_capture_walks_vault_once(self, monkeypatch):
+        monkeypatch.setenv("OAW_VAULT", str(self.vault))
+        monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
+        original = resolver.iter_markdown
+        walks: list[Path] = []
+
+        def recording_walk(root: Path):
+            walks.append(root)
+            yield from original(root)
+
+        monkeypatch.setattr(resolver, "iter_markdown", recording_walk)
+
+        result = cli.main(["task", "create", "--from-capture", "OAW-CAP-active"])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(walks, [self.vault])
+
     def test_complete_requires_checks(self):
         proc = self.run_oaw("task", "complete", "OAW-TSK-cli", "--note", "Done.")
         self.assertNotEqual(proc.returncode, 0)

@@ -12,7 +12,13 @@ from .boards import move_project_board_card, updated_project_board_text
 from .errors import OawError
 from .frontmatter import append_frontmatter_list_value, set_frontmatter_scalar
 from .notes import VaultTransaction, append_markdown_block_to_section
-from .resolver import NoteMatch, iter_markdown, note_match, resolve_project_root
+from .resolver import (
+    NoteMatch,
+    matches_from_references,
+    resolve_id_from_references,
+    resolve_project_root_from_references,
+    scan_note_references,
+)
 
 SESSION_ENV = (
     ("Codex", "CODEX_THREAD_ID"),
@@ -164,7 +170,7 @@ def create_task(
     root: Path,
     project: str | None,
     title: str | None,
-    capture: NoteMatch | None,
+    capture_id: str | None,
     start: bool,
     requested_id: str | None,
     status: str,
@@ -175,6 +181,8 @@ def create_task(
     allow_missing_session_id: bool,
 ) -> None:
     """Create a task from explicit CLI values, optionally promoting a capture."""
+    references = scan_note_references(root)
+    capture = resolve_id_from_references(capture_id, root, references) if capture_id else None
     if capture:
         if capture.frontmatter.get("type") != "capture":
             raise OawError(f"from-capture source is not a capture note: {capture.relpath}")
@@ -200,7 +208,7 @@ def create_task(
         raise OawError(
             "task create requires --project unless --from-capture identifies a project capture"
         )
-    project_root, alias = resolve_project_root(raw_project, root)
+    project_root, alias = resolve_project_root_from_references(raw_project, root, references)
     provider, session_ref = detect_session(allow_missing_session_id)
     if requested_id is not None:
         note_id = requested_id.strip()
@@ -214,11 +222,7 @@ def create_task(
         )
     path = project_root / "Tasks" / f"{clean_title}.md"
     relpath = path.relative_to(root)
-    conflicts = [
-        match
-        for candidate in iter_markdown(root)
-        if (match := note_match(candidate, root, note_id))
-    ]
+    conflicts = matches_from_references(note_id, references)
     if conflicts:
         paths = "\n".join(f"  {match.relpath} ({match.matched_by})" for match in conflicts)
         raise OawError(f"id '{note_id}' is already in use:\n{paths}")

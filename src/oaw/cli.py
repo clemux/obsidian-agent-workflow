@@ -2444,7 +2444,7 @@ def main(argv: list[str] | None = None) -> int:
                     root,
                     args.project,
                     args.title,
-                    resolve_id(args.from_capture, root) if args.from_capture else None,
+                    args.from_capture,
                     args.start,
                     args.id,
                     args.status,

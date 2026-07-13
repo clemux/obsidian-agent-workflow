@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,18 @@ class NoteMatch:
     note_id: str | None
     matched_by: str
     title: str
+    frontmatter_text: str
+    frontmatter: dict[str, object]
+
+
+@dataclass(frozen=True)
+class NoteReference:
+    """Frontmatter-only note identity data collected during one vault walk."""
+
+    path: Path
+    relpath: str
+    note_id: str | None
+    aliases: tuple[str, ...]
     frontmatter_text: str
     frontmatter: dict[str, object]
 
@@ -126,6 +139,107 @@ def note_match(path: Path, root: Path, target: str) -> NoteMatch | None:
     )
 
 
+def note_reference(path: Path, root: Path) -> NoteReference | None:
+    """Return identity metadata for a note without reading its body."""
+    try:
+        frontmatter = read_frontmatter_text(path, max_bytes=None, require_closed=False)
+    except UnicodeDecodeError:
+        return None
+    if not frontmatter:
+        return None
+    data = parse_frontmatter(frontmatter)
+    note_id = data.get("id")
+    aliases = data.get("aliases", [])
+    return NoteReference(
+        path=path,
+        relpath=path.relative_to(root).as_posix(),
+        note_id=note_id if isinstance(note_id, str) else None,
+        aliases=tuple(alias for alias in aliases if isinstance(alias, str))
+        if isinstance(aliases, list)
+        else (),
+        frontmatter_text=frontmatter.rstrip(),
+        frontmatter=data,
+    )
+
+
+def scan_note_references(root: Path) -> list[NoteReference]:
+    """Walk a vault once and collect frontmatter identity data for each Markdown note."""
+    return [reference for path in iter_markdown(root) if (reference := note_reference(path, root))]
+
+
+def note_match_from_reference(reference: NoteReference, target: str) -> NoteMatch | None:
+    """Resolve one target from a frontmatter-only reference, loading its body on a match."""
+    if reference.note_id == target:
+        matched_by = "id"
+    elif target in reference.aliases:
+        matched_by = "aliases"
+    else:
+        return None
+    try:
+        _, _, body = split_note(reference.path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
+        return None
+    return NoteMatch(
+        path=reference.path,
+        relpath=reference.relpath,
+        note_id=reference.note_id,
+        matched_by=matched_by,
+        title=title_from_body(reference.path, body),
+        frontmatter_text=reference.frontmatter_text,
+        frontmatter=reference.frontmatter,
+    )
+
+
+def matches_from_references(target: str, references: Sequence[NoteReference]) -> list[NoteMatch]:
+    return [
+        match
+        for reference in references
+        if (match := note_match_from_reference(reference, target)) is not None
+    ]
+
+
+def project_alias_matches_from_references(
+    target: str, references: Sequence[NoteReference]
+) -> list[NoteMatch]:
+    if not re.fullmatch(r"[A-Z][A-Z0-9]{1,7}", target):
+        return []
+    index_id = f"{target}-index"
+    matches: list[NoteMatch] = []
+    for reference in references:
+        if reference.path.parent.parent.name != "Projects" or reference.path.name != "Index.md":
+            continue
+        match = note_match_from_reference(reference, index_id)
+        if match:
+            matches.append(
+                NoteMatch(
+                    path=match.path,
+                    relpath=match.relpath,
+                    note_id=match.note_id,
+                    matched_by="project-alias",
+                    title=match.title,
+                    frontmatter_text=match.frontmatter_text,
+                    frontmatter=match.frontmatter,
+                )
+            )
+    return matches
+
+
+def resolve_id_from_references(
+    raw_id: str, root: Path, references: Sequence[NoteReference]
+) -> NoteMatch:
+    """Resolve an ID from metadata collected by one earlier vault walk."""
+    target = strip_obs_prefix(raw_id)
+    matches = matches_from_references(target, references)
+    if not matches:
+        matches = project_alias_matches_from_references(target, references)
+    if not matches:
+        raise OawError(f"no note with frontmatter id or alias '{target}' under {root}")
+    if len(matches) > 1:
+        paths = "\n".join(f"  {match.relpath} ({match.matched_by})" for match in matches)
+        raise OawError(f"id '{target}' is not unique:\n{paths}")
+    return matches[0]
+
+
 def resolve_with_matcher(raw_id: str, root: Path, matcher) -> NoteMatch:
     target = strip_obs_prefix(raw_id)
     matches = [match for path in iter_markdown(root) if (match := matcher(path, root, target))]
@@ -182,6 +296,32 @@ def resolve_project_root(raw: str, root: Path) -> tuple[Path, str | None]:
     if not target:
         raise OawError("task create requires a non-empty --project")
     matches = project_alias_matches(target, root)
+    if len(matches) > 1:
+        paths = "\n".join(f"  {match.relpath}" for match in matches)
+        raise OawError(f"project alias '{target}' is ambiguous:\n{paths}")
+    if matches:
+        return matches[0].path.parent, target
+    candidate = root / "Projects" / target
+    if candidate.is_dir():
+        prefix = None
+        index = candidate / "Index.md"
+        if index.exists():
+            _, data = read_frontmatter_only(index)
+            index_id = str(data.get("id") or "")
+            if index_id.endswith("-index"):
+                prefix = index_id.removesuffix("-index")
+        return candidate, prefix
+    raise OawError(f"project not found: {raw}")
+
+
+def resolve_project_root_from_references(
+    raw: str, root: Path, references: Sequence[NoteReference]
+) -> tuple[Path, str | None]:
+    """Resolve a project without introducing another vault traversal."""
+    target = strip_obs_prefix(raw.strip())
+    if not target:
+        raise OawError("task create requires a non-empty --project")
+    matches = project_alias_matches_from_references(target, references)
     if len(matches) > 1:
         paths = "\n".join(f"  {match.relpath}" for match in matches)
         raise OawError(f"project alias '{target}' is ambiguous:\n{paths}")
