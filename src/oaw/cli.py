@@ -579,9 +579,7 @@ def iter_markdown(root: Path):
                 yield directory / filename
 
 
-def read_matching_note(
-    path: Path, target: str
-) -> tuple[str, str, dict[str, object], str] | None:
+def read_matching_note(path: Path, target: str) -> tuple[str, str, dict[str, object], str] | None:
     with path.open("r", encoding="utf-8") as handle:
         if handle.readline().strip() != "---":
             return None

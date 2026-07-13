@@ -161,9 +161,7 @@ class TestCliParity(Assertions):
             )
             stderr = StringIO()
             with redirect_stderr(stderr):
-                returncode = parity.main(
-                    ["--checkout", str(checkout), "--installed", str(stale)]
-                )
+                returncode = parity.main(["--checkout", str(checkout), "--installed", str(stale)])
 
         self.assertNotEqual(returncode, 0)
         self.assertIn(

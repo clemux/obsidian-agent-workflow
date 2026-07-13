@@ -109,9 +109,7 @@ def codex_rollout_metrics(path: Path) -> SessionMetrics:
         assistant_turns=assistant_turns if saw_message else None,
         input_tokens=_nonnegative_int(usage.get("input_tokens")) if usage else None,
         output_tokens=_nonnegative_int(usage.get("output_tokens")) if usage else None,
-        cached_input_tokens=(
-            _nonnegative_int(usage.get("cached_input_tokens")) if usage else None
-        ),
+        cached_input_tokens=(_nonnegative_int(usage.get("cached_input_tokens")) if usage else None),
         total_tokens=_nonnegative_int(usage.get("total_tokens")) if usage else None,
     )
 

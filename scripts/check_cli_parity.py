@@ -45,7 +45,9 @@ def launcher_interpreter(launcher: Path) -> list[str]:
     try:
         shebang = shlex.split(first_line[2:].strip())
     except ValueError as exc:
-        raise SystemExit(f"installed oaw launcher has malformed shebang: {launcher}: {exc}") from exc
+        raise SystemExit(
+            f"installed oaw launcher has malformed shebang: {launcher}: {exc}"
+        ) from exc
     if not shebang:
         raise SystemExit(f"installed oaw launcher has an empty shebang: {launcher}")
 
@@ -64,9 +66,7 @@ def launcher_interpreter(launcher: Path) -> list[str]:
             f"installed oaw launcher has unsupported shebang: {launcher}: {first_line}"
         )
     if not PYTHON_INTERPRETER.fullmatch(interpreter_name):
-        raise SystemExit(
-            f"installed oaw launcher shebang is not Python: {launcher}: {first_line}"
-        )
+        raise SystemExit(f"installed oaw launcher shebang is not Python: {launcher}: {first_line}")
     return shebang
 
 
