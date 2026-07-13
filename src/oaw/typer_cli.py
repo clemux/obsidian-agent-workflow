@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from collections.abc import Callable, Sequence
 from enum import Enum
@@ -11,6 +12,7 @@ from typing import Annotated, Any
 import typer
 from typer._click import exceptions as click_exceptions
 from typer._click import globals as click_globals
+from typer._click import types as click_types
 from typer.core import TyperGroup
 
 from .boards import ensure_project_backlog_column, next_steps_card, update_next_steps_board
@@ -151,20 +153,25 @@ ARGPARSE_CHOICES = {
     "effort": ("S", "M", "L"),
 }
 
+NEGATIVE_NUMBER = re.compile(r"-(?:\d+(?:\.\d*)?|\.\d+)$")
+
 
 class StableTyperGroup(TyperGroup):
     """Run Click parsing while retaining the established usage-error contract."""
 
     @staticmethod
-    def _option_arity(command: Any, value: str) -> int | None:
-        """Return how many following values a known Click option consumes."""
+    def _option_expectation(command: Any, value: str) -> tuple[int, bool] | None:
+        """Return a known option's arity and whether it accepts numeric values."""
         option_name, separator, _ = value.partition("=")
         for param in command.params:
             if option_name not in param.opts:
                 continue
             if getattr(param, "is_flag", False) or getattr(param, "count", False):
-                return 0
-            return max(param.nargs - bool(separator), 0)
+                return (0, False)
+            accepts_negative = isinstance(
+                param.type, (click_types.IntParamType, click_types.FloatParamType)
+            )
+            return (max(param.nargs - int(bool(separator)), 0), accepts_negative)
         return None
 
     def _help_args(self, raw_args: list[str]) -> list[str] | None:
@@ -172,10 +179,12 @@ class StableTyperGroup(TyperGroup):
         command: Any = self
         path: list[str] = []
         pending_values = 0
+        pending_accepts_negative = False
         options_enabled = True
         for index, value in enumerate(raw_args):
             if pending_values:
-                if options_enabled and value in {"-h", "--help"}:
+                is_negative_value = pending_accepts_negative and NEGATIVE_NUMBER.fullmatch(value)
+                if value == "--" or (value.startswith("-") and not is_negative_value):
                     return raw_args[:index]
                 pending_values -= 1
                 continue
@@ -185,9 +194,9 @@ class StableTyperGroup(TyperGroup):
                 options_enabled = False
                 continue
             if options_enabled and value.startswith("-"):
-                option_arity = self._option_arity(command, value)
-                if option_arity is not None:
-                    pending_values = option_arity
+                option_expectation = self._option_expectation(command, value)
+                if option_expectation is not None:
+                    pending_values, pending_accepts_negative = option_expectation
                 continue
             if not isinstance(command, TyperGroup):
                 continue

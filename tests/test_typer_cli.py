@@ -82,6 +82,30 @@ def test_typer_help_in_a_known_option_value_slot_is_a_usage_error(help_flag: str
     assert "requires an argument" in result.stderr
 
 
+def test_typer_option_token_does_not_fill_a_pending_option_value() -> None:
+    result = CliRunner().invoke(typer_cli.app, ["list", "--project", "--status", "--help"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "requires an argument" in result.stderr
+
+
+def test_typer_separator_does_not_fill_a_pending_option_value() -> None:
+    result = CliRunner().invoke(typer_cli.app, ["list", "--project", "--", "--help"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "requires an argument" in result.stderr
+
+
+def test_typer_help_after_separator_is_a_positional_token() -> None:
+    result = CliRunner().invoke(typer_cli.app, ["resolve", "note-id", "--", "--help"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "--help" in result.stderr
+
+
 @pytest.mark.parametrize(
     ("arguments", "exit_code", "output_prefix"),
     [
