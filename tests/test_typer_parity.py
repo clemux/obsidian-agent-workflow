@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
+import json
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from io import StringIO
@@ -9,7 +12,7 @@ from shutil import copytree
 import pytest
 from typer.testing import CliRunner
 
-from oaw import cli, typer_cli
+from oaw import cli, snapshot, typer_cli
 
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = ROOT / ".codex-evidence" / "t1-command-inventory.txt"
@@ -20,6 +23,14 @@ SESSION_ENVIRONMENT = {
     "OPENCODE_SESSION_ID": "",
     "GEMINI_SESSION_ID": "",
 }
+SNAPSHOT_THREAD_ID = "019f48d7-39c2-7043-9c19-5a3565995898"
+
+
+class FixedDateTime(dt.datetime):
+    @classmethod
+    def now(cls, tz: dt.tzinfo | None = None) -> FixedDateTime:
+        value = cls(2026, 7, 13, 12, 0, tzinfo=dt.timezone.utc)
+        return value if tz is not None else value.replace(tzinfo=None)
 
 
 @dataclass(frozen=True)
@@ -32,7 +43,21 @@ class ParityCase:
 PARITY_CASES = (
     ParityCase("oaw resolve", ("resolve", "--path", "PRT-TSK-cli"), ("resolve",)),
     ParityCase("oaw list", ("list", "--project", "Parity"), ("list",)),
-    ParityCase("oaw project", ("project",), ("project", "unknown")),
+    ParityCase(
+        "oaw project",
+        (
+            "project",
+            "create",
+            "--name",
+            "Group project",
+            "--alias",
+            "GRP",
+            "--goal",
+            "Goal",
+            "--allow-missing-session-id",
+        ),
+        ("project", "unknown"),
+    ),
     ParityCase(
         "oaw project create",
         (
@@ -48,7 +73,22 @@ PARITY_CASES = (
         ),
         ("project", "create"),
     ),
-    ParityCase("oaw research", ("research",), ("research", "unknown")),
+    ParityCase(
+        "oaw research",
+        (
+            "research",
+            "scaffold",
+            "--project",
+            "Parity",
+            "--track",
+            "group-topic",
+            "--title",
+            "Group topic",
+            "--date",
+            "2026-07-13",
+        ),
+        ("research", "unknown"),
+    ),
     ParityCase(
         "oaw research scaffold",
         (
@@ -81,7 +121,11 @@ PARITY_CASES = (
         ),
         ("research", "start"),
     ),
-    ParityCase("oaw task", ("task",), ("task", "unknown")),
+    ParityCase(
+        "oaw task",
+        ("task", "start", "PRT-TSK-cli", "--note", "Group", "--allow-missing-session-id"),
+        ("task", "unknown"),
+    ),
     ParityCase(
         "oaw task backlog",
         ("task", "backlog", "PRT-TSK-cli", "--note", "Backlog", "--allow-missing-session-id"),
@@ -125,11 +169,21 @@ PARITY_CASES = (
             "Parity",
             "--title",
             "Created task",
+            "--status",
+            "todo",
+            "--priority",
+            "2",
+            "--effort",
+            "M",
             "--allow-missing-session-id",
         ),
         ("task", "create", "--priority", "9"),
     ),
-    ParityCase("oaw note", ("note",), ("note", "unknown")),
+    ParityCase(
+        "oaw note",
+        ("note", "observe", "PRT-TSK-cli", "--title", "Group", "--body", "Body"),
+        ("note", "unknown"),
+    ),
     ParityCase(
         "oaw note session",
         ("note", "session", "PRT-TSK-cli", "--note", "Session", "--allow-missing-session-id"),
@@ -140,7 +194,24 @@ PARITY_CASES = (
         ("note", "observe", "PRT-TSK-cli", "--title", "Observation", "--body", "Body"),
         ("note", "observe"),
     ),
-    ParityCase("oaw board", ("board",), ("board", "unknown")),
+    ParityCase(
+        "oaw board",
+        (
+            "board",
+            "add",
+            "--column",
+            "Next",
+            "--link",
+            "Projects/Parity/Tasks/CLI",
+            "--title",
+            "Group",
+            "--why",
+            "Parity",
+            "--id",
+            "PRT-TSK-group",
+        ),
+        ("board", "unknown"),
+    ),
     ParityCase(
         "oaw board add",
         (
@@ -170,13 +241,21 @@ PARITY_CASES = (
         ("board", "ensure-backlog", "--project", "Parity"),
         ("board", "ensure-backlog"),
     ),
-    ParityCase("oaw ingest", ("ingest",), ("ingest", "unknown")),
+    ParityCase(
+        "oaw ingest",
+        ("ingest", "safe-export", "--ingestion-root", "{vault}/incoming"),
+        ("ingest", "unknown"),
+    ),
     ParityCase(
         "oaw ingest safe-export",
         ("ingest", "safe-export", "--ingestion-root", "{vault}/incoming"),
         ("ingest", "safe-export", "--unknown"),
     ),
-    ParityCase("oaw link", ("link",), ("link", "unknown")),
+    ParityCase(
+        "oaw link",
+        ("link", "check", "PRT-TSK-cli", "PRT-TSK-linked"),
+        ("link", "unknown"),
+    ),
     ParityCase(
         "oaw link check", ("link", "check", "PRT-TSK-cli", "PRT-TSK-linked"), ("link", "check")
     ),
@@ -190,16 +269,34 @@ PARITY_CASES = (
         ("link", "ensure-bidirectional"),
     ),
     ParityCase("oaw link lint", ("link", "lint"), ("link", "lint", "--unknown")),
-    ParityCase("oaw export", ("export",), ("export", "unknown")),
+    ParityCase(
+        "oaw export",
+        ("export", "note", "PRT-TSK-export", "--output-root", "{vault}/group-exports"),
+        ("export", "unknown"),
+    ),
     ParityCase(
         "oaw export note",
         ("export", "note", "PRT-TSK-export", "--output-root", "{vault}/exports"),
         ("export", "note"),
     ),
     ParityCase(
-        "oaw export validate", ("export", "validate", "{vault}/missing"), ("export", "validate")
+        "oaw export validate",
+        ("export", "validate", "{vault}/fixture-exports/PRT-TSK-export"),
+        ("export", "validate"),
     ),
-    ParityCase("oaw session", ("session",), ("session", "unknown")),
+    ParityCase(
+        "oaw session",
+        (
+            "session",
+            "lookup",
+            "missing-session",
+            "--codex-root",
+            "{vault}/codex",
+            "--claude-root",
+            "{vault}/claude",
+        ),
+        ("session", "unknown"),
+    ),
     ParityCase(
         "oaw session lookup",
         (
@@ -218,8 +315,11 @@ PARITY_CASES = (
         (
             "session",
             "snapshot",
-            "missing-session",
+            SNAPSHOT_THREAD_ID,
             "--codex-only",
+            "--partial",
+            "--slug",
+            "parity",
             "--output-root",
             "{vault}/attachments",
             "--codex-root",
@@ -231,7 +331,19 @@ PARITY_CASES = (
         ),
         ("session", "snapshot"),
     ),
-    ParityCase("oaw retro", ("retro",), ("retro", "unknown")),
+    ParityCase(
+        "oaw retro",
+        (
+            "retro",
+            "create",
+            "--title",
+            "Group retro",
+            "--date",
+            "2026-07-13",
+            "--allow-missing-session-id",
+        ),
+        ("retro", "unknown"),
+    ),
     ParityCase(
         "oaw retro create",
         (
@@ -406,6 +518,12 @@ created: 2026-07-13
 # Prompt - Existing
 
 ## Running research sessions
+
+## Deep research prompt
+
+```text
+Research existing.
+```
 """,
     )
     write(
@@ -417,9 +535,44 @@ export-scope: personal
 # Approved
 """,
     )
-    (vault / "codex").mkdir(parents=True)
+    write(
+        vault / "codex/2026/07/13" / f"rollout-2026-07-13T12-00-00-{SNAPSHOT_THREAD_ID}.jsonl",
+        '{"timestamp":"2026-07-13T12:00:00.000Z","content":"parity"}\n',
+    )
     (vault / "claude").mkdir(parents=True)
     (vault / "plugins").mkdir(parents=True)
+    exported_note = """---
+export-scope: work
+---
+
+# Export fixture
+"""
+    bundle = vault / "fixture-exports/PRT-TSK-export"
+    write(bundle / "note.md", exported_note)
+    write(
+        bundle / "manifest.json",
+        json.dumps(
+            {
+                "schema": "oaw-safe-export-v1",
+                "target": "work",
+                "exported_at": "2026-07-13T12:00:00+00:00",
+                "source": {
+                    "id": "PRT-TSK-export",
+                    "path": "Projects/Parity/Tasks/Export.md",
+                    "title": "Export",
+                },
+                "note": {
+                    "path": "note.md",
+                    "sha256": hashlib.sha256(exported_note.encode()).hexdigest(),
+                    "size_bytes": len(exported_note.encode()),
+                },
+                "return_ingest": False,
+                "artifacts": [],
+            },
+            indent=2,
+        )
+        + "\n",
+    )
 
 
 @dataclass(frozen=True)
@@ -464,12 +617,24 @@ def exit_class(returncode: int) -> int:
     return returncode
 
 
-def filesystem_state(vault: Path) -> dict[Path, bytes]:
-    return {
-        path.relative_to(vault): path.read_bytes()
-        for path in sorted(vault.rglob("*"))
+def normalized_file_bytes(path: Path, vault: Path) -> bytes:
+    content = path.read_bytes()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return content
+    return text.replace(str(vault), "$VAULT").encode()
+
+
+def filesystem_state(vault: Path) -> tuple[tuple[Path, ...], dict[Path, bytes]]:
+    paths = sorted(vault.rglob("*"))
+    directories = tuple(path.relative_to(vault) for path in paths if path.is_dir())
+    files = {
+        path.relative_to(vault): normalized_file_bytes(path, vault)
+        for path in paths
         if path.is_file()
     }
+    return directories, files
 
 
 def normalized(value: str, vault: Path) -> str:
@@ -477,7 +642,11 @@ def normalized(value: str, vault: Path) -> str:
 
 
 def assert_frontend_parity(
-    tokens: tuple[str, ...], fixture: Path, work_root: Path, monkeypatch: pytest.MonkeyPatch
+    tokens: tuple[str, ...],
+    fixture: Path,
+    work_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    expected_exit_class: int,
 ) -> None:
     argparse_vault = work_root / "argparse"
     typer_vault = work_root / "typer"
@@ -489,7 +658,8 @@ def assert_frontend_parity(
     )
     typer_result = run_typer(render_arguments(tokens, typer_vault), typer_vault)
 
-    assert exit_class(argparse_result.returncode) == exit_class(typer_result.returncode)
+    assert exit_class(argparse_result.returncode) == expected_exit_class
+    assert exit_class(typer_result.returncode) == expected_exit_class
     assert normalized(argparse_result.stdout, argparse_vault) == normalized(
         typer_result.stdout, typer_vault
     )
@@ -514,12 +684,68 @@ def test_parity_corpus_covers_every_t1_inventory_path() -> None:
     assert all(case.representative and case.error_shape for case in PARITY_CASES)
 
 
+@pytest.mark.parametrize(
+    ("option", "value"),
+    (
+        ("--status", "backlog"),
+        ("--status", "todo"),
+        ("--priority", "1"),
+        ("--priority", "2"),
+        ("--priority", "3"),
+        ("--effort", "S"),
+        ("--effort", "M"),
+        ("--effort", "L"),
+    ),
+)
+def test_task_create_accepted_value_sets_match(
+    option: str,
+    value: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(snapshot.dt, "datetime", FixedDateTime)
+    fixture = tmp_path / "fixture"
+    build_vault(fixture)
+    tokens = (
+        "task",
+        "create",
+        "--project",
+        "Parity",
+        "--title",
+        f"Accepted {option} {value}",
+        option,
+        value,
+        "--allow-missing-session-id",
+    )
+
+    assert_frontend_parity(
+        tokens,
+        fixture,
+        tmp_path / "accepted-value",
+        monkeypatch,
+        expected_exit_class=0,
+    )
+
+
 @pytest.mark.parametrize("case", PARITY_CASES, ids=lambda case: case.path.removeprefix("oaw "))
 def test_argparse_and_typer_parity_corpus(
     case: ParityCase, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(snapshot.dt, "datetime", FixedDateTime)
     fixture = tmp_path / "fixture"
     build_vault(fixture)
 
-    assert_frontend_parity(case.representative, fixture, tmp_path / "representative", monkeypatch)
-    assert_frontend_parity(case.error_shape, fixture, tmp_path / "error", monkeypatch)
+    assert_frontend_parity(
+        case.representative,
+        fixture,
+        tmp_path / "representative",
+        monkeypatch,
+        expected_exit_class=0,
+    )
+    assert_frontend_parity(
+        case.error_shape,
+        fixture,
+        tmp_path / "error",
+        monkeypatch,
+        expected_exit_class=2,
+    )
