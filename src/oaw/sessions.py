@@ -6,13 +6,11 @@ import glob
 import json
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import OawError
-from .frontmatter import parse_frontmatter
-from .notes import read_note
-from .resolver import NoteMatch, iter_markdown, title_from_body
 
 SESSION_ENV = (
     ("Codex", "CODEX_THREAD_ID"),
@@ -27,32 +25,6 @@ SESSION_ENV = (
 class SessionArtifact:
     kind: str
     path: Path
-
-
-def notes_containing_literal(root: Path, literal: str) -> list[NoteMatch]:
-    matches: list[NoteMatch] = []
-    for path in iter_markdown(root):
-        try:
-            text, fm, body = read_note(path)
-        except UnicodeDecodeError:
-            continue
-        if literal not in text:
-            continue
-        data = parse_frontmatter(fm)
-        note_id = data.get("id")
-        rel = path.relative_to(root).as_posix()
-        matches.append(
-            NoteMatch(
-                path=path,
-                relpath=rel,
-                note_id=note_id if isinstance(note_id, str) else None,
-                matched_by="content",
-                title=title_from_body(path, body),
-                frontmatter_text=fm.rstrip(),
-                frontmatter=data,
-            )
-        )
-    return sorted(matches, key=lambda item: item.relpath)
 
 
 def find_session_artifacts(
@@ -182,7 +154,7 @@ def summarize_artifact(path: Path) -> tuple[str | None, str | None, list[str]]:
 
 
 def session_lookup(
-    root: Path,
+    note_hits: Sequence[tuple[str, str | None]],
     session_id: str,
     verbose: bool,
     codex_root: Path,
@@ -191,13 +163,12 @@ def session_lookup(
     session_id = session_id.strip()
     if not session_id:
         raise OawError("empty session ID")
-    note_hits = notes_containing_literal(root, session_id)
     if note_hits:
         print(f"Session: {session_id}")
         print("Vault matches:")
-        for hit in note_hits:
-            note_id = hit.note_id or "(no id)"
-            print(f"- {hit.relpath} | id: {note_id}")
+        for relpath, hit_id in note_hits:
+            note_id = hit_id or "(no id)"
+            print(f"- {relpath} | id: {note_id}")
         return
 
     artifacts = find_session_artifacts(

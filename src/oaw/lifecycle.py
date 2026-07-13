@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import os
 import re
 import unicodedata
 import urllib.parse
@@ -753,84 +752,3 @@ def start_research_run(
     print(f"Created: {result.relative_to(root).as_posix()}")
     print("Status: running")
     print("Prompt: updated")
-
-
-def note_type_matches(data: dict[str, object], note_type: str) -> bool:
-    value = data.get("type")
-    return isinstance(value, str) and value == note_type
-
-
-def note_status(data: dict[str, object]) -> str:
-    value = data.get("status", "")
-    return str(value) if value is not None else ""
-
-
-def read_project_note_row(
-    path: Path,
-    note_type: str,
-    status: str | None,
-    include_archived: bool,
-) -> tuple[str, str, str] | None:
-    with path.open("r", encoding="utf-8") as handle:
-        if handle.readline().strip() != "---":
-            return None
-        lines: list[str] = []
-        for line in handle:
-            if line.strip() == "---":
-                break
-            lines.append(line)
-        else:
-            return None
-        data = parse_frontmatter("".join(lines))
-        if not note_type_matches(data, note_type):
-            return None
-        current_status = note_status(data)
-        if status and current_status != status:
-            return None
-        if not status and current_status == "archived" and not include_archived:
-            return None
-        title = path.stem
-        for line in handle:
-            if line.startswith("# "):
-                title = line[2:].strip()
-                break
-        return str(data.get("id", "")), current_status, title
-
-
-def project_note_rows(
-    project_root: Path,
-    root: Path,
-    note_type: str,
-    status: str | None,
-    include_archived: bool,
-) -> list[tuple[str, str, str, str]]:
-    rows = []
-    root_prefix_length = len(root.as_posix().rstrip("/") + "/")
-    for path in sorted(project_root.rglob("*.md"), key=os.fspath):
-        row = read_project_note_row(path, note_type, status, include_archived)
-        if row is None:
-            continue
-        relative_path = path.as_posix()[root_prefix_length:]
-        rows.append((*row, relative_path))
-    return rows
-
-
-def list_project(
-    root: Path,
-    project: str,
-    note_type: str,
-    status: str | None,
-    include_archived: bool,
-) -> None:
-    project_root = root / "Projects" / project
-    if not project_root.exists():
-        raise OawError(f"project not found: {project_root}")
-    if note_type == "task":
-        tasks = project_root / "Tasks"
-        if not tasks.exists():
-            raise OawError(f"project tasks folder not found: {tasks}")
-        rows = project_note_rows(tasks, root, note_type, status, True)
-    else:
-        rows = project_note_rows(project_root, root, note_type, status, include_archived)
-    for row in rows:
-        print("\t".join(row))

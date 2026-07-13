@@ -19,12 +19,11 @@ from .lifecycle import (
     create_project,
     create_research_packet,
     create_task,
-    list_project,
     start_research_run,
     update_task,
 )
 from .links import link_check, link_ensure, link_ensure_bidirectional, link_lint, link_list
-from .resolver import output_resolve, resolve_id, vault_root
+from .resolver import list_project, notes_containing_literal, output_resolve, resolve_id, vault_root
 from .retro import create_retrospective, update_note_observation
 from .sessions import (
     default_claude_projects_root,
@@ -484,7 +483,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "session":
             if args.session_command == "lookup":
                 session_lookup(
-                    root, args.session_id, args.verbose, args.codex_root, args.claude_root
+                    [
+                        (hit.relpath, hit.note_id)
+                        for hit in notes_containing_literal(root, args.session_id)
+                    ],
+                    args.session_id,
+                    args.verbose,
+                    args.codex_root,
+                    args.claude_root,
                 )
             elif args.session_command == "snapshot":
                 if args.partial and args.complete:
