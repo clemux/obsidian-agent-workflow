@@ -289,7 +289,7 @@ class StableTyperGroup(TyperGroup):
 
 def _app(help_text: str) -> typer.Typer:
     return typer.Typer(
-        add_completion=False,
+        add_completion=True,
         no_args_is_help=False,
         help=help_text,
         cls=StableTyperGroup,

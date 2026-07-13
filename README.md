@@ -38,15 +38,11 @@ carries its own dependencies and needs no prefix.
 
 ### Shell completion
 
-The CLI is built with Typer, so completion is available from Click:
+The CLI is built with Typer, so it ships shell completion:
 
 ```bash
-# bash — add to ~/.bashrc
-eval "$(_OAW_COMPLETE=bash_source oaw)"
-# zsh — add to ~/.zshrc
-eval "$(_OAW_COMPLETE=zsh_source oaw)"
-# fish — add to ~/.config/fish/completions/oaw.fish
-_OAW_COMPLETE=fish_source oaw | source
+oaw --install-completion          # install for the current shell
+oaw --show-completion bash        # or print the script to inspect/copy
 ```
 
 Completion covers commands and option names. It does not complete vault IDs or
