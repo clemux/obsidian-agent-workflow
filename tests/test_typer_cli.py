@@ -4,7 +4,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from oaw import typer_cli
+from oaw import cli, typer_cli
 
 
 def write(path: Path, text: str) -> None:
@@ -69,15 +69,21 @@ aliases:
     ],
 )
 def test_typer_conflicts_preserve_argparse_diagnostics(
-    arguments: list[str], error_line: str
+    arguments: list[str],
+    error_line: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    result = CliRunner().invoke(typer_cli.app, arguments)
+    monkeypatch.setenv("COLUMNS", "80")
+    with pytest.raises(SystemExit) as expected_exit:
+        cli.build_parser().parse_args(arguments)
+    expected = capsys.readouterr()
+    result = CliRunner().invoke(typer_cli.app, arguments, env={"COLUMNS": "80"})
 
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert result.stderr.startswith("usage: oaw ")
+    assert expected_exit.value.code == result.exit_code == 2
+    assert expected.out == result.stdout == ""
+    assert result.stderr == expected.err
     assert result.stderr.endswith(error_line)
-    assert "╭─ Error" not in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -89,10 +95,36 @@ def test_typer_conflicts_preserve_argparse_diagnostics(
     ],
 )
 def test_typer_task_create_validates_every_choice_occurrence(
-    arguments: list[str], invalid_value: str
+    arguments: list[str],
+    invalid_value: str,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    result = CliRunner().invoke(typer_cli.app, ["task", "create", *arguments])
+    full_arguments = ["task", "create", *arguments]
+    monkeypatch.setenv("COLUMNS", "80")
+    with pytest.raises(SystemExit) as expected_exit:
+        cli.build_parser().parse_args(full_arguments)
+    expected = capsys.readouterr()
+    result = CliRunner().invoke(typer_cli.app, full_arguments, env={"COLUMNS": "80"})
 
-    assert result.exit_code == 2
-    assert result.stdout == ""
+    assert expected_exit.value.code == result.exit_code == 2
+    assert expected.out == result.stdout == ""
+    assert result.stderr == expected.err
     assert invalid_value in result.stderr
+
+
+@pytest.mark.parametrize("arguments", [[], ["resolve"], ["unknown-command"]])
+def test_typer_ordinary_usage_errors_preserve_argparse_diagnostics(
+    arguments: list[str],
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("COLUMNS", "80")
+    with pytest.raises(SystemExit) as expected_exit:
+        cli.build_parser().parse_args(arguments)
+    expected = capsys.readouterr()
+    result = CliRunner().invoke(typer_cli.app, arguments, env={"COLUMNS": "80"})
+
+    assert expected_exit.value.code == result.exit_code == 2
+    assert expected.out == result.stdout == ""
+    assert result.stderr == expected.err
