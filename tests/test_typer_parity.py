@@ -4,6 +4,7 @@ import base64
 import datetime as dt
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import copytree
@@ -632,6 +633,16 @@ def normalized_file_bytes(path: Path, vault: Path) -> bytes:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
         return content
+    # The frozen argparse corpus predates timezone-aware task ``created``
+    # metadata.  Compare task notes by their legacy date-only shape; dedicated
+    # lifecycle tests assert the full timestamp.  Keep other note schemas
+    # untouched so future datetime fields remain visible to parity checks.
+    if path.parent.name == "Tasks" and re.search(r"(?m)^type: task$", text):
+        text = re.sub(
+            r"(?m)^(created: \d{4}-\d{2}-\d{2})T[^\n]+$",
+            r"\1",
+            text,
+        )
     return text.replace(str(vault), "$VAULT").encode()
 
 

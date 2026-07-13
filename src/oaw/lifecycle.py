@@ -220,6 +220,7 @@ def create_task(
     if path.exists():
         raise OawError(f"task note already exists: {relpath.as_posix()}")
     today = dt.date.today().isoformat()
+    created = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
     project_slug = _slugify(project_root.name)
     task_status = "active" if start else status
     lines = [
@@ -227,7 +228,7 @@ def create_task(
         "type: task",
         f"project: {project_slug}",
         f"status: {task_status}",
-        f"created: {today}",
+        f"created: {created}",
     ]
     if priority is not None:
         lines.append(f"priority: {priority}")

@@ -1,3 +1,4 @@
+import datetime as dt
 import hashlib
 import json
 import os
@@ -2787,6 +2788,33 @@ aliases:
         self.assertEqual(resolved.returncode, 0, resolved.stderr)
         listing = self.run_oaw("list", "--project", "Obsidian Agent Workflow")
         self.assertIn("OAW-TSK-improve-resolver-errors", listing.stdout)
+
+    def test_task_create_writes_timezone_aware_iso8601_created_timestamp(self):
+        before = dt.datetime.now(dt.timezone.utc)
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Timestamped task",
+        )
+        after = dt.datetime.now(dt.timezone.utc)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        note = (
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Timestamped task.md"
+        ).read_text(encoding="utf-8")
+        created_line = next(
+            line for line in note.splitlines() if line.startswith("created:")
+        )
+        created_value = created_line.split(":", 1)[1].strip()
+        parsed = dt.datetime.fromisoformat(created_value.replace("Z", "+00:00"))
+
+        self.assertTrue(parsed.tzinfo is not None)
+        self.assertTrue(parsed.utcoffset() is not None)
+        self.assertTrue(parsed >= before - dt.timedelta(seconds=1))
+        self.assertTrue(parsed <= after + dt.timedelta(seconds=1))
 
     def test_task_create_todo_places_card_in_todo_column(self):
         proc = self.run_oaw(
