@@ -13,11 +13,13 @@ import shutil
 import subprocess
 import sys
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CHECKOUT = ROOT / "bin" / "oaw"
 PYTHON_INTERPRETER = re.compile(r"^(?:python|python3)(?:\d+(?:\.\d+)*)?$")
+MAX_HELP_WORKERS = 8
 
 
 def command_prefix(value: str, label: str) -> list[str]:
@@ -178,36 +180,49 @@ def compare_surfaces(checkout: list[str], installed: list[str]) -> tuple[int, li
     seen: set[tuple[str, ...]] = set()
     failures: list[str] = []
     checked = 0
-    while queue:
-        path = queue.popleft()
-        if path in seen:
-            continue
-        seen.add(path)
-        checkout_result = help_result(checkout, path)
-        installed_result = help_result(installed, path)
-        checked += 1
-        checkout_output = checkout_result.stdout + checkout_result.stderr
-        installed_output = installed_result.stdout + installed_result.stderr
-        if (
-            checkout_result.returncode != installed_result.returncode
-            or checkout_output != installed_output
-        ):
-            diff = "".join(
-                difflib.unified_diff(
-                    installed_output.splitlines(keepends=True),
-                    checkout_output.splitlines(keepends=True),
-                    fromfile="installed",
-                    tofile="checkout",
+    with ThreadPoolExecutor(max_workers=MAX_HELP_WORKERS) as executor:
+        while queue:
+            paths: list[tuple[str, ...]] = []
+            while queue:
+                path = queue.popleft()
+                if path not in seen:
+                    seen.add(path)
+                    paths.append(path)
+
+            results = [
+                (
+                    path,
+                    executor.submit(help_result, checkout, path),
+                    executor.submit(help_result, installed, path),
                 )
-            )
-            failures.append(
-                f"Mismatch: {display_path(path)} "
-                f"(installed rc={installed_result.returncode}, "
-                f"checkout rc={checkout_result.returncode})\n{diff}"
-            )
-        if checkout_result.returncode == 0:
-            for child in subcommands(checkout_result.stdout):
-                queue.append((*path, child))
+                for path in paths
+            ]
+            for path, checkout_future, installed_future in results:
+                checkout_result = checkout_future.result()
+                installed_result = installed_future.result()
+                checked += 1
+                checkout_output = checkout_result.stdout + checkout_result.stderr
+                installed_output = installed_result.stdout + installed_result.stderr
+                if (
+                    checkout_result.returncode != installed_result.returncode
+                    or checkout_output != installed_output
+                ):
+                    diff = "".join(
+                        difflib.unified_diff(
+                            installed_output.splitlines(keepends=True),
+                            checkout_output.splitlines(keepends=True),
+                            fromfile="installed",
+                            tofile="checkout",
+                        )
+                    )
+                    failures.append(
+                        f"Mismatch: {display_path(path)} "
+                        f"(installed rc={installed_result.returncode}, "
+                        f"checkout rc={checkout_result.returncode})\n{diff}"
+                    )
+                if checkout_result.returncode == 0:
+                    for child in subcommands(checkout_result.stdout):
+                        queue.append((*path, child))
     return checked, failures
 
 
