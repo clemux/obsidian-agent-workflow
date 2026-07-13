@@ -482,12 +482,15 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("unknown export command")
         elif args.command == "session":
             if args.session_command == "lookup":
+                session_id = args.session_id.strip()
+                if not session_id:
+                    raise OawError("empty session ID")
                 session_lookup(
                     [
                         (hit.relpath, hit.note_id)
-                        for hit in notes_containing_literal(root, args.session_id)
+                        for hit in notes_containing_literal(root, session_id)
                     ],
-                    args.session_id,
+                    session_id,
                     args.verbose,
                     args.codex_root,
                     args.claude_root,

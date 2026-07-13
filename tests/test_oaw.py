@@ -1799,7 +1799,7 @@ export-scope: personal
         proc = self.run_oaw(
             "session",
             "lookup",
-            "lookup-thread",
+            "  lookup-thread  ",
             "--codex-root",
             str(self.vault / "missing-codex"),
             "--claude-root",
