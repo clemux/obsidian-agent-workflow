@@ -14,21 +14,54 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def test_typer_frontend_has_no_argparse_or_cli_dependency() -> None:
-    tree = ast.parse(inspect.getsource(typer_cli))
-    imported_modules = {
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    }
-    imported_from = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+def imported_targets(source: str) -> set[str]:
+    tree = ast.parse(source)
+    targets: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            targets.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            relative_prefix = "." * node.level
+            module_prefix = f"{relative_prefix}{node.module or ''}"
+            for alias in node.names:
+                separator = "." if node.module else ""
+                targets.add(f"{module_prefix}{separator}{alias.name}")
+    return targets
 
-    assert "argparse" not in imported_modules
-    assert "oaw.cli" not in imported_modules
-    assert "cli" not in imported_modules
-    assert "oaw.cli" not in imported_from
-    assert "cli" not in imported_from
+
+def is_forbidden_cli_dependency(target: str) -> bool:
+    normalized = target.lstrip(".")
+    return (
+        normalized == "argparse"
+        or normalized.startswith("argparse.")
+        or normalized == "cli"
+        or normalized.startswith("cli.")
+        or normalized == "oaw.cli"
+        or normalized.startswith("oaw.cli.")
+    )
+
+
+def test_typer_frontend_has_no_argparse_or_cli_dependency() -> None:
+    targets = imported_targets(inspect.getsource(typer_cli))
+
+    assert not {target for target in targets if is_forbidden_cli_dependency(target)}
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "import argparse",
+        "from argparse import ArgumentParser",
+        "import oaw.cli as parser_cli",
+        "from oaw.cli import build_parser",
+        "from oaw import cli",
+        "from . import cli",
+        "from .cli import build_parser",
+        "from .. import cli",
+    ],
+)
+def test_typer_dependency_guard_recognizes_forbidden_import_forms(statement: str) -> None:
+    assert any(is_forbidden_cli_dependency(target) for target in imported_targets(statement))
 
 
 @pytest.mark.parametrize("help_flag", ["-h", "--help"])
@@ -38,6 +71,15 @@ def test_typer_help_wins_over_an_unknown_option(help_flag: str) -> None:
     assert result.exit_code == 0, result.stderr
     assert result.stderr == ""
     assert result.stdout.startswith("Usage: oaw resolve ")
+
+
+@pytest.mark.parametrize("help_flag", ["-h", "--help"])
+def test_typer_help_in_a_known_option_value_slot_is_a_usage_error(help_flag: str) -> None:
+    result = CliRunner().invoke(typer_cli.app, ["list", "--project", help_flag])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "requires an argument" in result.stderr
 
 
 @pytest.mark.parametrize(

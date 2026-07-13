@@ -155,14 +155,41 @@ ARGPARSE_CHOICES = {
 class StableTyperGroup(TyperGroup):
     """Run Click parsing while retaining the established usage-error contract."""
 
+    @staticmethod
+    def _option_arity(command: Any, value: str) -> int | None:
+        """Return how many following values a known Click option consumes."""
+        option_name, separator, _ = value.partition("=")
+        for param in command.params:
+            if option_name not in param.opts:
+                continue
+            if getattr(param, "is_flag", False) or getattr(param, "count", False):
+                return 0
+            return max(param.nargs - bool(separator), 0)
+        return None
+
     def _help_args(self, raw_args: list[str]) -> list[str] | None:
-        """Route eager help to the deepest addressed Click command."""
+        """Route eager help while honoring known options' value arity."""
         command: Any = self
         path: list[str] = []
-        for value in raw_args:
-            if value in {"-h", "--help"}:
+        pending_values = 0
+        options_enabled = True
+        for index, value in enumerate(raw_args):
+            if pending_values:
+                if options_enabled and value in {"-h", "--help"}:
+                    return raw_args[:index]
+                pending_values -= 1
+                continue
+            if options_enabled and value in {"-h", "--help"}:
                 return [*path, "--help"]
-            if not isinstance(command, TyperGroup) or value.startswith("-"):
+            if options_enabled and value == "--":
+                options_enabled = False
+                continue
+            if options_enabled and value.startswith("-"):
+                option_arity = self._option_arity(command, value)
+                if option_arity is not None:
+                    pending_values = option_arity
+                continue
+            if not isinstance(command, TyperGroup):
                 continue
             next_command = command.commands.get(value)
             if next_command is None:
