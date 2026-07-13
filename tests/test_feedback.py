@@ -33,10 +33,13 @@ def feedback_args(*extra: str) -> list[str]:
 
 
 def test_creation_tags_are_safe_deduplicated_ordered_and_json_quoted() -> None:
-    assert creation_tags(("agent-feedback",), ["agent-feedback", "cli", "cli", "bug/fix"]) == [
+    assert creation_tags(
+        ("agent-feedback",), ["agent-feedback", "cli", "cli", "bug/fix", "foo_bar"]
+    ) == [
         "agent-feedback",
         "cli",
         "bug/fix",
+        "foo_bar",
     ]
     assert creation_tag_block(("agent-feedback",), ["cli"]) == [
         "tags:",

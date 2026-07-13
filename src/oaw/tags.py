@@ -26,7 +26,7 @@ def creation_tags(defaults: Iterable[str], extras: Iterable[str] | None = None) 
     for raw in [*defaults, *(extras or [])]:
         if not isinstance(raw, str) or raw != raw.strip() or not raw or not SAFE_TAG.fullmatch(raw):
             raise OawError(
-                "tag must be a lowercase safe identifier using letters, digits, '.', '-', or '/'"
+                "tag must be a lowercase safe identifier using letters, digits, '.', '_', '-', or '/'"
             )
         tag = raw
         if tag not in result:

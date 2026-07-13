@@ -24,6 +24,7 @@ from .resolver import (
     scan_note_references,
 )
 from .sessions import detect_session
+from .tags import creation_tag_block, creation_tags
 
 RESEARCH_PACKET_TEMPLATE = Path("Templates/Research packet.md")
 PROJECT_INDEX_TEMPLATE = Path("Templates/Small project index.md")
@@ -238,17 +239,13 @@ def create_task(
         f"id: {note_id}",
         "aliases:",
         f"  - {note_id}",
-        "tags:",
-        "  - projects",
-        f"  - {project_slug}",
-        "  - task",
     ]
+    try:
+        lines.extend(creation_tag_block(("projects", project_slug, "task"), tags))
+    except OawError as exc:
+        raise OawError(f"task create --tag: {exc}") from exc
     if capture:
         lines.append(f"source-capture: {capture.note_id}")
-    for tag in tags or []:
-        cleaned = tag.strip()
-        if cleaned:
-            lines.append(f"  - {cleaned}")
     session_id = session_ref.split("=", 1)[1] if "=" in session_ref else ""
     if session_id and session_id != "unavailable":
         lines += ["session-ids:", f"  - {session_id}"]
@@ -335,16 +332,6 @@ def safe_project_name(raw: str) -> str:
     return name
 
 
-def safe_project_tag(raw: str) -> str:
-    tag = single_line_value(raw, "--tag")
-    assert tag is not None
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_/-]*", tag) or "//" in tag:
-        raise OawError(
-            "project create --tag must use letters, numbers, underscores, hyphens, or slashes"
-        )
-    return tag
-
-
 def replace_h2_body(text: str, heading: str, body: str) -> str:
     matches = list(re.finditer(rf"(?m)^## {re.escape(heading)}[ \t]*$", text))
     if len(matches) != 1:
@@ -376,10 +363,8 @@ def project_frontmatter(
         f"id: {json.dumps(note_id, ensure_ascii=False)}",
         "aliases:",
         f"  - {json.dumps(note_id, ensure_ascii=False)}",
-        "tags:",
     ]
-    for tag in tags:
-        lines.append(f"  - {json.dumps(tag, ensure_ascii=False)}")
+    lines.extend(creation_tag_block((), tags))
     session_id = session_ref.partition("=")[2]
     if session_id and session_id != "unavailable":
         lines += ["session-ids:", f"  - {json.dumps(session_id, ensure_ascii=False)}"]
@@ -470,9 +455,11 @@ def create_project(
     if not re.fullmatch(r"[A-Z][A-Z0-9]{1,7}", clean_alias):
         raise OawError("project create --alias must match [A-Z][A-Z0-9]{1,7}")
     repo = single_line_value(repo, "--repo", required=False)
-    extra_tags = [safe_project_tag(tag) for tag in tags_value or []]
     project_slug = _slugify(name)
-    tags = list(dict.fromkeys(["projects", project_slug, *extra_tags]))
+    try:
+        tags = creation_tags(("projects", project_slug), tags_value)
+    except OawError as exc:
+        raise OawError(f"project create --tag: {exc}") from exc
     template_rel = safe_relative_path(template, "template")
     template_path = root / template_rel
     if not template_path.is_file():

@@ -319,6 +319,8 @@ aliases:
             "agent-tooling",
             "--tag",
             "workflow",
+            "--tag",
+            "workflow",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(
@@ -2751,6 +2753,8 @@ aliases:
             "--tag",
             "resolver-errors",
             "--tag",
+            "resolver-errors",
+            "--tag",
             "cli-contract",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -2769,8 +2773,8 @@ aliases:
         self.assertIn("status: backlog", note)
         self.assertIn("priority: 2", note)
         self.assertIn("effort: M", note)
-        self.assertIn("  - resolver-errors", note)
-        self.assertIn("  - cli-contract", note)
+        self.assertIn('  - "resolver-errors"', note)
+        self.assertIn('  - "cli-contract"', note)
         self.assertIn("id: OAW-TSK-improve-resolver-errors", note)
         self.assertIn("session-ids:\n  - test-thread", note)
         self.assertIn("Error messages should list candidates.", note)
@@ -2945,6 +2949,12 @@ aliases:
             "todo",
             "--note",
             "Reproduce and fix the routing regression.",
+            "--tag",
+            "capture-routing",
+            "--tag",
+            "capture-routing",
+            "--tag",
+            "cli",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("Status: todo", proc.stdout)
@@ -2954,6 +2964,15 @@ aliases:
         )
         task = task_path.read_text(encoding="utf-8")
         capture = capture_path.read_text(encoding="utf-8")
+        tags = task.split("tags:\n", 1)[1].split("source-capture:", 1)[0]
+        self.assertEqual(
+            tags,
+            '  - "projects"\n'
+            '  - "obsidian-agent-workflow"\n'
+            '  - "task"\n'
+            '  - "capture-routing"\n'
+            '  - "cli"\n',
+        )
         self.assertIn("source-capture: OAW-CAP-active", task)
         self.assertIn(
             "[[Projects/Obsidian Agent Workflow/Inbox/Active capture|OAW-CAP-active]]",
