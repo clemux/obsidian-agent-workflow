@@ -1752,7 +1752,8 @@ export-scope: personal
             "--write",
         )
 
-        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(proc.stdout, "")
         self.assertIn("not allowed with argument", proc.stderr)
 
     def test_safe_export_ingest_refuses_root_that_contains_vault(self):
@@ -2139,9 +2140,24 @@ aliases:
             "--write",
         )
 
-        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(proc.stdout, "")
         self.assertIn("not allowed with argument", proc.stderr)
         self.assertEqual(before, task_path.read_text(encoding="utf-8"))
+
+    def test_link_ensure_bidirectional_rejects_conflicting_dry_run_and_write(self):
+        proc = self.run_oaw(
+            "link",
+            "ensure-bidirectional",
+            "OAW-TSK-cli",
+            "OAW-TSK-archived",
+            "--dry-run",
+            "--write",
+        )
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(proc.stdout, "")
+        self.assertIn("not allowed with argument", proc.stderr)
 
     def test_link_ensure_bidirectional_writes_missing_reciprocal_links(self):
         write(
@@ -2579,6 +2595,72 @@ aliases:
         snapshot = output_root / "2026-07-13-019f48d7"
         self.assertTrue(all((snapshot / "codex" / rollout.name).exists() for rollout in rollouts))
 
+    def test_session_snapshot_accepts_other_repeated_options(self):
+        session_id = "019f5ac2-efd4-7171-965a-6e6f8d0a1a27"
+        fork_session_ids = (
+            "019f5ac3-1111-7222-8333-c26aa5d38893",
+            "019f5ac4-2222-7333-8444-d37bb6e49904",
+        )
+        claude_root = self.vault / "harness/claude/projects"
+        codex_root = self.vault / "harness/codex/sessions"
+        output_root = self.vault / "attachments"
+        write(
+            claude_root / "-tmp-project" / f"{session_id}.jsonl",
+            f'{{"timestamp":"2026-07-13T10:00:00.000Z","sessionId":"{session_id}"}}\n',
+        )
+        for session in fork_session_ids:
+            write(
+                claude_root / "-tmp-project" / f"{session}.jsonl",
+                f'{{"timestamp":"2026-07-13T10:01:00.000Z","sessionId":"{session}"}}\n',
+            )
+        explicit_rollouts = (
+            codex_root / "rollout-explicit-one.jsonl",
+            codex_root / "rollout-explicit-two.jsonl",
+        )
+        grep_rollouts = (
+            codex_root / "rollout-grep-one.jsonl",
+            codex_root / "rollout-grep-two.jsonl",
+        )
+        for rollout in explicit_rollouts:
+            write(rollout, "{}\n")
+        write(grep_rollouts[0], '{"content":"first repeated grep marker"}\n')
+        write(grep_rollouts[1], '{"content":"second repeated grep marker"}\n')
+
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            session_id,
+            "--slug",
+            "repeated options",
+            "--codex-rollout",
+            str(explicit_rollouts[0]),
+            "--codex-rollout",
+            str(explicit_rollouts[1]),
+            "--claude-session",
+            fork_session_ids[0],
+            "--claude-session",
+            fork_session_ids[1],
+            "--grep",
+            "first repeated grep marker",
+            "--grep",
+            "second repeated grep marker",
+            "--output-root",
+            str(output_root),
+            "--claude-root",
+            str(claude_root),
+            "--codex-root",
+            str(codex_root),
+            "--plugin-data-root",
+            str(self.vault / "missing-plugin"),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        snapshot = output_root / "2026-07-13-repeated-options"
+        for session in fork_session_ids:
+            self.assertTrue((snapshot / f"claude/forks/parent-{session[:8]}.jsonl").exists())
+        for rollout in (*explicit_rollouts, *grep_rollouts):
+            self.assertTrue((snapshot / "codex" / rollout.name).exists())
+
     def test_session_snapshot_does_not_treat_bare_session_id_as_fork_parent(self):
         session_id = "019f3ed8-245c-79f3-8ec6-c1ba30e3646d"
         unrelated_id = "019f9999-1111-7222-8333-c26aa5d38893"
@@ -2656,6 +2738,10 @@ aliases:
             "2",
             "--effort",
             "M",
+            "--tag",
+            "resolver-errors",
+            "--tag",
+            "cli-contract",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn(
@@ -2673,6 +2759,8 @@ aliases:
         self.assertIn("status: backlog", note)
         self.assertIn("priority: 2", note)
         self.assertIn("effort: M", note)
+        self.assertIn("  - resolver-errors", note)
+        self.assertIn("  - cli-contract", note)
         self.assertIn("id: OAW-TSK-improve-resolver-errors", note)
         self.assertIn("session-ids:\n  - test-thread", note)
         self.assertIn("Error messages should list candidates.", note)
