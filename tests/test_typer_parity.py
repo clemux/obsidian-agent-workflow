@@ -647,6 +647,7 @@ def assert_frontend_parity(
     work_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     expected_exit_class: int,
+    expected_stderr_prefix: str | None = None,
 ) -> None:
     argparse_vault = work_root / "argparse"
     typer_vault = work_root / "typer"
@@ -671,6 +672,9 @@ def assert_frontend_parity(
         assert normalized(argparse_result.stderr, argparse_vault) == normalized(
             typer_result.stderr, typer_vault
         )
+    if expected_stderr_prefix is not None:
+        assert argparse_result.stderr.startswith(expected_stderr_prefix)
+        assert typer_result.stderr.startswith(expected_stderr_prefix)
     assert filesystem_state(argparse_vault) == filesystem_state(typer_vault)
 
 
@@ -724,6 +728,34 @@ def test_task_create_accepted_value_sets_match(
         tmp_path / "accepted-value",
         monkeypatch,
         expected_exit_class=0,
+    )
+
+
+def test_domain_oaw_error_stderr_exit_and_failure_state_match(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(snapshot.dt, "datetime", FixedDateTime)
+    fixture = tmp_path / "fixture"
+    build_vault(fixture)
+    tokens = (
+        "task",
+        "start",
+        "PRT-TSK-missing",
+        "--note",
+        "Must not write",
+        "--allow-missing-session-id",
+    )
+
+    assert_frontend_parity(
+        tokens,
+        fixture,
+        tmp_path / "domain-error",
+        monkeypatch,
+        expected_exit_class=1,
+        expected_stderr_prefix=(
+            "oaw: no note with frontmatter id or alias 'PRT-TSK-missing' under "
+        ),
     )
 
 
