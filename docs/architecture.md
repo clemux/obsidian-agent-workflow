@@ -100,7 +100,7 @@ adapter modules above them would violate the non-goals.
 - The YAML-library exception is confined to `frontmatter.py`: it alone may
   import the YAML library. Everything else uses its interface, so the
   permitted round-trip dependency (`ruamel.yaml`) stays swappable and the
-  current hand-rolled parser can be kept as the fallback during migration.
+  current hand-rolled parser can remain as the fallback.
 - `resolver.py` owns vault traversal, id/alias matching, and any future
   stat-validated id index. `frontmatter.py` owns the cheap raw-frontmatter
   pre-filter and frontmatter-only parsing operations (per the performance
@@ -154,7 +154,7 @@ Target:
    fixes the harness-leak class of flake.
 3. **CLI contract** — a small retained subprocess suite pinning exit codes and
    stable output lines that agents and skills rely on (`Updated:`/`Status:`/
-   `Board:`, error phrasing). These are the golden tests that gate every
+   `Board:`, error phrasing). These focused native tests gate every
    extraction step.
 4. **Perf smoke** (optional, marked, excluded by default): resolve on a
    generated 5k-note fixture, gated relative to a measured baseline on that
@@ -162,7 +162,7 @@ Target:
    real vault.
 5. **Reserved contract suites** (land with the reserved run seams, specified
    now so the seams stay honest): run-registry, run-lifecycle, and
-   transaction/journal contract tests, independent of argparse — canonical
+   transaction/journal contract tests, independent of the CLI frontend — canonical
    `TaskRef` scope, stale runs, multiple concurrent provider/session runs,
    execution-mode policy (human/agent/hybrid), and rejection or recovery of
    partial registry/task/board writes.

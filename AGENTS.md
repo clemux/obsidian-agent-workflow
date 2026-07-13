@@ -12,10 +12,19 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 
 Keep small workflow changes close to `bin/oaw` and mirror behavior changes in tests and docs. For board-related changes, update the CLI, `tests/test_oaw.py`, `README.md`, and `skills/oaw/SKILL.md` together so agent-facing behavior does not drift from implementation.
 
+The Typer frontend is the current CLI implementation. Native command-contract
+coverage lives in `tests/test_typer_cli.py` and covers command-tree completeness,
+exit classes, output routing, accepted values, conflicts, and no-write behavior.
+Do not reintroduce a historical argparse comparison suite or filesystem golden.
+`scripts/check_cli_parity.py` has a narrower purpose: it checks the installed
+snapshot against the checkout's help surfaces and source bytes.
+
 ## Build, Test, and Development Commands
 
 - `uv run pytest` runs the full test suite.
 - `uv run pytest tests/test_oaw.py` runs only the current CLI tests.
+- `uv run pytest tests/test_typer_cli.py tests/test_cli_parity.py` runs focused
+  native Typer contracts and the installed-vs-checkout staleness check tests.
 - `uv run python bin/oaw --help` shows top-level CLI commands.
 - `uv run python bin/oaw resolve --json OAW-TSK-cli` exercises vault resolution.
 - `OAW_VAULT=/tmp/example-vault uv run python bin/oaw ...` points the CLI at a non-default vault for manual testing.

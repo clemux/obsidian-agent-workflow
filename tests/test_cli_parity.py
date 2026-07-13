@@ -13,7 +13,6 @@ from .assertions import Assertions
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "check_cli_parity.py"
 BIN = ROOT / "bin" / "oaw"
-INVENTORY = ROOT / ".codex-evidence" / "t1-command-inventory.txt"
 
 
 class TestCliParity(Assertions):
@@ -65,19 +64,6 @@ class TestCliParity(Assertions):
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertRegex(proc.stdout, r"Parity: ok \(\d+ help surfaces\)")
-
-    def test_checkout_typer_tree_matches_the_t1_command_inventory(self):
-        paths = {
-            "oaw" + (f" {' '.join(path)}" if path else "")
-            for path in parity.checkout_command_paths()
-        }
-        inventory = {
-            line.strip()
-            for line in INVENTORY.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        }
-
-        self.assertEqual(paths, {"oaw", *inventory})
 
     def test_current_installed_launcher_resolves_package_source(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -24,7 +24,7 @@ local source and verify the installed command surface with:
 
 ```bash
 uv tool upgrade oaw
-python scripts/check_cli_parity.py
+uv run python scripts/check_cli_parity.py
 ```
 
 If `uv tool upgrade oaw` does not rebuild the local checkout source, use
@@ -49,22 +49,16 @@ Completion covers commands and option names. It does not complete vault IDs or
 project aliases; dynamic completion for those is tracked separately as
 `OAW-TSK-add-dynamic-completion-for-oaw-ids-and-project-aliases`.
 
-### Migration note: argparse → Typer
+### CLI contract
 
-The CLI moved from `argparse` to Typer. Commands, options, exit codes (0 success,
-1 domain error, 2 usage error), stdout contract lines, and error phrasing for
-domain errors are unchanged. Three usage-error behaviors deliberately differ:
+The Typer frontend owns the command tree and its native contract tests. They pin
+the complete command-path set, the exit classes (0 success, 1 domain error, 2
+usage error), stdout/stderr routing, accepted choice values, option conflicts,
+and no-write behavior when validation fails.
 
-- **Usage-error wording.** Click phrases usage errors in its own words and prints
-  its own usage block. The exit code (2) and the set of accepted values are
-  unchanged; only the prose differs.
-- **No option abbreviations.** argparse expanded unambiguous prefixes
-  (`--verb` → `--verbose`); Typer requires full option names. An abbreviation now
-  exits 2 instead of running.
-- **`--help` on an already-invalid command line.** argparse validated
-  left-to-right and errored before reaching `--help` (so `task create --priority 9
-  --help` exited 2); Typer honors help eagerly and prints help with exit 0. This
-  only affects command lines that were already going to fail.
+`scripts/check_cli_parity.py` is a separate maintenance check: it compares the
+installed snapshot with this checkout's help surfaces and source bytes. It does
+not compare against a historical frontend or filesystem golden.
 
 ## Development checks
 
@@ -419,7 +413,8 @@ display text.
 
 Use installed `oaw ...` commands for operational vault writes such as task lifecycle updates, board moves, and session snapshots. Reserve `uv run python bin/oaw ...` for development checks against this checkout, preferably with temp vaults. This keeps approval prompts scoped to stable commands instead of broad interpreter entrypoints; see `AGT-FDBK-allow-listed-skill-scripts`.
 
-After refreshing the uv-managed installation, run `python scripts/check_cli_parity.py`.
+After refreshing the uv-managed installation, run
+`uv run python scripts/check_cli_parity.py`.
 It recursively compares every checkout and installed `--help` surface, including
 nested commands and options, and fails with a diff when the installed artifact is stale.
 

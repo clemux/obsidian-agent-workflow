@@ -4,9 +4,52 @@ from pathlib import Path
 
 import pytest
 import typer
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from oaw import cli
+
+EXPECTED_COMMAND_PATHS = {
+    (),
+    ("resolve",),
+    ("list",),
+    ("project",),
+    ("project", "create"),
+    ("research",),
+    ("research", "scaffold"),
+    ("research", "start"),
+    ("task",),
+    ("task", "backlog"),
+    ("task", "promote"),
+    ("task", "start"),
+    ("task", "complete"),
+    ("task", "note"),
+    ("task", "create"),
+    ("note",),
+    ("note", "session"),
+    ("note", "observe"),
+    ("board",),
+    ("board", "add"),
+    ("board", "move"),
+    ("board", "done"),
+    ("board", "ensure-backlog"),
+    ("ingest",),
+    ("ingest", "safe-export"),
+    ("link",),
+    ("link", "check"),
+    ("link", "list"),
+    ("link", "ensure"),
+    ("link", "ensure-bidirectional"),
+    ("link", "lint"),
+    ("export",),
+    ("export", "note"),
+    ("export", "validate"),
+    ("session",),
+    ("session", "lookup"),
+    ("session", "snapshot"),
+    ("retro",),
+    ("retro", "create"),
+}
 
 
 def write(path: Path, text: str) -> None:
@@ -32,6 +75,45 @@ def imported_targets(source: str) -> set[str]:
 def is_forbidden_cli_dependency(target: str) -> bool:
     normalized = target.lstrip(".")
     return normalized == "argparse" or normalized.startswith("argparse.")
+
+
+def command_paths() -> set[tuple[str, ...]]:
+    paths: set[tuple[str, ...]] = {()}
+
+    def visit(command: object, parent: tuple[str, ...]) -> None:
+        for name, child in getattr(command, "commands", {}).items():
+            path = (*parent, name)
+            paths.add(path)
+            visit(child, path)
+
+    visit(get_command(cli.app), ())
+    return paths
+
+
+def write_project_index(vault: Path) -> None:
+    write(
+        vault / "Projects/Parity/Index.md",
+        """---
+type: project
+id: PRT-index
+aliases:
+  - PRT-index
+---
+
+# Parity
+""",
+    )
+
+
+def vault_state(vault: Path) -> dict[str, bytes | None]:
+    return {
+        path.relative_to(vault).as_posix(): path.read_bytes() if path.is_file() else None
+        for path in sorted(vault.rglob("*"))
+    }
+
+
+def test_typer_command_tree_matches_declared_contract() -> None:
+    assert command_paths() == EXPECTED_COMMAND_PATHS
 
 
 def test_typer_frontend_has_no_argparse_or_cli_dependency() -> None:
@@ -167,7 +249,7 @@ aliases:
         ),
     ],
 )
-def test_typer_conflicts_preserve_argparse_diagnostics(
+def test_typer_conflicts_preserve_usage_diagnostics(
     arguments: list[str],
     error_line: str,
 ) -> None:
@@ -199,10 +281,86 @@ def test_typer_task_create_validates_every_choice_occurrence(
 
 
 @pytest.mark.parametrize("arguments", [[], ["resolve"], ["unknown-command"]])
-def test_typer_ordinary_usage_errors_preserve_argparse_diagnostics(
+def test_typer_ordinary_usage_errors_preserve_usage_diagnostics(
     arguments: list[str],
 ) -> None:
     result = CliRunner().invoke(cli.app, arguments, env={"COLUMNS": "80"})
 
     assert result.exit_code == 2
     assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("--status", "backlog"),
+        ("--status", "todo"),
+        ("--priority", "1"),
+        ("--priority", "2"),
+        ("--priority", "3"),
+        ("--effort", "S"),
+        ("--effort", "M"),
+        ("--effort", "L"),
+    ],
+)
+def test_typer_task_create_accepts_each_declared_value(
+    option: str,
+    value: str,
+    tmp_path: Path,
+) -> None:
+    write_project_index(tmp_path)
+    title = f"Accepted {option.removeprefix('--')} {value}"
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "task",
+            "create",
+            "--project",
+            "Parity",
+            "--title",
+            title,
+            option,
+            value,
+            "--allow-missing-session-id",
+        ],
+        env={"OAW_VAULT": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stderr == ""
+    assert f"Status: {'backlog' if option != '--status' else value}" in result.stdout
+
+
+def test_typer_domain_error_uses_stderr_and_exit_class_one(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        ["resolve", "--path", "missing"],
+        env={"OAW_VAULT": str(tmp_path)},
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith("oaw: no note with frontmatter id or alias")
+
+
+def test_typer_domain_error_does_not_write_the_vault(tmp_path: Path) -> None:
+    write_project_index(tmp_path)
+    before = vault_state(tmp_path)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "task",
+            "start",
+            "PRT-TSK-missing",
+            "--note",
+            "Must not write",
+            "--allow-missing-session-id",
+        ],
+        env={"OAW_VAULT": str(tmp_path)},
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "no note with frontmatter id or alias" in result.stderr
+    assert vault_state(tmp_path) == before
