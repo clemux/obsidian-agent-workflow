@@ -3,7 +3,9 @@ name = "oaw"
 version = "0.1.0"
 description = "Resolve Obsidian IDs and update project task lifecycle state"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "typer>=0.26.8,<0.27",
+]
 
 [project.scripts]
 oaw = "oaw.cli:main"
