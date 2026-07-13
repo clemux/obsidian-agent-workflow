@@ -792,6 +792,45 @@ id: AGT-TSK-obsidian-task-ids
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("not unique", proc.stderr)
 
+    def test_resolve_prefilters_unrelated_frontmatter_before_parsing(self, monkeypatch):
+        for index in range(50):
+            write(
+                self.vault / f"Noise/{index}.md",
+                f"""---
+id: NOISE-{index}
+aliases:
+  - OTHER-{index}
+---
+
+# PERF-TARGET body decoy
+""",
+            )
+        write(
+            self.vault / "Target.md",
+            """---
+id: PERF-TARGET
+aliases:
+  - PERF-ALIAS
+---
+
+# Performance target
+""",
+        )
+        original = cli.parse_frontmatter
+        parsed: list[str] = []
+
+        def recording_parse(frontmatter: str):
+            parsed.append(frontmatter)
+            return original(frontmatter)
+
+        monkeypatch.setattr(cli, "parse_frontmatter", recording_parse)
+
+        match = cli.resolve_id("PERF-TARGET", self.vault)
+
+        self.assertEqual(match.title, "Performance target")
+        self.assertEqual(len(parsed), 1)
+        self.assertIn("id: PERF-TARGET", parsed[0])
+
     def test_task_start_updates_status_board_and_session(self):
         proc = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Started work.")
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -801,6 +840,25 @@ id: AGT-TSK-obsidian-task-ids
         self.assertIn("CODEX_THREAD_ID=test-thread", task)
         self.assertIn('session-ids:\n  - "test-thread"\n', task)
         self.assertLess(board.index("OAW-TSK-cli"), board.index("## Todo"))
+
+    def test_task_lifecycle_resolves_once_per_write(self, monkeypatch):
+        monkeypatch.setenv("OAW_VAULT", str(self.vault))
+        monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
+        original = cli.resolve_id
+        resolved: list[str] = []
+
+        def recording_resolve(raw_id: str, root: Path):
+            resolved.append(raw_id)
+            return original(raw_id, root)
+
+        monkeypatch.setattr(cli, "resolve_id", recording_resolve)
+
+        cli.update_task("OAW-TSK-cli", "active", "Started once.", None, False)
+        self.assertEqual(resolved, ["OAW-TSK-cli"])
+
+        resolved.clear()
+        cli.append_task_note("OAW-TSK-cli", "Noted once.", None, False)
+        self.assertEqual(resolved, ["OAW-TSK-cli"])
 
     def test_complete_requires_checks(self):
         proc = self.run_oaw("task", "complete", "OAW-TSK-cli", "--note", "Done.")

@@ -573,25 +573,49 @@ def iter_markdown(root: Path):
     skip = {".git", ".obsidian", ".trash", "node_modules", ".venv", "__pycache__"}
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in skip]
+        directory = Path(dirpath)
         for filename in filenames:
             if filename.endswith(".md"):
-                yield Path(dirpath) / filename
+                yield directory / filename
+
+
+def read_matching_note(
+    path: Path, target: str
+) -> tuple[str, str, dict[str, object], str] | None:
+    with path.open("r", encoding="utf-8") as handle:
+        if handle.readline().strip() != "---":
+            return None
+        lines: list[str] = []
+        for line in handle:
+            if line.strip() == "---":
+                break
+            lines.append(line)
+        else:
+            return None
+        fm = "".join(lines)
+        if target not in fm:
+            return None
+        data = parse_frontmatter(fm)
+        note_id = data.get("id")
+        aliases = data.get("aliases", [])
+        if isinstance(note_id, str) and note_id == target:
+            matched_by = "id"
+        elif isinstance(aliases, list) and target in aliases:
+            matched_by = "aliases"
+        else:
+            return None
+        return fm, handle.read(), data, matched_by
 
 
 def note_match(path: Path, root: Path, target: str) -> NoteMatch | None:
     try:
-        _, fm, body, data = read_note(path)
+        matched = read_matching_note(path, target)
     except UnicodeDecodeError:
         return None
-    note_id = data.get("id")
-    aliases = data.get("aliases", [])
-    matched_by = ""
-    if isinstance(note_id, str) and note_id == target:
-        matched_by = "id"
-    elif isinstance(aliases, list) and target in aliases:
-        matched_by = "aliases"
-    else:
+    if matched is None:
         return None
+    fm, body, data, matched_by = matched
+    note_id = data.get("id")
     rel = path.relative_to(root).as_posix()
     return NoteMatch(
         path=path,
@@ -1101,15 +1125,14 @@ def update_task(
     text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
     match.path.write_text(text, encoding="utf-8")
-    refreshed = resolve_id(raw_id, root)
     moved = move_board_card(
-        project_root_for_task(refreshed.path, root),
-        refreshed.path,
-        refreshed.title,
-        refreshed.note_id,
+        project_root_for_task(match.path, root),
+        match.path,
+        match.title,
+        match.note_id,
         status,
     )
-    print(f"Updated: {refreshed.relpath}")
+    print(f"Updated: {match.relpath}")
     print(f"Status: {status}")
     print(f"Board: {'updated' if moved else 'not found'}")
 
@@ -1124,9 +1147,8 @@ def append_task_note(raw_id: str, note: str, checks: str | None, allow_missing: 
     text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
     match.path.write_text(text, encoding="utf-8")
-    refreshed = resolve_id(raw_id, root)
-    status = refreshed.frontmatter.get("status", "")
-    print(f"Updated: {refreshed.relpath}")
+    status = match.frontmatter.get("status", "")
+    print(f"Updated: {match.relpath}")
     print(f"Status: {status}")
     print("Board: unchanged")
 
@@ -1296,6 +1318,38 @@ def note_status(data: dict[str, object]) -> str:
     return str(value) if value is not None else ""
 
 
+def read_project_note_row(
+    path: Path,
+    note_type: str,
+    status: str | None,
+    include_archived: bool,
+) -> tuple[str, str, str] | None:
+    with path.open("r", encoding="utf-8") as handle:
+        if handle.readline().strip() != "---":
+            return None
+        lines: list[str] = []
+        for line in handle:
+            if line.strip() == "---":
+                break
+            lines.append(line)
+        else:
+            return None
+        data = parse_frontmatter("".join(lines))
+        if not note_type_matches(data, note_type):
+            return None
+        current_status = note_status(data)
+        if status and current_status != status:
+            return None
+        if not status and current_status == "archived" and not include_archived:
+            return None
+        title = path.stem
+        for line in handle:
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+        return str(data.get("id", "")), current_status, title
+
+
 def project_note_rows(
     project_root: Path,
     root: Path,
@@ -1304,18 +1358,13 @@ def project_note_rows(
     include_archived: bool,
 ) -> list[tuple[str, str, str, str]]:
     rows = []
-    for path in sorted(project_root.rglob("*.md")):
-        _, _, body, data = read_note(path)
-        if not note_type_matches(data, note_type):
+    root_prefix_length = len(root.as_posix().rstrip("/") + "/")
+    for path in sorted(project_root.rglob("*.md"), key=os.fspath):
+        row = read_project_note_row(path, note_type, status, include_archived)
+        if row is None:
             continue
-        current_status = note_status(data)
-        if status and current_status != status:
-            continue
-        if not status and current_status == "archived" and not include_archived:
-            continue
-        note_id = data.get("id", "")
-        title = title_from_body(path, body)
-        rows.append((str(note_id), current_status, title, path.relative_to(root).as_posix()))
+        relative_path = path.as_posix()[root_prefix_length:]
+        rows.append((*row, relative_path))
     return rows
 
 
