@@ -40,6 +40,8 @@ src/oaw/
     exports.py       # safe outbound export + validate
     ingest.py        # safe-export ingestion
     retro.py         # retro create, note observe/session intake
+    feedback.py      # durable agent-feedback creation
+    tags.py          # strict creation-only tag serialization
     cli.py           # Typer composition root + dispatch, thin
 bin/oaw              # shim for checkout dogfooding: imports src/oaw, calls cli.main
 tests/

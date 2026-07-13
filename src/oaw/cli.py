@@ -19,6 +19,7 @@ from typer.main import get_command
 from .boards import ensure_project_backlog_column, next_steps_card, update_next_steps_board
 from .errors import OawError
 from .exports import validate_export_bundle, write_export_bundle
+from .feedback import FEEDBACK_TYPES, FeedbackType, create_feedback, read_feedback_body
 from .ingest import SAFE_EXPORT_DESTINATION, default_ingestion_root, safe_export_ingest
 from .lifecycle import (
     PROJECT_INDEX_TEMPLATE,
@@ -46,7 +47,7 @@ from .snapshot import session_snapshot
 
 USAGE_BY_COMMAND = {
     "oaw": "usage: oaw [-h]\n"
-    "           {resolve,list,project,research,task,note,board,ingest,link,export,session,retro} ...\n",
+    "           {resolve,list,project,research,task,note,board,ingest,link,export,session,retro,feedback} ...\n",
     "oaw resolve": "usage: oaw resolve [-h] [--full] [--path] [--meta] [--outline] [--json] id\n",
     "oaw list": "usage: oaw list [-h] --project PROJECT [--type TYPE] [--status STATUS]\n"
     "                [--include-archived]\n",
@@ -128,6 +129,11 @@ USAGE_BY_COMMAND = {
     "oaw retro": "usage: oaw retro [-h] {create} ...\n",
     "oaw retro create": "usage: oaw retro create [-h] --title TITLE [--summary SUMMARY] [--date DATE]\n"
     "                        [--id ID] [--force] [--allow-missing-session-id]\n",
+    "oaw feedback": "usage: oaw feedback [-h] {create} ...\n",
+    "oaw feedback create": "usage: oaw feedback create [-h] --title TITLE --type {pain,verified,idea,bug}\n"
+    "                           --scope SCOPE [--body BODY | --body-file BODY_FILE]\n"
+    "                           [--command COMMAND] [--tag TAG] [--id ID] [--date DATE]\n"
+    "                           [--allow-missing-session-id]\n",
 }
 
 SUBCOMMAND_DESTINATIONS = {
@@ -142,6 +148,7 @@ SUBCOMMAND_DESTINATIONS = {
     "oaw export": "export_command",
     "oaw session": "session_command",
     "oaw retro": "retro_command",
+    "oaw feedback": "feedback_command",
 }
 
 ARGUMENT_NAMES = {
@@ -152,6 +159,7 @@ ARGPARSE_CHOICES = {
     "status": ("backlog", "todo"),
     "priority": ("1", "2", "3"),
     "effort": ("S", "M", "L"),
+    "feedback_type": FEEDBACK_TYPES,
 }
 
 NEGATIVE_NUMBER = re.compile(r"-(?:\d+(?:\.\d*)?|\.\d+)$")
@@ -310,6 +318,7 @@ link_app = _app("Inspect and maintain durable wikilinks")
 export_app = _app("Safe outbound note export utilities")
 session_app = _app("Session artifact utilities")
 retro_app = _app("Retrospective note utilities")
+feedback_app = _app("Agent feedback note utilities")
 
 
 class TaskStatus(str, Enum):
@@ -333,6 +342,7 @@ app.add_typer(link_app, name="link")
 app.add_typer(export_app, name="export")
 app.add_typer(session_app, name="session")
 app.add_typer(retro_app, name="retro")
+app.add_typer(feedback_app, name="feedback")
 
 
 def _run(action: Callable[[], None]) -> None:
@@ -786,6 +796,43 @@ def retro_create(
     _run(
         lambda: create_retrospective(
             vault_root(), title, summary, date, requested_id, force, allow_missing_session_id
+        )
+    )
+
+
+@feedback_app.command("create", help="create a durable agent-feedback note")
+def feedback_create(
+    title: Annotated[str, typer.Option("--title", help="feedback title")],
+    feedback_type: Annotated[
+        FeedbackType, typer.Option("--type", help="pain, verified, idea, or bug")
+    ],
+    scope: Annotated[str, typer.Option("--scope", help="affected workflow or surface")],
+    body: Annotated[str | None, typer.Option("--body", help="feedback Markdown body")] = None,
+    body_file: Annotated[
+        str | None, typer.Option("--body-file", help="UTF-8 body file; '-' reads stdin")
+    ] = None,
+    command: Annotated[str | None, typer.Option("--command", help="related command")] = None,
+    tag: Annotated[list[str] | None, typer.Option("--tag", help="extra tag; repeatable")] = None,
+    requested_id: Annotated[str | None, typer.Option("--id", help="override feedback ID")] = None,
+    date: Annotated[str | None, typer.Option("--date", help="creation date (YYYY-MM-DD)")] = None,
+    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
+) -> None:
+    if body is not None and body_file is not None:
+        _usage_error("argument --body-file: not allowed with argument --body")
+    if body is None and body_file is None:
+        _usage_error("the following arguments are required: one of --body, --body-file")
+    _run(
+        lambda: create_feedback(
+            vault_root(),
+            title,
+            feedback_type.value,
+            scope,
+            read_feedback_body(body, body_file, sys.stdin),
+            command,
+            tag,
+            requested_id,
+            date,
+            allow_missing_session_id,
         )
     )
 

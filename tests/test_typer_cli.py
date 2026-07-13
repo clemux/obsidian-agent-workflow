@@ -49,6 +49,8 @@ EXPECTED_COMMAND_PATHS = {
     ("session", "snapshot"),
     ("retro",),
     ("retro", "create"),
+    ("feedback",),
+    ("feedback", "create"),
 }
 
 
@@ -191,6 +193,32 @@ def test_typer_help_preserves_command_path_parsing_order(
 
     assert result.exit_code == exit_code
     assert result.output.startswith(output_prefix)
+
+
+def test_typer_feedback_help_and_type_validation_use_native_contract() -> None:
+    help_result = CliRunner().invoke(cli.app, ["feedback", "create", "--help"])
+    assert help_result.exit_code == 0, help_result.stderr
+    assert "Usage: oaw feedback create" in help_result.stdout
+    assert "--body-file" in help_result.stdout
+
+    invalid_type = CliRunner().invoke(
+        cli.app,
+        [
+            "feedback",
+            "create",
+            "--title",
+            "Invalid type",
+            "--type",
+            "unknown",
+            "--scope",
+            "tests",
+            "--body",
+            "body",
+        ],
+    )
+    assert invalid_type.exit_code == 2
+    assert invalid_type.stdout == ""
+    assert "argument --type: invalid choice: 'unknown'" in invalid_type.stderr
 
 
 def test_temporary_typer_frontend_resolves_with_shared_service(tmp_path: Path) -> None:

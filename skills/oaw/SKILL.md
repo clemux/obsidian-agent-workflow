@@ -241,6 +241,30 @@ provides Drafts, By provider, Sensitive, and Metadata audit views. `Projects/Ses
 is a separate software project whose Base tracks project tasks and research; it is not the historical
 agent-retrospective review surface.
 
+## Agent feedback
+
+Create one durable feedback note for a concrete friction, verified behavior,
+idea, or bug instead of leaving it only in a session transcript:
+
+```bash
+oaw feedback create \
+  --title "Body-file validation is unclear" \
+  --type pain \
+  --scope "oaw feedback create" \
+  --body "The command should say which body source failed." \
+  --command "oaw feedback create" \
+  --tag cli
+```
+
+`--title`, `--type` (`pain`, `verified`, `idea`, or `bug`), `--scope`, and
+exactly one body source are mandatory: use `--body` or `--body-file`; pass
+`--body-file -` to read standard input. The note path is
+`Agents/Feedback/<date> <title>.md` and its default ID/alias is
+`AGT-FDBK-<title-slug>`. `--date` and `--id` override those derived values.
+Repeat `--tag` for safe, deduplicated extra tags. The command refuses duplicate
+IDs and paths, never overwrites feedback, and requires real session provenance
+unless `--allow-missing-session-id` is explicitly accepted.
+
 ## Safe outbound exports
 
 Use `oaw export note` only for notes that have explicit frontmatter approval:

@@ -6,7 +6,9 @@ import os
 import re
 import tempfile
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
+from typing import TextIO
 
 from .errors import OawError
 
@@ -74,6 +76,75 @@ class VaultTransaction:
         finally:
             for temp in temps:
                 temp.unlink(missing_ok=True)
+
+
+def write_new_note_atomic(
+    path: Path,
+    text: str,
+    *,
+    link: Callable[[str, str], None] = os.link,
+    write: Callable[[TextIO, str], None] | None = None,
+    flush: Callable[[TextIO], None] | None = None,
+    fsync: Callable[[int], None] = os.fsync,
+    mkdir: Callable[[Path], None] | None = None,
+) -> None:
+    """Atomically create one new note without ever replacing an existing path.
+
+    The temporary file is linked into place, rather than replaced, so the
+    filesystem rejects a racing creator with ``FileExistsError``. Any directory
+    made solely for a failed creation is removed when still empty.
+    """
+    missing_directories: list[Path] = []
+    directory = path.parent
+    while not directory.exists():
+        missing_directories.append(directory)
+        directory = directory.parent
+    temp: Path | None = None
+    published = False
+    created_directories: list[Path] = []
+    try:
+        for directory in reversed(missing_directories):
+            try:
+                if mkdir is None:
+                    directory.mkdir()
+                else:
+                    mkdir(directory)
+            except FileExistsError:
+                if not directory.is_dir():
+                    raise
+            else:
+                created_directories.append(directory)
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, delete=False
+        ) as handle:
+            temp = Path(handle.name)
+            if write is None:
+                handle.write(text)
+            else:
+                write(handle, text)
+            if flush is None:
+                handle.flush()
+            else:
+                flush(handle)
+            fsync(handle.fileno())
+        link(str(temp), str(path))
+        published = True
+        temp.unlink()
+        temp = None
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            fsync(fd)
+        finally:
+            os.close(fd)
+    except Exception:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
+        if published:
+            path.unlink(missing_ok=True)
+        for directory in reversed(created_directories):
+            with suppress(OSError):
+                directory.rmdir()
+        raise
 
 
 def heading_level(line: str) -> int | None:

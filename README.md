@@ -93,6 +93,7 @@ The default vault path is machine-specific legacy debt; override with `OAW_VAULT
   - [Session lookup](#session-lookup)
   - [Session snapshots](#session-snapshots)
 - [Notes and retrospectives](#notes-and-retrospectives)
+- [Agent feedback](#agent-feedback)
 - [Import and export](#import-and-export)
   - [Safe export ingestion](#safe-export-ingestion)
   - [Outbound export bundles](#outbound-export-bundles)
@@ -111,6 +112,7 @@ The default vault path is machine-specific legacy debt; override with `OAW_VAULT
 | [`oaw board`](#boards) | Add, move, and complete kanban cards on project boards |
 | [`oaw session`](#sessions) | Look up a session ID across notes and artifacts; snapshot session artifacts |
 | [`oaw note` / `oaw retro`](#notes-and-retrospectives) | Append session traces or observations; create retrospective drafts |
+| [`oaw feedback`](#agent-feedback) | Create dated, durable agent-feedback notes |
 | [`oaw ingest` / `oaw export`](#import-and-export) | Ingest marked-safe handoff files; export marked-safe note bundles |
 | [`oaw link`](#link-hygiene) | Check, add, and lint durable wikilinks between notes |
 
@@ -341,6 +343,30 @@ oaw retro create \
 `note observe --section` defaults to `Observations`. Retrospective creation also
 accepts `--date` and `--id` overrides; `--force` is required to replace an
 existing generated path.
+
+## Agent feedback
+
+Use `oaw feedback create` to retain one concrete friction, verified behavior,
+idea, or bug as a dated note under `Agents/Feedback/`:
+
+```bash
+oaw feedback create \
+  --title "Body-file validation is unclear" \
+  --type pain \
+  --scope "oaw feedback create" \
+  --body "The command should say which body source failed." \
+  --command "oaw feedback create" \
+  --tag cli
+```
+
+`--title`, `--type` (`pain`, `verified`, `idea`, or `bug`), `--scope`, and
+exactly one of `--body` or `--body-file` are required. `--body-file -` reads
+standard input. The command derives `AGT-FDBK-<slug>` from the title and writes
+`Agents/Feedback/<date> <title>.md`; use `--id` or `--date` to override those
+derived values. Extra `--tag` values are validated, ordered, deduplicated, and
+serialized as quoted YAML strings. It refuses duplicate IDs or paths and never
+overwrites an existing note. Feedback creation records a real harness session
+ID unless `--allow-missing-session-id` is explicit.
 
 ## Import and export
 
