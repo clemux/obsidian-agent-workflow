@@ -316,7 +316,13 @@ aliases:
             "--goal",
             "Keep useful notes.",
             "--allow-missing-session-id",
-            env={"CODEX_THREAD_ID": ""},
+            env={
+                "CODEX_THREAD_ID": "",
+                "CLAUDE_SESSION_ID": "",
+                "CLAUDE_CODE_SESSION_ID": "",
+                "OPENCODE_SESSION_ID": "",
+                "GEMINI_SESSION_ID": "",
+            },
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         note = (self.vault / "Projects/Notebook/Index.md").read_text(encoding="utf-8")
