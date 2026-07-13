@@ -1,3 +1,5 @@
+import ast
+import inspect
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,50 @@ from oaw import cli, typer_cli
 def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def test_typer_frontend_has_no_argparse_or_cli_dependency() -> None:
+    tree = ast.parse(inspect.getsource(typer_cli))
+    imported_modules = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    imported_from = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+
+    assert "argparse" not in imported_modules
+    assert "oaw.cli" not in imported_modules
+    assert "cli" not in imported_modules
+    assert "oaw.cli" not in imported_from
+    assert "cli" not in imported_from
+
+
+@pytest.mark.parametrize("help_flag", ["-h", "--help"])
+def test_typer_help_wins_over_an_unknown_option(help_flag: str) -> None:
+    result = CliRunner().invoke(typer_cli.app, ["resolve", "--bogus", help_flag])
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stderr == ""
+    assert result.stdout.startswith("Usage: oaw resolve ")
+
+
+@pytest.mark.parametrize(
+    ("arguments", "exit_code", "output_prefix"),
+    [
+        (["task", "bogus", "--help"], 2, "usage: oaw task "),
+        (["unknown-command", "--help"], 2, "usage: oaw "),
+        (["--help", "task"], 0, "Usage: oaw "),
+        (["task", "--help", "create"], 0, "Usage: oaw task "),
+    ],
+)
+def test_typer_help_preserves_command_path_parsing_order(
+    arguments: list[str], exit_code: int, output_prefix: str
+) -> None:
+    result = CliRunner().invoke(typer_cli.app, arguments)
+
+    assert result.exit_code == exit_code
+    assert result.output.startswith(output_prefix)
 
 
 def test_temporary_typer_frontend_resolves_with_shared_service(tmp_path: Path) -> None:

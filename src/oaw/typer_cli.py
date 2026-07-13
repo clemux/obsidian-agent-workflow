@@ -1,8 +1,4 @@
-"""Temporary Typer frontend used to validate the CLI dependency boundary.
-
-This module is intentionally not the installed entry point. The argparse adapter
-in :mod:`oaw.cli` remains authoritative until the Typer migration is complete.
-"""
+"""Self-contained Typer composition for the OAW CLI migration."""
 
 from __future__ import annotations
 
@@ -13,6 +9,8 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
+from typer._click import exceptions as click_exceptions
+from typer._click import globals as click_globals
 from typer.core import TyperGroup
 
 from .boards import ensure_project_backlog_column, next_steps_card, update_next_steps_board
@@ -43,9 +41,178 @@ from .sessions import (
 )
 from .snapshot import session_snapshot
 
+USAGE_BY_COMMAND = {
+    "oaw": "usage: oaw [-h]\n"
+    "           {resolve,list,project,research,task,note,board,ingest,link,export,session,retro} ...\n",
+    "oaw resolve": "usage: oaw resolve [-h] [--full] [--path] [--meta] [--outline] [--json] id\n",
+    "oaw list": "usage: oaw list [-h] --project PROJECT [--type TYPE] [--status STATUS]\n"
+    "                [--include-archived]\n",
+    "oaw project": "usage: oaw project [-h] {create} ...\n",
+    "oaw project create": "usage: oaw project create [-h] --name NAME --alias ALIAS --goal GOAL\n"
+    "                          [--repo REPO] [--tag TAG] [--template TEMPLATE]\n"
+    "                          [--allow-missing-session-id]\n",
+    "oaw research": "usage: oaw research [-h] {scaffold,start} ...\n",
+    "oaw research scaffold": "usage: oaw research scaffold [-h] --project PROJECT --track TRACK\n"
+    "                             --title TITLE [--date DATE] [--template TEMPLATE]\n"
+    "                             [--force]\n",
+    "oaw research start": "usage: oaw research start [-h] --project PROJECT --track TRACK --source SOURCE\n"
+    "                          --url URL\n",
+    "oaw task": "usage: oaw task [-h] {backlog,promote,start,complete,note,create} ...\n",
+    "oaw task backlog": "usage: oaw task backlog [-h] --note NOTE [--checks CHECKS]\n"
+    "                        [--allow-missing-session-id]\n"
+    "                        id\n",
+    "oaw task promote": "usage: oaw task promote [-h] --note NOTE [--checks CHECKS]\n"
+    "                        [--allow-missing-session-id]\n"
+    "                        id\n",
+    "oaw task start": "usage: oaw task start [-h] --note NOTE [--checks CHECKS]\n"
+    "                      [--allow-missing-session-id]\n"
+    "                      id\n",
+    "oaw task complete": "usage: oaw task complete [-h] --note NOTE [--checks CHECKS]\n"
+    "                         [--allow-missing-session-id]\n"
+    "                         id\n",
+    "oaw task note": "usage: oaw task note [-h] --note NOTE [--checks CHECKS]\n"
+    "                     [--allow-missing-session-id]\n"
+    "                     id\n",
+    "oaw task create": "usage: oaw task create [-h] [--project PROJECT] [--title TITLE]\n"
+    "                       [--from-capture FROM_CAPTURE] [--start] [--id ID]\n"
+    "                       [--status {backlog,todo}] [--priority {1,2,3}]\n"
+    "                       [--effort {S,M,L}] [--note NOTE] [--tag TAG]\n"
+    "                       [--allow-missing-session-id]\n",
+    "oaw note": "usage: oaw note [-h] {session,observe} ...\n",
+    "oaw note session": "usage: oaw note session [-h] --note NOTE [--checks CHECKS]\n"
+    "                        [--allow-missing-session-id]\n"
+    "                        id\n",
+    "oaw note observe": "usage: oaw note observe [-h] [--section SECTION] --title TITLE --body BODY id\n",
+    "oaw board": "usage: oaw board [-h] {add,move,done,ensure-backlog} ...\n",
+    "oaw board add": "usage: oaw board add [-h] --column COLUMN --link LINK --title TITLE --why WHY\n"
+    "                     --id ID\n",
+    "oaw board move": "usage: oaw board move [-h] --column COLUMN token\n",
+    "oaw board done": "usage: oaw board done [-h] token\n",
+    "oaw board ensure-backlog": "usage: oaw board ensure-backlog [-h] --project PROJECT\n",
+    "oaw ingest": "usage: oaw ingest [-h] {safe-export} ...\n",
+    "oaw ingest safe-export": "usage: oaw ingest safe-export [-h] [--ingestion-root INGESTION_ROOT]\n"
+    "                              [--destination DESTINATION] [--dry-run |\n"
+    "                              --write]\n",
+    "oaw link": "usage: oaw link [-h] {check,list,ensure,ensure-bidirectional,lint} ...\n",
+    "oaw link check": "usage: oaw link check [-h] left right\n",
+    "oaw link list": "usage: oaw link list [-h] note\n",
+    "oaw link ensure": "usage: oaw link ensure [-h] [--section SECTION] [--label LABEL] [--dry-run |\n"
+    "                       --write]\n"
+    "                       source target\n",
+    "oaw link ensure-bidirectional": "usage: oaw link ensure-bidirectional [-h] [--section SECTION] [--dry-run |\n"
+    "                                     --write]\n"
+    "                                     left right\n",
+    "oaw link lint": "usage: oaw link lint [-h]\n",
+    "oaw export": "usage: oaw export [-h] {note,validate} ...\n",
+    "oaw export note": "usage: oaw export note [-h] [--target TARGET] [--output-root OUTPUT_ROOT]\n"
+    "                       [--force]\n"
+    "                       id\n",
+    "oaw export validate": "usage: oaw export validate [-h] [--target TARGET] bundle\n",
+    "oaw session": "usage: oaw session [-h] {lookup,snapshot} ...\n",
+    "oaw session lookup": "usage: oaw session lookup [-h] [--verbose] [--codex-root CODEX_ROOT]\n"
+    "                          [--claude-root CLAUDE_ROOT]\n"
+    "                          session_id\n",
+    "oaw session snapshot": "usage: oaw session snapshot [-h] [--slug SLUG] [--date DATE] [--partial]\n"
+    "                            [--complete] [--codex-only]\n"
+    "                            [--codex-thread CODEX_THREAD]\n"
+    "                            [--codex-rollout CODEX_ROLLOUT]\n"
+    "                            [--claude-session CLAUDE_SESSION] [--grep GREP]\n"
+    "                            [--output-root OUTPUT_ROOT]\n"
+    "                            [--claude-root CLAUDE_ROOT]\n"
+    "                            [--codex-root CODEX_ROOT]\n"
+    "                            [--plugin-data-root PLUGIN_DATA_ROOT]\n"
+    "                            session_id\n",
+    "oaw retro": "usage: oaw retro [-h] {create} ...\n",
+    "oaw retro create": "usage: oaw retro create [-h] --title TITLE [--summary SUMMARY] [--date DATE]\n"
+    "                        [--id ID] [--force] [--allow-missing-session-id]\n",
+}
 
-class ArgparseCompatibleGroup(TyperGroup):
-    """Use the shipping parser as the temporary frontend's usage-error oracle."""
+SUBCOMMAND_DESTINATIONS = {
+    "oaw": "command",
+    "oaw project": "project_command",
+    "oaw research": "research_command",
+    "oaw task": "task_command",
+    "oaw note": "note_command",
+    "oaw board": "board_command",
+    "oaw ingest": "ingest_command",
+    "oaw link": "link_command",
+    "oaw export": "export_command",
+    "oaw session": "session_command",
+    "oaw retro": "retro_command",
+}
+
+ARGUMENT_NAMES = {
+    "note_id": "id",
+}
+
+ARGPARSE_CHOICES = {
+    "status": ("backlog", "todo"),
+    "priority": ("1", "2", "3"),
+    "effort": ("S", "M", "L"),
+}
+
+
+class StableTyperGroup(TyperGroup):
+    """Run Click parsing while retaining the established usage-error contract."""
+
+    def _help_args(self, raw_args: list[str]) -> list[str] | None:
+        """Route eager help to the deepest addressed Click command."""
+        command: Any = self
+        path: list[str] = []
+        for value in raw_args:
+            if value in {"-h", "--help"}:
+                return [*path, "--help"]
+            if not isinstance(command, TyperGroup) or value.startswith("-"):
+                continue
+            next_command = command.commands.get(value)
+            if next_command is None:
+                return None
+            path.append(value)
+            command = next_command
+        return None
+
+    @staticmethod
+    def _error_message(exc: click_exceptions.UsageError) -> str:
+        ctx = exc.ctx
+        command_path = ctx.command_path if ctx is not None else "oaw"
+        message = exc.format_message()
+        if isinstance(exc, click_exceptions.MissingParameter) and ctx is not None:
+            missing: list[str] = []
+            for param in ctx.command.params:
+                if param.name is None:
+                    continue
+                if not param.required or ctx.params.get(param.name) is not None:
+                    continue
+                missing.append(
+                    param.opts[0]
+                    if param.opts[0].startswith("--")
+                    else ARGUMENT_NAMES.get(param.name, param.name)
+                )
+            if missing:
+                return f"the following arguments are required: {', '.join(missing)}"
+        if isinstance(exc, click_exceptions.BadParameter) and exc.param is not None:
+            param = exc.param
+            if param.name in ARGPARSE_CHOICES:
+                choices = ARGPARSE_CHOICES[param.name]
+                if exc.message.startswith("'"):
+                    invalid = exc.message.split("'", maxsplit=2)[1]
+                else:
+                    invalid = exc.message.split(maxsplit=1)[0]
+                return (
+                    f"argument {param.opts[0]}: invalid choice: '{invalid}' "
+                    f"(choose from {', '.join(choices)})"
+                )
+        if message == "Missing command.":
+            return f"the following arguments are required: {SUBCOMMAND_DESTINATIONS[command_path]}"
+        if (
+            message.startswith("No such command ")
+            and ctx is not None
+            and isinstance(ctx.command, TyperGroup)
+        ):
+            invalid = message.removeprefix("No such command ").removesuffix(".")
+            choices = ", ".join(ctx.command.commands)
+            return f"argument {SUBCOMMAND_DESTINATIONS[command_path]}: invalid choice: {invalid} (choose from {choices})"
+        return message
 
     def main(
         self,
@@ -57,18 +224,30 @@ class ArgparseCompatibleGroup(TyperGroup):
         **extra: Any,
     ) -> Any:
         raw_args = list(args) if args is not None else sys.argv[1:]
-        if not any(value in {"-h", "--help"} for value in raw_args):
-            from .cli import build_parser
-
-            build_parser().parse_args(raw_args)
-        return super().main(
-            args=args,
-            prog_name=prog_name,
-            complete_var=complete_var,
-            standalone_mode=standalone_mode,
-            windows_expand_args=windows_expand_args,
-            **extra,
-        )
+        prog_name = "oaw"
+        if any(value in {"-h", "--help"} for value in raw_args):
+            help_args = self._help_args(raw_args)
+            if help_args is not None:
+                raw_args = help_args
+        try:
+            result = super().main(
+                args=raw_args,
+                prog_name=prog_name,
+                complete_var=complete_var,
+                standalone_mode=False,
+                windows_expand_args=windows_expand_args,
+                **extra,
+            )
+        except click_exceptions.UsageError as exc:
+            command_path = exc.ctx.command_path if exc.ctx is not None else (prog_name or "oaw")
+            typer.echo(USAGE_BY_COMMAND[command_path], err=True, nl=False)
+            typer.echo(f"{command_path}: error: {self._error_message(exc)}", err=True)
+            if standalone_mode:
+                raise SystemExit(2) from exc
+            return 2
+        if standalone_mode and isinstance(result, int):
+            raise SystemExit(result)
+        return result
 
 
 def _app(help_text: str) -> typer.Typer:
@@ -76,7 +255,10 @@ def _app(help_text: str) -> typer.Typer:
         add_completion=False,
         no_args_is_help=False,
         help=help_text,
-        cls=ArgparseCompatibleGroup,
+        cls=StableTyperGroup,
+        context_settings={"help_option_names": ["-h", "--help"]},
+        rich_markup_mode=None,
+        suggest_commands=False,
     )
 
 
@@ -123,6 +305,11 @@ def _run(action: Callable[[], None]) -> None:
     except OawError as exc:
         typer.echo(f"oaw: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+
+
+def _usage_error(message: str) -> None:
+    """Raise a Click usage error attached to the active Typer command."""
+    raise click_exceptions.UsageError(message, click_globals.get_current_context())
 
 
 @app.callback()
@@ -304,15 +491,20 @@ def task_create(
         bool, typer.Option("--start", help="create promoted task directly as active")
     ] = False,
     requested_id: Annotated[str | None, typer.Option("--id", help="override task ID")] = None,
-    status: Annotated[TaskStatus, typer.Option("--status", help="backlog or todo")] = (
-        TaskStatus.BACKLOG
-    ),
-    priority: Annotated[int | None, typer.Option("--priority", min=1, max=3)] = None,
-    effort: Annotated[TaskEffort | None, typer.Option("--effort", help="S, M, or L")] = None,
+    status: Annotated[
+        list[TaskStatus] | None, typer.Option("--status", help="backlog or todo")
+    ] = None,
+    priority: Annotated[list[int] | None, typer.Option("--priority", min=1, max=3)] = None,
+    effort: Annotated[list[TaskEffort] | None, typer.Option("--effort", help="S, M, or L")] = None,
     note: Annotated[str | None, typer.Option("--note", help="initial problem statement")] = None,
     tag: Annotated[list[str] | None, typer.Option("--tag", help="extra tag; repeatable")] = None,
     allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
 ) -> None:
+    if start and status is not None:
+        _usage_error("argument --status: not allowed with argument --start")
+    selected_status = status[-1] if status else TaskStatus.BACKLOG
+    selected_priority = priority[-1] if priority else None
+    selected_effort = effort[-1] if effort else None
     _run(
         lambda: create_task(
             vault_root(),
@@ -321,9 +513,9 @@ def task_create(
             from_capture,
             start,
             requested_id,
-            status.value,
-            priority,
-            effort.value if effort is not None else None,
+            selected_status.value,
+            selected_priority,
+            selected_effort.value if selected_effort is not None else None,
             note,
             tag,
             allow_missing_session_id,
@@ -404,6 +596,8 @@ def ingest_safe_export(
         bool, typer.Option("--write", help="ingest safe files and quarantine rejects")
     ] = False,
 ) -> None:
+    if dry_run and write:
+        _usage_error("argument --write: not allowed with argument --dry-run")
     _run(
         lambda: safe_export_ingest(
             vault_root(),
@@ -435,6 +629,8 @@ def link_ensure_command(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="preview only")] = False,
     write: Annotated[bool, typer.Option("--write", help="write the edit")] = False,
 ) -> None:
+    if dry_run and write:
+        _usage_error("argument --write: not allowed with argument --dry-run")
     _run(lambda: link_ensure(vault_root(), source, target, section, label, write))
 
 
@@ -446,6 +642,8 @@ def link_ensure_bidirectional_command(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="preview only")] = False,
     write: Annotated[bool, typer.Option("--write", help="write the edits")] = False,
 ) -> None:
+    if dry_run and write:
+        _usage_error("argument --write: not allowed with argument --dry-run")
     _run(lambda: link_ensure_bidirectional(vault_root(), left, right, section, write))
 
 
