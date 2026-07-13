@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 from oaw import cli, lifecycle, resolver
@@ -262,6 +264,27 @@ aliases:
             check=False,
         )
 
+    def test_cli_main_accepts_argv_and_returns_status_code(self, monkeypatch):
+        monkeypatch.setenv("OAW_VAULT", str(self.vault))
+        stdout = StringIO()
+
+        with redirect_stdout(stdout):
+            returncode = cli.main(["resolve", "--path", "OAW-TSK-cli"])
+
+        self.assertEqual(returncode, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            f"{self.vault / 'Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md'}\n",
+        )
+
+    def test_no_command_is_usage_error_on_stderr(self):
+        proc = self.run_oaw()
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(proc.stdout, "")
+        self.assertIn("usage: oaw", proc.stderr)
+        self.assertIn("the following arguments are required: command", proc.stderr)
+
     def test_resolve_obs_prefix_to_json(self):
         proc = self.run_oaw("resolve", "--json", "obs:AGT-TSK-obsidian-task-ids")
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -284,6 +307,8 @@ aliases:
             "~/dev/agent-skills:main",
             "--tag",
             "agent-tooling",
+            "--tag",
+            "workflow",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(
@@ -295,7 +320,7 @@ aliases:
         self.assertIn('repo: "~/dev/agent-skills:main"', note)
         self.assertIn('id: "AGT-index"', note)
         self.assertIn('  - "AGT-index"', note)
-        self.assertIn('  - "projects"\n  - "agent-tooling"', note)
+        self.assertIn('  - "projects"\n  - "agent-tooling"\n  - "workflow"', note)
         self.assertIn('  - "test-thread"', note)
         self.assertIn("# Agent Tooling", note)
         self.assertIn("## Goal\n\nMaintain shared cross-harness skills.", note)
@@ -2500,6 +2525,59 @@ aliases:
 
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("requires a full Codex thread UUID", proc.stderr)
+
+    def test_session_snapshot_rejects_partial_and_complete_on_stderr(self):
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            "019f48d7-39c2-7043-9c19-5a3565995898",
+            "--partial",
+            "--complete",
+        )
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(proc.stdout, "")
+        self.assertEqual(proc.stderr, "oaw: --partial and --complete are mutually exclusive\n")
+
+    def test_session_snapshot_accepts_repeated_codex_thread_options(self):
+        primary_thread = "019f48d7-39c2-7043-9c19-5a3565995898"
+        extra_threads = (
+            "019f48d8-1111-7222-8333-c26aa5d38893",
+            "019f48d9-2222-7333-8444-d37bb6e49904",
+        )
+        codex_root = self.vault / "harness/codex/sessions"
+        output_root = self.vault / "attachments"
+        rollouts = []
+        for index, thread_id in enumerate((primary_thread, *extra_threads)):
+            rollout = codex_root / f"rollout-{index}-{thread_id}.jsonl"
+            write(rollout, "{}\n")
+            rollouts.append(rollout)
+
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            primary_thread,
+            "--codex-only",
+            "--partial",
+            "--date",
+            "2026-07-13",
+            "--codex-thread",
+            extra_threads[0],
+            "--codex-thread",
+            extra_threads[1],
+            "--output-root",
+            str(output_root),
+            "--codex-root",
+            str(codex_root),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+            "--plugin-data-root",
+            str(self.vault / "missing-plugin"),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        snapshot = output_root / "2026-07-13-019f48d7"
+        self.assertTrue(all((snapshot / "codex" / rollout.name).exists() for rollout in rollouts))
 
     def test_session_snapshot_does_not_treat_bare_session_id_as_fork_parent(self):
         session_id = "019f3ed8-245c-79f3-8ec6-c1ba30e3646d"
