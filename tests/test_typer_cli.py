@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 import typer
 from typer.testing import CliRunner
 
@@ -35,3 +36,63 @@ aliases:
     assert isinstance(typer_cli.app, typer.Typer)
     assert result.exit_code == 0, result.output
     assert result.output == f"{tmp_path / 'Projects/Example/Tasks/Resolver CLI.md'}\n"
+
+
+@pytest.mark.parametrize(
+    ("arguments", "error_line"),
+    [
+        (
+            ["task", "create", "--start", "--status", "todo"],
+            "oaw task create: error: argument --status: not allowed with argument --start\n",
+        ),
+        (
+            ["ingest", "safe-export", "--dry-run", "--write"],
+            "oaw ingest safe-export: error: argument --write: "
+            "not allowed with argument --dry-run\n",
+        ),
+        (
+            ["link", "ensure", "left", "right", "--dry-run", "--write"],
+            "oaw link ensure: error: argument --write: not allowed with argument --dry-run\n",
+        ),
+        (
+            [
+                "link",
+                "ensure-bidirectional",
+                "left",
+                "right",
+                "--dry-run",
+                "--write",
+            ],
+            "oaw link ensure-bidirectional: error: argument --write: "
+            "not allowed with argument --dry-run\n",
+        ),
+    ],
+)
+def test_typer_conflicts_preserve_argparse_diagnostics(
+    arguments: list[str], error_line: str
+) -> None:
+    result = CliRunner().invoke(typer_cli.app, arguments)
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert result.stderr.startswith("usage: oaw ")
+    assert result.stderr.endswith(error_line)
+    assert "╭─ Error" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("arguments", "invalid_value"),
+    [
+        (["--status", "invalid", "--status", "backlog"], "invalid"),
+        (["--effort", "X", "--effort", "S"], "X"),
+        (["--priority", "9", "--priority", "1"], "9"),
+    ],
+)
+def test_typer_task_create_validates_every_choice_occurrence(
+    arguments: list[str], invalid_value: str
+) -> None:
+    result = CliRunner().invoke(typer_cli.app, ["task", "create", *arguments])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert invalid_value in result.stderr

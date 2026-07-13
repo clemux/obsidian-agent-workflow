@@ -7,6 +7,7 @@ in :mod:`oaw.cli` remains authoritative until the Typer migration is complete.
 from __future__ import annotations
 
 from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 from typing import Annotated
 
@@ -57,6 +58,43 @@ export_app = _app("Safe outbound note export utilities")
 session_app = _app("Session artifact utilities")
 retro_app = _app("Retrospective note utilities")
 
+ARGPARSE_CONFLICT_USAGE = {
+    "task create": (
+        "usage: oaw task create [-h] [--project PROJECT] [--title TITLE]",
+        "                       [--from-capture FROM_CAPTURE] [--start] [--id ID]",
+        "                       [--status {backlog,todo}] [--priority {1,2,3}]",
+        "                       [--effort {S,M,L}] [--note NOTE] [--tag TAG]",
+        "                       [--allow-missing-session-id]",
+    ),
+    "ingest safe-export": (
+        "usage: oaw ingest safe-export [-h] [--ingestion-root INGESTION_ROOT]",
+        "                              [--destination DESTINATION]",
+        "                              [--dry-run | --write]",
+    ),
+    "link ensure": (
+        "usage: oaw link ensure [-h] [--section SECTION] [--label LABEL]",
+        "                       [--dry-run | --write]",
+        "                       source target",
+    ),
+    "link ensure-bidirectional": (
+        "usage: oaw link ensure-bidirectional [-h] [--section SECTION]",
+        "                                     [--dry-run | --write]",
+        "                                     left right",
+    ),
+}
+
+
+class TaskStatus(str, Enum):
+    BACKLOG = "backlog"
+    TODO = "todo"
+
+
+class TaskEffort(str, Enum):
+    SMALL = "S"
+    MEDIUM = "M"
+    LARGE = "L"
+
+
 app.add_typer(project_app, name="project")
 app.add_typer(research_app, name="research")
 app.add_typer(task_app, name="task")
@@ -78,14 +116,22 @@ def _run(action: Callable[[], None]) -> None:
         raise typer.Exit(code=1) from exc
 
 
-def _usage_error(message: str) -> None:
-    """Raise a Click usage error, matching argparse's exit class for bad syntax."""
-    raise typer.BadParameter(message)
-
-
-def _option_was_given(context: typer.Context, name: str) -> bool:
-    source = context.get_parameter_source(name)
-    return source is not None and source.name == "COMMANDLINE"
+def _argument_conflict(
+    context: typer.Context,
+    command: str,
+    left: tuple[str, str],
+    right: tuple[str, str],
+) -> None:
+    """Emit argparse's stable mutual-exclusion diagnostic and usage exit."""
+    positions = {name: index for index, name in enumerate(context.params)}
+    later, earlier = (left, right) if positions[left[0]] > positions[right[0]] else (right, left)
+    for line in ARGPARSE_CONFLICT_USAGE[command]:
+        typer.echo(line, err=True)
+    typer.echo(
+        f"oaw {command}: error: argument {later[1]}: not allowed with argument {earlier[1]}",
+        err=True,
+    )
+    raise typer.Exit(code=2)
 
 
 @app.callback()
@@ -268,19 +314,26 @@ def task_create(
         bool, typer.Option("--start", help="create promoted task directly as active")
     ] = False,
     requested_id: Annotated[str | None, typer.Option("--id", help="override task ID")] = None,
-    status: Annotated[str, typer.Option("--status", help="backlog or todo")] = "backlog",
-    priority: Annotated[int | None, typer.Option("--priority", min=1, max=3)] = None,
-    effort: Annotated[str | None, typer.Option("--effort", help="S, M, or L")] = None,
+    status_values: Annotated[
+        list[TaskStatus] | None,
+        typer.Option("--status", help="backlog or todo"),
+    ] = None,
+    priority_values: Annotated[list[int] | None, typer.Option("--priority", min=1, max=3)] = None,
+    effort_values: Annotated[
+        list[TaskEffort] | None,
+        typer.Option("--effort", help="S, M, or L"),
+    ] = None,
     note: Annotated[str | None, typer.Option("--note", help="initial problem statement")] = None,
     tag: Annotated[list[str] | None, typer.Option("--tag", help="extra tag; repeatable")] = None,
     allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
 ) -> None:
-    if start and _option_was_given(context, "status"):
-        _usage_error("--start and --status are mutually exclusive")
-    if status not in {"backlog", "todo"}:
-        _usage_error("invalid value for --status: choose from backlog, todo")
-    if effort is not None and effort not in {"S", "M", "L"}:
-        _usage_error("invalid value for --effort: choose from S, M, L")
+    if start and status_values:
+        _argument_conflict(
+            context, "task create", ("start", "--start"), ("status_values", "--status")
+        )
+    status = status_values[-1].value if status_values else "backlog"
+    priority = priority_values[-1] if priority_values else None
+    effort = effort_values[-1].value if effort_values else None
     _run(
         lambda: create_task(
             vault_root(),
@@ -359,6 +412,7 @@ def board_ensure_backlog(project: Annotated[str, typer.Option("--project")]) -> 
 
 @ingest_app.command("safe-export", help="ingest frontmatter-approved Markdown files")
 def ingest_safe_export(
+    context: typer.Context,
     ingestion_root: Annotated[
         Path | None, typer.Option("--ingestion-root", help="handoff folder to scan")
     ] = None,
@@ -373,7 +427,9 @@ def ingest_safe_export(
     ] = False,
 ) -> None:
     if dry_run and write:
-        _usage_error("--dry-run and --write are mutually exclusive")
+        _argument_conflict(
+            context, "ingest safe-export", ("dry_run", "--dry-run"), ("write", "--write")
+        )
     _run(
         lambda: safe_export_ingest(
             vault_root(),
@@ -398,6 +454,7 @@ def link_list_command(note: Annotated[str, typer.Argument()]) -> None:
 
 @link_app.command("ensure", help="ensure one durable wikilink exists")
 def link_ensure_command(
+    context: typer.Context,
     source: Annotated[str, typer.Argument()],
     target: Annotated[str, typer.Argument()],
     section: Annotated[str, typer.Option("--section")] = "Related",
@@ -406,12 +463,13 @@ def link_ensure_command(
     write: Annotated[bool, typer.Option("--write", help="write the edit")] = False,
 ) -> None:
     if dry_run and write:
-        _usage_error("--dry-run and --write are mutually exclusive")
+        _argument_conflict(context, "link ensure", ("dry_run", "--dry-run"), ("write", "--write"))
     _run(lambda: link_ensure(vault_root(), source, target, section, label, write))
 
 
 @link_app.command("ensure-bidirectional", help="ensure durable links in both directions")
 def link_ensure_bidirectional_command(
+    context: typer.Context,
     left: Annotated[str, typer.Argument()],
     right: Annotated[str, typer.Argument()],
     section: Annotated[str, typer.Option("--section")] = "Related",
@@ -419,7 +477,12 @@ def link_ensure_bidirectional_command(
     write: Annotated[bool, typer.Option("--write", help="write the edits")] = False,
 ) -> None:
     if dry_run and write:
-        _usage_error("--dry-run and --write are mutually exclusive")
+        _argument_conflict(
+            context,
+            "link ensure-bidirectional",
+            ("dry_run", "--dry-run"),
+            ("write", "--write"),
+        )
     _run(lambda: link_ensure_bidirectional(vault_root(), left, right, section, write))
 
 
