@@ -16,12 +16,15 @@ class ColumnEngine:
     """Apply the common heading and card placement rules used by OAW boards."""
 
     @staticmethod
-    def find_column(lines: list[str], column: str) -> int | None:
+    def find_column(lines: list[str], column: str, *, last: bool = False) -> int | None:
+        found: int | None = None
         for index, line in enumerate(lines):
             heading = re.match(r"^##\s+(.+?)\s*$", line)
             if heading and heading.group(1) == column:
-                return index
-        return None
+                if not last:
+                    return index
+                found = index
+        return found
 
     @staticmethod
     def insert_before_ordered_column(
@@ -58,8 +61,9 @@ class ColumnEngine:
         card: str,
         *,
         ordered_columns: tuple[str, ...] | None = None,
+        target_last: bool = False,
     ) -> list[str]:
-        target_index = self.find_column(lines, column)
+        target_index = self.find_column(lines, column, last=target_last)
         updated = list(lines)
         if target_index is None:
             if ordered_columns is not None:
@@ -122,6 +126,7 @@ def render_project_board(
         project_column_for_status(status),
         card,
         ordered_columns=PROJECT_BOARD_COLUMNS,
+        target_last=True,
     )
     return "\n".join(rendered) + "\n"
 
