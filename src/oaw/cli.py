@@ -18,6 +18,13 @@ import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
+from .boards import (
+    ensure_project_backlog_column,
+    move_project_board_card,
+    next_steps_card,
+    update_next_steps_board,
+    updated_project_board_text,
+)
 from .errors import OawError
 from .frontmatter import (
     append_frontmatter_list_value,
@@ -38,9 +45,7 @@ from .resolver import (
 from .runs import VaultTransaction
 
 DEFAULT_VAULT = Path("/path/to/vault")
-NEXT_BOARD = Path("Projects/Next steps.md")
 RETRO_ATTACHMENTS = Path("Agents/Retrospectives/attachments")
-BOARD_COLUMN_ORDER = ["Backlog", "Todo", "Active", "Done"]
 SAFE_EXPORT_DESTINATION = Path("Imports/Safe export")
 SAFE_EXPORT_QUARANTINE = Path(".rejected")
 SAFE_EXPORT_TAG = "safe-export-personal"
@@ -768,216 +773,6 @@ def update_note_observation(raw_id: str, section: str, title: str, body: str) ->
     print(f"Section: {normalize_heading(section)}")
 
 
-def card_line(task_path: Path, project_root: Path, title: str, note_id: str | None) -> str:
-    rel_no_ext = task_path.relative_to(project_root).with_suffix("").as_posix()
-    suffix = f" - {note_id}" if note_id else ""
-    return f"- [ ] [[{rel_no_ext}|{title}]]{suffix}"
-
-
-def board_column_insert_at(lines: list[str], target_column: str) -> int:
-    target_order = BOARD_COLUMN_ORDER.index(target_column)
-    for idx, line in enumerate(lines):
-        heading = re.match(r"^##\s+(.+?)\s*$", line)
-        if (
-            heading
-            and heading.group(1) in BOARD_COLUMN_ORDER
-            and BOARD_COLUMN_ORDER.index(heading.group(1)) > target_order
-        ):
-            return idx
-    return len(lines)
-
-
-def move_board_card(
-    project_root: Path, task_path: Path, title: str, note_id: str | None, status: str
-) -> bool:
-    board = project_root / "Board.md"
-    if not board.exists():
-        return False
-    text = board.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    target_column = {
-        "backlog": "Backlog",
-        "todo": "Todo",
-        "active": "Active",
-        "done": "Done",
-    }[status]
-    identifiers = {task_path.stem}
-    if note_id:
-        identifiers.add(note_id)
-    new_lines: list[str] = []
-    existing_card = ""
-    target_heading_idx: int | None = None
-    in_column: str | None = None
-    for line in lines:
-        heading = re.match(r"^##\s+(.+?)\s*$", line)
-        if heading:
-            in_column = heading.group(1)
-            if in_column == target_column:
-                target_heading_idx = len(new_lines)
-            new_lines.append(line)
-            continue
-        if line.startswith("- [ ] ") and any(token in line for token in identifiers):
-            existing_card = line
-            continue
-        new_lines.append(line)
-    card = existing_card or card_line(task_path, project_root, title, note_id)
-    if target_heading_idx is None:
-        insert_at = board_column_insert_at(new_lines, target_column)
-        new_lines[insert_at:insert_at] = [f"## {target_column}", "", card, ""]
-    else:
-        insert_at = target_heading_idx + 1
-        while insert_at < len(new_lines) and new_lines[insert_at] == "":
-            insert_at += 1
-        new_lines.insert(insert_at, card)
-    board.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-    return True
-
-
-def updated_board_text(
-    project_root: Path, task_path: Path, title: str, note_id: str, status: str
-) -> tuple[Path | None, str | None]:
-    """Return a board update without writing it, for multi-file transactions."""
-    board = project_root / "Board.md"
-    if not board.exists():
-        return None, None
-    lines = board.read_text(encoding="utf-8").splitlines()
-    target_column = {
-        "backlog": "Backlog",
-        "todo": "Todo",
-        "active": "Active",
-        "done": "Done",
-    }[status]
-    identifiers = {task_path.stem, note_id}
-    new_lines: list[str] = []
-    existing_card = ""
-    target_heading_idx: int | None = None
-    for line in lines:
-        heading = re.match(r"^##\s+(.+?)\s*$", line)
-        if heading:
-            if heading.group(1) == target_column:
-                target_heading_idx = len(new_lines)
-            new_lines.append(line)
-            continue
-        if line.startswith("- [ ] ") and any(token in line for token in identifiers):
-            existing_card = line
-            continue
-        new_lines.append(line)
-    card = existing_card or card_line(task_path, project_root, title, note_id)
-    if target_heading_idx is None:
-        insert_at = board_column_insert_at(new_lines, target_column)
-        new_lines[insert_at:insert_at] = [f"## {target_column}", "", card, ""]
-    else:
-        insert_at = target_heading_idx + 1
-        while insert_at < len(new_lines) and new_lines[insert_at] == "":
-            insert_at += 1
-        new_lines.insert(insert_at, card)
-    return board, "\n".join(new_lines) + "\n"
-
-
-def board_path(root: Path) -> Path:
-    board = root / NEXT_BOARD
-    if not board.exists():
-        raise OawError(f"board not found: {board}")
-    return board
-
-
-def board_card(link: str, title: str, why: str, card_id: str) -> str:
-    clean_link = link.strip().removesuffix(".md")
-    clean_title = title.strip()
-    clean_why = why.strip()
-    clean_id = card_id.strip()
-    if not clean_link or not clean_title or not clean_why or not clean_id:
-        raise OawError("board add requires non-empty --link, --title, --why, and --id")
-    return f"- [ ] [[{clean_link}|{clean_title}]] - {clean_why} ({clean_id})"
-
-
-def find_board_column(lines: list[str], column: str) -> int | None:
-    for idx, line in enumerate(lines):
-        heading = re.match(r"^##\s+(.+?)\s*$", line)
-        if heading and heading.group(1) == column:
-            return idx
-    return None
-
-
-def remove_board_card(lines: list[str], token: str) -> tuple[list[str], str | None]:
-    kept: list[str] = []
-    found: str | None = None
-    for line in lines:
-        if re.match(r"^-\s+\[[ xX]\]\s+", line) and token in line:
-            if found is not None:
-                raise OawError(f"multiple board cards match '{token}'")
-            found = line
-            continue
-        kept.append(line)
-    return kept, found
-
-
-def insert_board_card(lines: list[str], column: str, card: str) -> list[str]:
-    target_idx = find_board_column(lines, column)
-    updated = list(lines)
-    if target_idx is None:
-        if updated and updated[-1] != "":
-            updated.append("")
-        updated.extend([f"## {column}", "", card])
-        return updated
-    insert_at = target_idx + 1
-    while insert_at < len(updated) and updated[insert_at] == "":
-        insert_at += 1
-    updated.insert(insert_at, card)
-    return updated
-
-
-def ensure_project_backlog_column(project: str) -> None:
-    root = vault_root()
-    project_root = root / "Projects" / project
-    if not project_root.exists():
-        raise OawError(f"project not found: {project_root}")
-    path = project_root / "Board.md"
-    if not path.exists():
-        raise OawError(f"project board not found: {path}")
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if find_board_column(lines, "Backlog") is not None:
-        print(f"Board: {path.relative_to(root).as_posix()}")
-        print("Backlog: present")
-        return
-    insert_at = board_column_insert_at(lines, "Backlog")
-    insertion = ["## Backlog", ""]
-    if insert_at > 0 and lines[insert_at - 1] != "":
-        insertion.insert(0, "")
-    lines[insert_at:insert_at] = insertion
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Board: {path.relative_to(root).as_posix()}")
-    print("Backlog: added")
-
-
-def update_next_board(
-    column: str,
-    token: str | None,
-    card: str | None,
-    done: bool,
-) -> None:
-    root = vault_root()
-    path = board_path(root)
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if token:
-        lines, existing = remove_board_card(lines, token)
-        if existing is None:
-            raise OawError(f"no board card matches '{token}'")
-        card = existing
-    if card is None:
-        raise OawError("missing board card")
-    if done:
-        card = re.sub(r"^-\s+\[[ xX]\]", "- [x]", card, count=1)
-    else:
-        card = re.sub(r"^-\s+\[[ xX]\]", "- [ ]", card, count=1)
-    lines = insert_board_card(lines, column, card)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Board: {NEXT_BOARD.as_posix()}")
-    print(f"Column: {column}")
-    if token:
-        print(f"Matched: {token}")
-
-
 def update_task(
     match: NoteMatch,
     root: Path,
@@ -996,7 +791,7 @@ def update_task(
     text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
     match.path.write_text(text, encoding="utf-8")
-    moved = move_board_card(
+    moved = move_project_board_card(
         project_root_for_task(match.path, root),
         match.path,
         match.title,
@@ -1159,7 +954,7 @@ def create_task(args: argparse.Namespace) -> None:
         )
         capture_text = append_frontmatter_list_value(capture_text, "destinations", task_link)
         capture_text = set_frontmatter_scalar(capture_text, "status", "triaged")
-        board, board_text = updated_board_text(project_root, path, title, note_id, status)
+        board, board_text = updated_project_board_text(project_root, path, title, note_id, status)
         transaction = VaultTransaction()
         transaction.stage(path, task_text)
         if board and board_text:
@@ -1170,7 +965,7 @@ def create_task(args: argparse.Namespace) -> None:
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(task_text, encoding="utf-8")
-        moved = move_board_card(project_root, path, title, note_id, status)
+        moved = move_project_board_card(project_root, path, title, note_id, status)
     print(f"Created: {relpath.as_posix()}")
     print(f"ID: {note_id}")
     print(f"Status: {status}")
@@ -3023,19 +2818,21 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 parser.error("unknown note command")
         elif args.command == "board":
+            root = vault_root()
             if args.board_command == "add":
-                update_next_board(
+                update_next_steps_board(
+                    root,
                     args.column,
                     None,
-                    board_card(args.link, args.title, args.why, args.id),
+                    next_steps_card(args.link, args.title, args.why, args.id),
                     False,
                 )
             elif args.board_command == "move":
-                update_next_board(args.column, args.token, None, False)
+                update_next_steps_board(root, args.column, args.token, None, False)
             elif args.board_command == "done":
-                update_next_board("Done", args.token, None, True)
+                update_next_steps_board(root, "Done", args.token, None, True)
             elif args.board_command == "ensure-backlog":
-                ensure_project_backlog_column(args.project)
+                ensure_project_backlog_column(root, args.project)
         elif args.command == "ingest":
             if args.ingest_command == "safe-export":
                 safe_export_ingest(args)
