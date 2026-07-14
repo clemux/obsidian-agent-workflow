@@ -26,6 +26,12 @@ Claude Code trial, the running agent had no callable current-session rename
 capability. Claude may accept a user/launcher title such as `claude --name`, but
 ordinary OAW work must not spend time probing or announcing that limitation.
 
+Claude Code titles are therefore set outside the agent. A hook reads the `oaw
+task` commands the session already runs and sets `[I]`, `[R]`, or `[DONE]` from
+each command's result, which changes nothing in this policy: the agent still has
+no rename capability, still skips synchronization silently, and still never
+compensates through task state. See `docs/claude-code.md` in the repository.
+
 Keep the always-loaded skill policy client-neutral and small. Add client-specific
 details here only when verified behavior changes. A client without an already
 exposed rename tool must continue OAW work silently and must not spawn or resume

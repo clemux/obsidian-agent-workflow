@@ -229,12 +229,15 @@ successful `oaw task complete`. Incidental references do not take title
 ownership from the primary task, and resuming a session re-synchronizes a stale
 title when task ownership and phase are clear.
 
-This is capability-gated. Codex Desktop can use its callable task rename. A
-Claude Code launcher can set a display name with `claude --name`, but that is
-not an in-session agent capability; the skill uses an in-session rename only if
-Claude actually exposes one as a callable tool. Clients without such a
-capability continue the OAW workflow unchanged and never mutate task state to
-compensate for the missing UI operation.
+This is capability-gated. Codex Desktop can use its callable task rename. Claude
+Code exposes no rename to the running agent, so the skill leaves the title alone
+there; `claude --name` is a launcher flag, not an in-session agent capability.
+Clients without such a capability continue the OAW workflow unchanged and never
+mutate task state to compensate for the missing UI operation.
+
+A Claude Code title is instead set out of band by a hook, which reads the `oaw
+task` commands the agent already runs and asks nothing of the skill. See
+[docs/claude-code.md](docs/claude-code.md).
 
 Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It accepts optional `--checks`, works in any task status, and refreshes `last_event_at` only when the caller already has a matching running record; it never creates one.
 
