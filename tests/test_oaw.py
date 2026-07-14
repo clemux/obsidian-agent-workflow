@@ -28,6 +28,24 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def snapshot_tree_without_following_symlinks(
+    root: Path,
+) -> dict[str, tuple[str, bytes | str | None]]:
+    snapshot: dict[str, tuple[str, bytes | str | None]] = {}
+    for current, directories, files in os.walk(root, followlinks=False):
+        parent = Path(current)
+        for name in sorted([*directories, *files]):
+            path = parent / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                snapshot[relative] = ("symlink", os.readlink(path))
+            elif path.is_dir():
+                snapshot[relative] = ("directory", None)
+            else:
+                snapshot[relative] = ("file", path.read_bytes())
+    return snapshot
+
+
 class TestOaw(Assertions):
     def setup_method(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -1426,6 +1444,97 @@ aliases:
             if path.is_file()
         }
         self.assertEqual(before, after)
+
+    @pytest.mark.parametrize("operation", ["list", "audit", "close", "start", "create-start"])
+    def test_symlinked_run_directory_fails_closed_without_writes(self, operation):
+        with tempfile.TemporaryDirectory() as outside_raw:
+            outside = Path(outside_raw)
+            marker = outside / "outside-marker.txt"
+            marker.write_text("outside must remain untouched\n", encoding="utf-8")
+            registry = self.vault / "Agents/Runs"
+            registry.symlink_to(outside, target_is_directory=True)
+            before_vault = snapshot_tree_without_following_symlinks(self.vault)
+            before_outside = snapshot_tree_without_following_symlinks(outside)
+            identifier = "AGT-RUN-OAW-TSK-cli-codex-0123456789ab"
+            arguments = {
+                "list": ("run", "list"),
+                "audit": ("run", "audit"),
+                "close": ("run", "close", identifier, "--reason", "must fail"),
+                "start": (
+                    "task",
+                    "start",
+                    "OAW-TSK-cli",
+                    "--note",
+                    "Must not follow registry symlink.",
+                ),
+                "create-start": (
+                    "task",
+                    "create",
+                    "--project",
+                    "Obsidian Agent Workflow",
+                    "--title",
+                    "Blocked directory symlink task",
+                    "--start",
+                ),
+            }[operation]
+
+            result = self.run_oaw(*arguments)
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("run registry directory must not be a symlink", result.stderr)
+            self.assertEqual(before_vault, snapshot_tree_without_following_symlinks(self.vault))
+            self.assertEqual(before_outside, snapshot_tree_without_following_symlinks(outside))
+
+    @pytest.mark.parametrize("operation", ["list", "audit", "close", "start", "create-start"])
+    def test_canonical_run_symlink_entry_fails_closed_without_writes(self, operation):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        canonical = self.run_record_for("test-thread")
+        with tempfile.TemporaryDirectory() as outside_raw:
+            outside = Path(outside_raw)
+            outside_run = outside / canonical.name
+            outside_run.write_bytes(canonical.read_bytes())
+            canonical.unlink()
+            canonical.symlink_to(outside_run)
+            before_vault = snapshot_tree_without_following_symlinks(self.vault)
+            before_outside = snapshot_tree_without_following_symlinks(outside)
+            arguments = {
+                "list": ("run", "list"),
+                "audit": ("run", "audit"),
+                "close": (
+                    "run",
+                    "close",
+                    canonical.stem,
+                    "--reason",
+                    "must fail",
+                ),
+                "start": (
+                    "task",
+                    "start",
+                    "OAW-TSK-cli",
+                    "--note",
+                    "Must not follow run symlink.",
+                ),
+                "create-start": (
+                    "task",
+                    "create",
+                    "--project",
+                    "Obsidian Agent Workflow",
+                    "--title",
+                    "Blocked entry symlink task",
+                    "--start",
+                ),
+            }[operation]
+
+            result = self.run_oaw(*arguments)
+
+            self.assertEqual(result.returncode, 1)
+            if operation == "audit":
+                self.assertIn("noncanonical registry artifact", result.stdout)
+            else:
+                self.assertIn("run registry contains symlink entries", result.stderr)
+            self.assertEqual(before_vault, snapshot_tree_without_following_symlinks(self.vault))
+            self.assertEqual(before_outside, snapshot_tree_without_following_symlinks(outside))
 
     def test_run_audit_reports_clean_registry(self):
         started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")

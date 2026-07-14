@@ -111,6 +111,73 @@ def run_id(task_id: str, identity: Identity) -> str:
     return f"AGT-RUN-{task_id}-{identity.provider}-{digest}"
 
 
+def registry_directory(root: Path) -> Path:
+    """Return the logical registry directory after real-vault confinement checks."""
+    try:
+        real_root = root.resolve(strict=True)
+    except OSError as exc:
+        raise OawError(f"vault root cannot be resolved: {root}") from exc
+    if not real_root.is_dir():
+        raise OawError(f"vault root is not a directory: {root}")
+
+    current = root
+    for part in RUNS_DIR.parts:
+        current /= part
+        if current.is_symlink():
+            raise OawError(f"run registry directory must not be a symlink: {current}")
+        if not current.exists():
+            continue
+        try:
+            resolved = current.resolve(strict=True)
+        except OSError as exc:
+            raise OawError(f"run registry path cannot be resolved: {current}") from exc
+        if not resolved.is_relative_to(real_root):
+            raise OawError(f"run registry path escapes the vault: {current}")
+        if not current.is_dir():
+            raise OawError(f"run registry path is not a directory: {current}")
+    return root / RUNS_DIR
+
+
+def registry_entries(root: Path) -> list[Path]:
+    """List registry files and symlinks without following any symlink."""
+    directory = registry_directory(root)
+    if not directory.exists():
+        return []
+    real_root = root.resolve(strict=True)
+    entries: list[Path] = []
+    pending = [directory]
+    while pending:
+        parent = pending.pop()
+        try:
+            children = sorted(parent.iterdir())
+        except OSError as exc:
+            raise OawError(f"run registry cannot be read: {parent}") from exc
+        for child in children:
+            if child.is_symlink():
+                entries.append(child)
+                continue
+            try:
+                resolved = child.resolve(strict=True)
+            except OSError as exc:
+                raise OawError(f"run registry path cannot be resolved: {child}") from exc
+            if not resolved.is_relative_to(real_root):
+                raise OawError(f"run registry path escapes the vault: {child}")
+            if child.is_dir():
+                pending.append(child)
+            else:
+                entries.append(child)
+    return sorted(entries)
+
+
+def ensure_registry_has_no_symlinks(root: Path) -> Path:
+    directory = registry_directory(root)
+    links = [path for path in registry_entries(root) if path.is_symlink()]
+    if links:
+        rendered = ", ".join(path.relative_to(root).as_posix() for path in links)
+        raise OawError(f"run registry contains symlink entries: {rendered}")
+    return directory
+
+
 def run_path(root: Path, identifier: str) -> Path:
     if (
         not identifier.startswith("AGT-RUN-")
@@ -119,7 +186,11 @@ def run_path(root: Path, identifier: str) -> Path:
         or "\\" in identifier
     ):
         raise OawError(f"invalid run id: {identifier}")
-    return root / RUNS_DIR / f"{identifier}.md"
+    directory = ensure_registry_has_no_symlinks(root)
+    path = directory / f"{identifier}.md"
+    if path.exists() and path.resolve(strict=True).parent != directory.resolve(strict=True):
+        raise OawError(f"run registry entry escapes the vault: {path}")
+    return path
 
 
 def durable_task_link(task_path: Path, root: Path, task_id: str) -> str:
@@ -127,7 +198,16 @@ def durable_task_link(task_path: Path, root: Path, task_id: str) -> str:
     return f"[[{target}|{task_id}]]"
 
 
-def load_run(path: Path) -> Run:
+def load_run(root: Path, path: Path) -> Run:
+    directory = ensure_registry_has_no_symlinks(root)
+    if path.parent != directory or path.is_symlink():
+        raise OawError(f"run registry entry is not confined: {path}")
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise OawError(f"run registry entry cannot be resolved: {path}") from exc
+    if resolved.parent != directory.resolve(strict=True):
+        raise OawError(f"run registry entry escapes the vault: {path}")
     text = path.read_text(encoding="utf-8")
     _, fm, body = split_note(text)
     return Run(path, parse_frontmatter(fm), body)
@@ -254,6 +334,7 @@ def validate_run_schema(run: Run) -> None:
 
 
 def load_validated_run(
+    root: Path,
     path: Path,
     *,
     expected_id: str,
@@ -263,7 +344,7 @@ def load_validated_run(
     require_canonical_id: bool = False,
 ) -> Run:
     """Load a run and reject deterministic identity or task-scope mismatches."""
-    run = load_run(path)
+    run = load_run(root, path)
     errors = [
         *run_schema_errors(run),
         *run_scope_errors(
@@ -306,12 +387,12 @@ def validate_resolved_task_scope(
 
 def noncanonical_registry_artifacts(root: Path) -> list[Path]:
     """Return files or links outside the canonical flat Markdown run layout."""
-    directory = root / RUNS_DIR
+    directory = registry_directory(root)
     if not directory.exists():
         return []
     return [
         path
-        for path in sorted(directory.rglob("*"))
+        for path in registry_entries(root)
         if (
             path.is_symlink()
             or not path.is_file()
@@ -334,6 +415,7 @@ def validated_registry_runs(
     runs: list[Run] = []
     for run in iter_runs(root):
         validated = load_validated_run(
+            root,
             run.path,
             expected_id=run.path.stem,
             require_canonical_id=True,
@@ -344,10 +426,14 @@ def validated_registry_runs(
 
 
 def iter_runs(root: Path) -> list[Run]:
-    directory = root / RUNS_DIR
+    directory = ensure_registry_has_no_symlinks(root)
     if not directory.exists():
         return []
-    return [load_run(path) for path in sorted(directory.glob("*.md"))]
+    artifacts = noncanonical_registry_artifacts(root)
+    if artifacts:
+        rendered = ", ".join(path.relative_to(root).as_posix() for path in artifacts)
+        raise OawError(f"run registry contains noncanonical artifacts: {rendered}")
+    return [load_run(root, path) for path in sorted(directory.glob("*.md"))]
 
 
 def find_run(
@@ -358,7 +444,7 @@ def find_run(
     path = run_path(root, identifier)
     if not path.exists():
         raise OawError(f"run not found: {identifier}")
-    run = load_validated_run(path, expected_id=identifier, require_canonical_id=True)
+    run = load_validated_run(root, path, expected_id=identifier, require_canonical_id=True)
     validate_resolved_task_scope(run, root, resolve_task)
     return run
 
@@ -386,6 +472,7 @@ def matching_run(
     if not path.exists():
         return None
     return load_validated_run(
+        root,
         path,
         expected_id=expected,
         task_id=task_id,
@@ -534,8 +621,8 @@ def append_session_id(text: str, session_id: str) -> str:
 def audit_runs(root: Path, resolve_task: Callable[[str], Any], now: dt.datetime) -> list[str]:
     findings: list[str] = []
     live_keys: dict[tuple[str, str, str], list[str]] = {}
-    directory = root / RUNS_DIR
-    paths = sorted(directory.rglob("*")) if directory.exists() else []
+    directory = registry_directory(root)
+    paths = registry_entries(root)
     for path in paths:
         relative = path.relative_to(directory).as_posix()
         if (
@@ -549,7 +636,7 @@ def audit_runs(root: Path, resolve_task: Callable[[str], Any], now: dt.datetime)
             continue
         prefix = path.stem
         try:
-            run = load_run(path)
+            run = load_run(root, path)
         except (OawError, OSError) as exc:
             findings.append(f"{prefix}: malformed: {exc}")
             continue
