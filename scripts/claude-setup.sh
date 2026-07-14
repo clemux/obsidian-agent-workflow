@@ -45,10 +45,13 @@ jq empty "$SETTINGS" 2>/dev/null || {
 
 # Add each entry only when absent, so re-running changes nothing. PostToolUse joins the existing
 # Bash matcher block when there is one, rather than adding a second block for the same matcher.
-patched=$(jq --arg hook "$HOOK" '
+# Claude Code runs the command through a shell, so a checkout path containing a space would split
+# into two arguments; quote it. Deduplicate on the hook's path rather than the whole command string,
+# so an entry written by an older version of this script is recognized instead of duplicated.
+patched=$(jq --arg path "$HOOK" --arg hook "'${HOOK//\'/\'\\\'\'}'" '
   def record_entry: {type: "command", command: ($hook + " record"), timeout: 5};
   def emit_entry:   {type: "command", command: ($hook + " emit"),   timeout: 5};
-  def has_cmd($c):  any(.hooks[]?; .command == $c);
+  def has_cmd($mode): any(.hooks[]?; (.command? // "") | contains($path) and endswith($mode));
 
   .hooks //= {}
   | .hooks.PostToolUse //= []
@@ -56,12 +59,12 @@ patched=$(jq --arg hook "$HOOK" '
 
   | if any(.hooks.PostToolUse[]?; .matcher == "Bash")
     then .hooks.PostToolUse |= map(
-      if .matcher == "Bash" and (has_cmd($hook + " record") | not)
+      if .matcher == "Bash" and (has_cmd("record") | not)
       then .hooks += [record_entry] else . end)
     else .hooks.PostToolUse += [{matcher: "Bash", hooks: [record_entry]}]
     end
 
-  | if any(.hooks.UserPromptSubmit[]?; has_cmd($hook + " emit"))
+  | if any(.hooks.UserPromptSubmit[]?; has_cmd("emit"))
     then .
     elif (.hooks.UserPromptSubmit | length) > 0
     then .hooks.UserPromptSubmit[0].hooks += [emit_entry]
@@ -83,6 +86,9 @@ if ! $install; then
 fi
 
 cp -- "$SETTINGS" "${SETTINGS}.bak"
-printf '%s\n' "$patched" >"$SETTINGS"
+# Write through a temporary file: a crash midway through a direct redirect would leave every future
+# session reading a truncated global config.
+printf '%s\n' "$patched" >"${SETTINGS}.tmp"
+mv -- "${SETTINGS}.tmp" "$SETTINGS"
 echo "registered the OAW session-title hook in $SETTINGS (backup: ${SETTINGS}.bak)"
 echo "hooks are read at session start, so this takes effect in your next Claude Code session"
