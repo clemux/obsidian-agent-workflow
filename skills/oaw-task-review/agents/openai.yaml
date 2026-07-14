@@ -1,0 +1,4 @@
+interface:
+  display_name: "OAW Task Review"
+  short_description: "Review OAW task statuses one task at a time"
+  default_prompt: "Use $oaw-task-review to review open project task statuses interactively."

@@ -6,8 +6,9 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 
 - `bin/oaw` contains the executable Python CLI for resolving Obsidian IDs and updating task lifecycle state.
 - `tests/test_oaw.py` contains the `unittest` coverage for resolver behavior, duplicate handling, and lifecycle writes.
-- `skills/oaw/SKILL.md` documents the agent-facing workflow for using the CLI.
-- `skills/oaw/agents/openai.yaml` contains OpenAI skill display metadata.
+- `skills/oaw/` documents the agent-facing workflow for using the CLI.
+- `skills/oaw-task-review/` provides the interactive project-task status review workflow.
+- Each skill's `agents/openai.yaml` contains OpenAI display metadata.
 - `README.md` is the user-facing overview and install guide.
 
 Keep small workflow changes close to `bin/oaw` and mirror behavior changes in tests and docs. For board-related changes, update the CLI, `tests/test_oaw.py`, `README.md`, and `skills/oaw/SKILL.md` together so agent-facing behavior does not drift from implementation.

@@ -36,6 +36,24 @@ The CLI depends on `typer` at runtime, so bare `python bin/oaw ...` fails with
 `ModuleNotFoundError: No module named 'typer'`. The installed `oaw` command
 carries its own dependencies and needs no prefix.
 
+### Agent skills
+
+The repository also contains two Codex skills:
+
+- `skills/oaw` documents ID resolution and lifecycle operations.
+- `skills/oaw-task-review` runs a resumable, one-task-at-a-time project status review.
+
+Link them into the personal skills directory so edits in the checkout remain live:
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s "$(pwd)/skills/oaw" "${CODEX_HOME:-$HOME/.codex}/skills/oaw"
+ln -s "$(pwd)/skills/oaw-task-review" "${CODEX_HOME:-$HOME/.codex}/skills/oaw-task-review"
+```
+
+Skip a link that already exists. Validate either package with the skill creator's
+`quick_validate.py` before sharing changes.
+
 ### Shell completion
 
 The CLI is built with Typer, so it ships shell completion:
@@ -85,6 +103,7 @@ The default vault path is machine-specific legacy debt; override with `OAW_VAULT
 ## Table of contents
 
 - [Command overview](#command-overview)
+- [Agent skills](#agent-skills)
 - [Resolving references](#resolving-references)
 - [Listing notes](#listing-notes)
 - [Task lifecycle](#task-lifecycle)
