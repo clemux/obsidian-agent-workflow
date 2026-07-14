@@ -1950,7 +1950,10 @@ aliases:
         [
             ("priority:\n  - 2\n", "must be a scalar 1, 2, or 3"),
             ("priority: high\n", "must be a scalar 1, 2, or 3"),
-            ("priority: 2\npriority: 3\n", "at most one priority field"),
+            ("priority: 2\npriority: 3\n", "duplicate field: priority"),
+            ("'priority': 2\n", "unsupported or malformed field"),
+            ("priority: 2\n  continuation\n", "flat scalar fields and flat block lists"),
+            ("broken: [\n", "field broken has an unclosed flow value"),
         ],
     )
     def test_task_priority_rejects_malformed_priority_without_writing(
@@ -1978,7 +1981,7 @@ aliases:
         self.assertEqual(before, task_path.read_bytes())
 
     def test_task_priority_rejects_unsupported_location_without_writing(self):
-        path = self.vault / "Projects/Obsidian Agent Workflow/Inbox/Outside task.md"
+        path = self.vault / "Projects/Obsidian Agent Workflow/Archive/Tasks/Outside task.md"
         write(
             path,
             """---

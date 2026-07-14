@@ -62,7 +62,7 @@ def is_project_task(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     parts = rel.parts
-    return len(parts) >= 4 and parts[0] == "Projects" and parts[-2] == "Tasks"
+    return len(parts) == 4 and parts[0] == "Projects" and parts[2] == "Tasks"
 
 
 def project_root_for_task(path: Path, root: Path) -> Path:
@@ -334,6 +334,91 @@ def append_task_note(
     print("Board: unchanged")
 
 
+def _validate_frontmatter_value(key: str, value: str) -> None:
+    if not value:
+        raise OawError(f"task frontmatter list {key} contains an empty item")
+    if value.startswith(("|", ">")):
+        raise OawError("task frontmatter multiline scalar fields are not supported")
+    if value[0] in "[{":
+        pairs = {"[": "]", "{": "}"}
+        if not value.endswith(pairs[value[0]]):
+            raise OawError(f"task frontmatter field {key} has an unclosed flow value")
+        stack: list[str] = []
+        quote: str | None = None
+        escaped = False
+        for character in value:
+            if escaped:
+                escaped = False
+                continue
+            if quote == '"' and character == "\\":
+                escaped = True
+                continue
+            if character in {"'", '"'}:
+                quote = None if quote == character else character if quote is None else quote
+                continue
+            if quote is not None:
+                continue
+            if character in pairs:
+                stack.append(pairs[character])
+            elif character in "]}" and (not stack or stack.pop() != character):
+                raise OawError(f"task frontmatter field {key} has an invalid flow value")
+        if quote is not None or stack:
+            raise OawError(f"task frontmatter field {key} has an unclosed flow value")
+    elif value[0] in "]}":
+        raise OawError(f"task frontmatter field {key} has an invalid flow value")
+    elif value.startswith('"'):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise OawError(f"task frontmatter field {key} has an invalid quoted value") from exc
+        if not isinstance(parsed, str):
+            raise OawError(f"task frontmatter field {key} must not use structured JSON")
+    elif value.startswith("'") and not re.fullmatch(r"'(?:[^']|'')*'", value):
+        raise OawError(f"task frontmatter field {key} has an invalid quoted value")
+
+
+def _validate_priority_update_frontmatter(lines: list[str], end: int) -> None:
+    seen_keys: set[str] = set()
+    block_list_key: str | None = None
+    priority_value: str | None = None
+    for raw_line in lines[1:end]:
+        line = raw_line.rstrip("\r\n")
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.startswith((" ", "\t")):
+            if line.startswith("\t"):
+                raise OawError("task frontmatter indentation must use spaces")
+            item = re.fullmatch(r"\s+-\s+(\S.*)", line)
+            if block_list_key is None or item is None:
+                raise OawError(
+                    "task frontmatter must use flat scalar fields and flat block lists"
+                )
+            item_value, _ = split_inline_comment(item.group(1))
+            _validate_frontmatter_value(block_list_key, item_value)
+            continue
+        field = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", line)
+        if field is None:
+            raise OawError("task frontmatter contains an unsupported or malformed field")
+        key, raw_value = field.groups()
+        if key in seen_keys:
+            raise OawError(f"task frontmatter contains duplicate field: {key}")
+        seen_keys.add(key)
+        value, _ = split_inline_comment(raw_value.strip())
+        if not value:
+            block_list_key = key
+            if key == "priority":
+                priority_value = ""
+            continue
+        block_list_key = None
+        _validate_frontmatter_value(key, value)
+        if key == "priority":
+            priority_value = value
+    if priority_value is not None and priority_value not in {"1", "2", "3"}:
+        raise OawError(
+            "task priority frontmatter must be a scalar 1, 2, or 3 before OAW can update it"
+        )
+
+
 def update_task_priority(
     match: NoteMatch,
     root: Path,
@@ -357,18 +442,7 @@ def update_task_priority(
     end = next((idx for idx in range(1, len(lines)) if lines[idx].strip() == "---"), None)
     if end is None:
         raise OawError("task note frontmatter is not closed")
-    priority_lines = [
-        line for line in lines[1:end] if re.match(r"^priority\s*:", line)
-    ]
-    if len(priority_lines) > 1:
-        raise OawError("task priority frontmatter must contain at most one priority field")
-    if priority_lines:
-        raw_value = priority_lines[0].split(":", 1)[1].rstrip("\r\n")
-        value, _ = split_inline_comment(raw_value.strip())
-        if value not in {"1", "2", "3"}:
-            raise OawError(
-                "task priority frontmatter must be a scalar 1, 2, or 3 before OAW can update it"
-            )
+    _validate_priority_update_frontmatter(lines, end)
 
     provider, session_ref = detect_session(allow_missing)
     text = set_frontmatter_scalar(text, "priority", str(priority))
