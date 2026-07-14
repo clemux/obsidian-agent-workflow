@@ -11,7 +11,12 @@ from pathlib import Path
 
 from .boards import updated_project_board_text
 from .errors import OawError
-from .frontmatter import append_frontmatter_list_value, parse_frontmatter, set_frontmatter_scalar
+from .frontmatter import (
+    append_frontmatter_list_value,
+    parse_frontmatter,
+    set_frontmatter_scalar,
+    split_inline_comment,
+)
 from .notes import VaultTransaction, append_markdown_block_to_section, split_note
 from .resolver import (
     NoteMatch,
@@ -57,7 +62,7 @@ def is_project_task(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     parts = rel.parts
-    return len(parts) >= 4 and parts[0] == "Projects" and parts[-2] == "Tasks"
+    return len(parts) == 4 and parts[0] == "Projects" and parts[2] == "Tasks"
 
 
 def project_root_for_task(path: Path, root: Path) -> Path:
@@ -326,6 +331,131 @@ def append_task_note(
     status = match.frontmatter.get("status", "")
     print(f"Updated: {match.relpath}")
     print(f"Status: {status}")
+    print("Board: unchanged")
+
+
+def _validate_frontmatter_value(key: str, value: str) -> None:
+    if not value:
+        raise OawError(f"task frontmatter list {key} contains an empty item")
+    if value.startswith(("|", ">")):
+        raise OawError("task frontmatter multiline scalar fields are not supported")
+    if value[0] in "[{":
+        pairs = {"[": "]", "{": "}"}
+        if not value.endswith(pairs[value[0]]):
+            raise OawError(f"task frontmatter field {key} has an unclosed flow value")
+        stack: list[str] = []
+        quote: str | None = None
+        escaped = False
+        for character in value:
+            if escaped:
+                escaped = False
+                continue
+            if quote == '"' and character == "\\":
+                escaped = True
+                continue
+            if character in {"'", '"'}:
+                quote = None if quote == character else character if quote is None else quote
+                continue
+            if quote is not None:
+                continue
+            if character in pairs:
+                stack.append(pairs[character])
+            elif character in "]}" and (not stack or stack.pop() != character):
+                raise OawError(f"task frontmatter field {key} has an invalid flow value")
+        if quote is not None or stack:
+            raise OawError(f"task frontmatter field {key} has an unclosed flow value")
+    elif value[0] in "]}":
+        raise OawError(f"task frontmatter field {key} has an invalid flow value")
+    elif value.startswith('"'):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise OawError(f"task frontmatter field {key} has an invalid quoted value") from exc
+        if not isinstance(parsed, str):
+            raise OawError(f"task frontmatter field {key} must not use structured JSON")
+    elif value.startswith("'") and not re.fullmatch(r"'(?:[^']|'')*'", value):
+        raise OawError(f"task frontmatter field {key} has an invalid quoted value")
+    elif re.search(r":\s", value) or value.startswith(("&", "*", "!", "@", "`", "? ", "- ")):
+        raise OawError(f"task frontmatter field {key} contains an unsupported YAML value")
+
+
+def _validate_priority_update_frontmatter(lines: list[str], end: int) -> None:
+    seen_keys: set[str] = set()
+    block_list_key: str | None = None
+    priority_value: str | None = None
+    for raw_line in lines[1:end]:
+        line = raw_line.rstrip("\r\n")
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.startswith((" ", "\t")):
+            if line.startswith("\t"):
+                raise OawError("task frontmatter indentation must use spaces")
+            item = re.fullmatch(r"\s+-\s+(\S.*)", line)
+            if block_list_key is None or item is None:
+                raise OawError(
+                    "task frontmatter must use flat scalar fields and flat block lists"
+                )
+            item_value, _ = split_inline_comment(item.group(1))
+            _validate_frontmatter_value(block_list_key, item_value)
+            continue
+        field = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", line)
+        if field is None:
+            raise OawError("task frontmatter contains an unsupported or malformed field")
+        key, raw_value = field.groups()
+        if key in seen_keys:
+            raise OawError(f"task frontmatter contains duplicate field: {key}")
+        seen_keys.add(key)
+        value, _ = split_inline_comment(raw_value.strip())
+        if not value:
+            block_list_key = key
+            if key == "priority":
+                priority_value = ""
+            continue
+        block_list_key = None
+        _validate_frontmatter_value(key, value)
+        if key == "priority":
+            priority_value = value
+    if priority_value is not None and priority_value not in {"1", "2", "3"}:
+        raise OawError(
+            "task priority frontmatter must be a scalar 1, 2, or 3 before OAW can update it"
+        )
+
+
+def update_task_priority(
+    match: NoteMatch,
+    root: Path,
+    priority: int,
+    note: str,
+    allow_missing: bool,
+) -> None:
+    if not is_lifecycle_task(match.path, root):
+        raise lifecycle_task_error()
+    if match.frontmatter.get("type") != "task":
+        raise OawError("task priority requires frontmatter type: task")
+    if priority not in {1, 2, 3}:
+        raise OawError("task priority must be 1, 2, or 3")
+    if not note.strip():
+        raise OawError("task priority requires non-empty --note")
+
+    text = match.path.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise OawError("task note has no YAML frontmatter")
+    end = next((idx for idx in range(1, len(lines)) if lines[idx].strip() == "---"), None)
+    if end is None:
+        raise OawError("task note frontmatter is not closed")
+    _validate_priority_update_frontmatter(lines, end)
+
+    provider, session_ref = detect_session(allow_missing)
+    text = set_frontmatter_scalar(text, "priority", str(priority))
+    text = append_session_id_frontmatter(text, session_ref)
+    text = append_session_entry(text, provider, session_ref, note, None)
+    transaction = VaultTransaction()
+    transaction.stage(match.path, text)
+    transaction.commit()
+    print(f"Updated: {match.relpath}")
+    print(f"Priority: {priority}")
+    print(f"Status: {match.frontmatter.get('status', '')}")
     print("Board: unchanged")
 
 

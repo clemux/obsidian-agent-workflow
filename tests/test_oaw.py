@@ -1841,6 +1841,240 @@ aliases:
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("required: --checks", proc.stderr)
 
+    @pytest.mark.parametrize("priority", [1, 2, 3])
+    def test_task_priority_updates_metadata_trace_and_preserves_task_state(self, priority):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace(
+                "status: todo\n",
+                "status: todo\npriority: 3 # retained comment\neffort: M\n",
+            ),
+            encoding="utf-8",
+        )
+        before_board = board_path.read_bytes()
+
+        proc = self.run_oaw(
+            "task",
+            "priority",
+            "OAW-TSK-cli",
+            "--priority",
+            str(priority),
+            "--note",
+            "Re-ranked against the cross-project queue.",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"Priority: {priority}", proc.stdout)
+        self.assertIn("Status: todo", proc.stdout)
+        self.assertIn("Board: unchanged", proc.stdout)
+        task = task_path.read_text(encoding="utf-8")
+        self.assertIn(f"status: todo\npriority: {priority} # retained comment\neffort: M\n", task)
+        self.assertIn('session-ids:\n  - "test-thread"\n', task)
+        self.assertIn("`CODEX_THREAD_ID=test-thread`", task)
+        self.assertIn("Re-ranked against the cross-project queue.", task)
+        self.assertEqual(before_board, board_path.read_bytes())
+        self.assertFalse((self.vault / "Agents/Runs").exists())
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md",
+            "Tasks/Root priority task.md",
+        ],
+    )
+    def test_task_priority_supports_non_project_task_locations(self, relative_path):
+        path = self.vault / relative_path
+        if relative_path.startswith("Tasks/"):
+            write(
+                path,
+                """---
+type: task
+status: backlog
+id: ROOT-TSK-priority
+aliases:
+  - ROOT-TSK-priority
+---
+
+# Root priority task
+""",
+            )
+            note_id = "ROOT-TSK-priority"
+        else:
+            note_id = "AGT-TSK-obsidian-task-ids"
+
+        proc = self.run_oaw(
+            "task",
+            "priority",
+            note_id,
+            "--priority",
+            "2",
+            "--note",
+            "Ranked task.",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("priority: 2", path.read_text(encoding="utf-8"))
+        self.assertIn("Board: unchanged", proc.stdout)
+
+    def test_task_priority_allows_explicit_missing_session_trace(self):
+        cleared = {
+            "CODEX_THREAD_ID": "",
+            "CLAUDE_SESSION_ID": "",
+            "CLAUDE_CODE_SESSION_ID": "",
+            "OPENCODE_SESSION_ID": "",
+            "GEMINI_SESSION_ID": "",
+        }
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+
+        proc = self.run_oaw(
+            "task",
+            "priority",
+            "OAW-TSK-cli",
+            "--priority",
+            "2",
+            "--note",
+            "Untraceable update accepted.",
+            "--allow-missing-session-id",
+            env=cleared,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        task = task_path.read_text(encoding="utf-8")
+        self.assertIn("priority: 2", task)
+        self.assertIn("`session_id=unavailable`", task)
+        self.assertNotIn("session-ids:", task)
+
+    @pytest.mark.parametrize(
+        ("replacement", "expected"),
+        [
+            ("priority:\n  - 2\n", "must be a scalar 1, 2, or 3"),
+            ("priority: high\n", "must be a scalar 1, 2, or 3"),
+            ("priority: 2\npriority: 3\n", "duplicate field: priority"),
+            ("'priority': 2\n", "unsupported or malformed field"),
+            ("priority: 2\n  continuation\n", "flat scalar fields and flat block lists"),
+            ("broken: [\n", "field broken has an unclosed flow value"),
+            ("broken: foo: bar\n", "field broken contains an unsupported YAML value"),
+            (
+                "broken-list:\n  - foo: bar\n",
+                "field broken-list contains an unsupported YAML value",
+            ),
+        ],
+    )
+    def test_task_priority_rejects_malformed_priority_without_writing(
+        self, replacement, expected
+    ):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace("status: todo\n", "status: todo\n" + replacement),
+            encoding="utf-8",
+        )
+        before = task_path.read_bytes()
+
+        proc = self.run_oaw(
+            "task",
+            "priority",
+            "OAW-TSK-cli",
+            "--priority",
+            "1",
+            "--note",
+            "Must fail.",
+        )
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn(expected, proc.stderr)
+        self.assertEqual(before, task_path.read_bytes())
+
+    def test_task_priority_rejects_unsupported_location_without_writing(self):
+        path = self.vault / "Projects/Obsidian Agent Workflow/Archive/Tasks/Outside task.md"
+        write(
+            path,
+            """---
+type: task
+status: backlog
+id: OAW-TSK-outside
+aliases:
+  - OAW-TSK-outside
+---
+
+# Outside task
+""",
+        )
+        before = path.read_bytes()
+
+        proc = self.run_oaw(
+            "task",
+            "priority",
+            "OAW-TSK-outside",
+            "--priority",
+            "2",
+            "--note",
+            "Must fail.",
+        )
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("lifecycle writes are supported", proc.stderr)
+        self.assertEqual(before, path.read_bytes())
+
+    def test_task_priority_domain_rejects_unclosed_frontmatter_before_transaction(
+        self, monkeypatch
+    ):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        match = resolver.resolve_id("OAW-TSK-cli", self.vault)
+        malformed = task_path.read_text(encoding="utf-8").replace("\n---\n\n# Resolver CLI", "\n\n# Resolver CLI")
+        task_path.write_text(malformed, encoding="utf-8")
+        before = task_path.read_bytes()
+
+        class UnexpectedTransaction:
+            def __init__(self):
+                raise AssertionError("validation must happen before transaction construction")
+
+        monkeypatch.setattr(lifecycle, "VaultTransaction", UnexpectedTransaction)
+
+        with pytest.raises(OawError, match="frontmatter is not closed"):
+            lifecycle.update_task_priority(match, self.vault, 2, "Must fail.", False)
+        self.assertEqual(before, task_path.read_bytes())
+
+    def test_task_priority_rejects_non_task_frontmatter_without_writing(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace("type: task", "type: capture"),
+            encoding="utf-8",
+        )
+        before = task_path.read_bytes()
+
+        proc = self.run_oaw(
+            "task",
+            "priority",
+            "OAW-TSK-cli",
+            "--priority",
+            "2",
+            "--note",
+            "Must fail.",
+        )
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("requires frontmatter type: task", proc.stderr)
+        self.assertEqual(before, task_path.read_bytes())
+
+    def test_task_priority_rejects_blank_note_without_writing(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        before = task_path.read_bytes()
+
+        proc = self.run_oaw(
+            "task",
+            "priority",
+            "OAW-TSK-cli",
+            "--priority",
+            "2",
+            "--note",
+            "  ",
+        )
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("requires non-empty --note", proc.stderr)
+        self.assertEqual(before, task_path.read_bytes())
+
     def test_task_note_appends_session_without_status_or_board_change(self):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
         board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
