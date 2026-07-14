@@ -141,6 +141,22 @@ def project_column_for_status(status: str) -> str:
     }[status]
 
 
+def project_card_matches(
+    line: str,
+    *,
+    task_path: Path,
+    project_root: Path,
+    note_id: str | None,
+) -> bool:
+    """Match a project card by exact link target or exact trailing task ID."""
+    match = re.fullmatch(r"- \[ \] \[\[([^]|]+)(?:\|[^]]*)?\]\](?: - (.+))?", line)
+    if match is None:
+        return False
+    target, trailing_id = match.groups()
+    relative_target = task_path.relative_to(project_root).with_suffix("").as_posix()
+    return target in {relative_target, task_path.stem} or bool(note_id and trailing_id == note_id)
+
+
 def render_project_board(
     text: str,
     *,
@@ -151,12 +167,14 @@ def render_project_board(
     status: str,
 ) -> str:
     """Render a project board with the task card in its status column."""
-    identifiers = {task_path.stem}
-    if note_id:
-        identifiers.add(note_id)
     lines, existing_cards = _COLUMNS.remove_cards(
         text.splitlines(),
-        lambda line: line.startswith("- [ ] ") and any(token in line for token in identifiers),
+        lambda line: project_card_matches(
+            line,
+            task_path=task_path,
+            project_root=project_root,
+            note_id=note_id,
+        ),
     )
     card = (
         existing_cards[-1]

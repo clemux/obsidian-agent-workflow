@@ -26,9 +26,13 @@ from .lifecycle import (
     RESEARCH_PACKET_TEMPLATE,
     append_note_session,
     append_task_note,
+    audit_run_registry,
+    close_run,
     create_project,
     create_research_packet,
     create_task,
+    list_runs,
+    pause_task,
     start_research_run,
     update_task,
 )
@@ -47,7 +51,7 @@ from .snapshot import session_snapshot
 
 USAGE_BY_COMMAND = {
     "oaw": "usage: oaw [-h]\n"
-    "           {resolve,list,project,research,task,note,board,ingest,link,export,session,retro,feedback} ...\n",
+    "           {resolve,list,project,research,task,run,note,board,ingest,link,export,session,retro,feedback} ...\n",
     "oaw resolve": "usage: oaw resolve [-h] [--full] [--path] [--meta] [--outline] [--json] id\n",
     "oaw list": "usage: oaw list [-h] --project PROJECT [--type TYPE] [--status STATUS]\n"
     "                [--include-archived]\n",
@@ -61,19 +65,16 @@ USAGE_BY_COMMAND = {
     "                             [--force]\n",
     "oaw research start": "usage: oaw research start [-h] --project PROJECT --track TRACK --source SOURCE\n"
     "                          --url URL\n",
-    "oaw task": "usage: oaw task [-h] {backlog,promote,start,review,complete,note,create} ...\n",
+    "oaw task": "usage: oaw task [-h] {backlog,promote,start,pause,review,complete,note,create} ...\n",
     "oaw task backlog": "usage: oaw task backlog [-h] --note NOTE [--checks CHECKS]\n"
     "                        [--allow-missing-session-id]\n"
     "                        id\n",
     "oaw task promote": "usage: oaw task promote [-h] --note NOTE [--checks CHECKS]\n"
     "                        [--allow-missing-session-id]\n"
     "                        id\n",
-    "oaw task start": "usage: oaw task start [-h] --note NOTE [--checks CHECKS]\n"
-    "                      [--allow-missing-session-id]\n"
-    "                      id\n",
-    "oaw task complete": "usage: oaw task complete [-h] --note NOTE [--checks CHECKS]\n"
-    "                         [--allow-missing-session-id]\n"
-    "                         id\n",
+    "oaw task start": "usage: oaw task start [-h] --note NOTE [--checks CHECKS] id\n",
+    "oaw task pause": "usage: oaw task pause [-h] --note NOTE id\n",
+    "oaw task complete": "usage: oaw task complete [-h] --note NOTE --checks CHECKS id\n",
     "oaw task note": "usage: oaw task note [-h] --note NOTE [--checks CHECKS]\n"
     "                     [--allow-missing-session-id]\n"
     "                     id\n",
@@ -81,14 +82,17 @@ USAGE_BY_COMMAND = {
     "                       [--from-capture FROM_CAPTURE] [--start] [--id ID]\n"
     "                       [--status {backlog,todo}] [--priority {1,2,3}]\n"
     "                       [--effort {S,M,L}] [--note NOTE] [--tag TAG]\n"
+    "                       [--execution {human,agent,hybrid}]\n"
     "                       [--allow-missing-session-id]\n",
+    "oaw run": "usage: oaw run [-h] {list,close,audit} ...\n",
+    "oaw run list": "usage: oaw run list [-h] [--task TASK] [--state {running,paused,completed,closed}] [--json]\n",
+    "oaw run close": "usage: oaw run close [-h] --reason REASON id\n",
+    "oaw run audit": "usage: oaw run audit [-h]\n",
     "oaw note": "usage: oaw note [-h] {session,observe} ...\n",
     "oaw note session": "usage: oaw note session [-h] --note NOTE [--checks CHECKS]\n"
     "                        [--allow-missing-session-id]\n"
     "                        id\n",
-    "oaw task review": "usage: oaw task review [-h] --note NOTE --checks CHECKS\n"
-    "                      [--allow-missing-session-id]\n"
-    "                      id\n",
+    "oaw task review": "usage: oaw task review [-h] --note NOTE --checks CHECKS id\n",
     "oaw note observe": "usage: oaw note observe [-h] [--section SECTION] --title TITLE --body BODY id\n",
     "oaw board": "usage: oaw board [-h] {add,move,done,ensure-backlog} ...\n",
     "oaw board add": "usage: oaw board add [-h] --column COLUMN --link LINK --title TITLE --why WHY\n"
@@ -144,6 +148,7 @@ SUBCOMMAND_DESTINATIONS = {
     "oaw project": "project_command",
     "oaw research": "research_command",
     "oaw task": "task_command",
+    "oaw run": "run_command",
     "oaw note": "note_command",
     "oaw board": "board_command",
     "oaw ingest": "ingest_command",
@@ -162,6 +167,8 @@ ARGPARSE_CHOICES = {
     "status": ("backlog", "todo"),
     "priority": ("1", "2", "3"),
     "effort": ("S", "M", "L"),
+    "execution": ("human", "agent", "hybrid"),
+    "state": ("running", "paused", "completed", "closed"),
     "feedback_type": FEEDBACK_TYPES,
 }
 
@@ -314,6 +321,7 @@ app = _app("OAW command-line interface.")
 project_app = _app("Project workspace lifecycle")
 research_app = _app("Research packet utilities")
 task_app = _app("Project task lifecycle")
+run_app = _app("Inspect and administer agent-run records")
 note_app = _app("Append session traces or observations to resolved notes")
 board_app = _app("Update the cross-project Next steps board")
 ingest_app = _app("Ingest approved handoff files")
@@ -335,9 +343,23 @@ class TaskEffort(str, Enum):
     LARGE = "L"
 
 
+class TaskExecution(str, Enum):
+    HUMAN = "human"
+    AGENT = "agent"
+    HYBRID = "hybrid"
+
+
+class RunState(str, Enum):
+    RUNNING = "running"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    CLOSED = "closed"
+
+
 app.add_typer(project_app, name="project")
 app.add_typer(research_app, name="research")
 app.add_typer(task_app, name="task")
+app.add_typer(run_app, name="run")
 app.add_typer(note_app, name="note")
 app.add_typer(board_app, name="board")
 app.add_typer(ingest_app, name="ingest")
@@ -496,9 +518,17 @@ def task_start(
     note_id: Annotated[str, typer.Argument()],
     note: Annotated[str, typer.Option("--note")],
     checks: Annotated[str | None, typer.Option("--checks")] = None,
-    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
 ) -> None:
-    _task_transition(note_id, note, checks, allow_missing_session_id, "active")
+    _task_transition(note_id, note, checks, False, "active")
+
+
+@task_app.command("pause")
+def task_pause(
+    note_id: Annotated[str, typer.Argument()],
+    note: Annotated[str, typer.Option("--note")],
+) -> None:
+    root_path = vault_root()
+    _run(lambda: pause_task(resolve_id(note_id, root_path), root_path, note))
 
 
 @task_app.command("review")
@@ -506,19 +536,17 @@ def task_review(
     note_id: Annotated[str, typer.Argument()],
     note: Annotated[str, typer.Option("--note")],
     checks: Annotated[str, typer.Option("--checks")],
-    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
 ) -> None:
-    _task_transition(note_id, note, checks, allow_missing_session_id, "review")
+    _task_transition(note_id, note, checks, False, "review")
 
 
 @task_app.command("complete")
 def task_complete(
     note_id: Annotated[str, typer.Argument()],
     note: Annotated[str, typer.Option("--note")],
-    checks: Annotated[str | None, typer.Option("--checks")] = None,
-    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
+    checks: Annotated[str, typer.Option("--checks")],
 ) -> None:
-    _task_transition(note_id, note, checks, allow_missing_session_id, "done")
+    _task_transition(note_id, note, checks, False, "done")
 
 
 @task_app.command("note", help="append an agent session note without changing status")
@@ -558,10 +586,16 @@ def task_create(
     effort: Annotated[list[TaskEffort] | None, typer.Option("--effort", help="S, M, or L")] = None,
     note: Annotated[str | None, typer.Option("--note", help="initial problem statement")] = None,
     tag: Annotated[list[str] | None, typer.Option("--tag", help="extra tag; repeatable")] = None,
+    execution: Annotated[
+        TaskExecution | None,
+        typer.Option("--execution", help="human, agent, or hybrid ownership"),
+    ] = None,
     allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
 ) -> None:
     if start and status is not None:
         _usage_error("argument --status: not allowed with argument --start")
+    if start and allow_missing_session_id:
+        _usage_error("argument --allow-missing-session-id: not allowed with argument --start")
     selected_status = status[-1] if status else TaskStatus.BACKLOG
     selected_priority = priority[-1] if priority else None
     selected_effort = effort[-1] if effort else None
@@ -578,9 +612,32 @@ def task_create(
             selected_effort.value if selected_effort is not None else None,
             note,
             tag,
+            execution.value if execution is not None else None,
             allow_missing_session_id,
         )
     )
+
+
+@run_app.command("list", help="list run records")
+def run_list(
+    task: Annotated[str | None, typer.Option("--task")] = None,
+    state: Annotated[RunState | None, typer.Option("--state")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    _run(lambda: list_runs(task, state.value if state else None, json_output, vault_root()))
+
+
+@run_app.command("close", help="administratively close a run")
+def run_close(
+    identifier: Annotated[str, typer.Argument(metavar="id")],
+    reason: Annotated[str, typer.Option("--reason")],
+) -> None:
+    _run(lambda: close_run(identifier, reason, vault_root()))
+
+
+@run_app.command("audit", help="audit registry consistency")
+def run_audit() -> None:
+    _run(lambda: audit_run_registry(vault_root()))
 
 
 @note_app.command("session", help="append an Agent sessions entry")

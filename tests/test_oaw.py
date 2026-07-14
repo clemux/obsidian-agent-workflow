@@ -28,6 +28,24 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def snapshot_tree_without_following_symlinks(
+    root: Path,
+) -> dict[str, tuple[str, bytes | str | None]]:
+    snapshot: dict[str, tuple[str, bytes | str | None]] = {}
+    for current, directories, files in os.walk(root, followlinks=False):
+        parent = Path(current)
+        for name in sorted([*directories, *files]):
+            path = parent / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                snapshot[relative] = ("symlink", os.readlink(path))
+            elif path.is_dir():
+                snapshot[relative] = ("directory", None)
+            else:
+                snapshot[relative] = ("file", path.read_bytes())
+    return snapshot
+
+
 class TestOaw(Assertions):
     def setup_method(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -267,6 +285,12 @@ aliases:
             capture_output=True,
             check=False,
         )
+
+    def run_record_for(self, session_id: str) -> Path:
+        for path in (self.vault / "Agents/Runs").glob("*.md"):
+            if f'agent_session_id: "{session_id}"' in path.read_text(encoding="utf-8"):
+                return path
+        raise AssertionError(f"run record not found for {session_id}")
 
     def test_cli_main_accepts_argv_and_returns_status_code(self, monkeypatch):
         monkeypatch.setenv("OAW_VAULT", str(self.vault))
@@ -888,10 +912,766 @@ aliases:
         self.assertGreater(board.index("OAW-TSK-cli"), board.index("## Active"))
         self.assertLess(board.index("OAW-TSK-cli"), board.index("## Done"))
 
+    def test_task_start_is_idempotent_for_same_identity(self):
+        first = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "First start.")
+        second = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Refresh start.")
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        records = list((self.vault / "Agents/Runs").glob("*.md"))
+        self.assertEqual(len(records), 1)
+        text = records[0].read_text(encoding="utf-8")
+        self.assertIn(" — start — First start.", text)
+        self.assertIn(" — refresh — Refresh start.", text)
+        task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+        self.assertIn("execution: agent", task)
+
+    def test_claude_refresh_uses_provider_and_session_identity_and_preserves_env(self):
+        cleared = {
+            "CODEX_THREAD_ID": "",
+            "CLAUDE_SESSION_ID": "",
+            "CLAUDE_CODE_SESSION_ID": "",
+            "OPENCODE_SESSION_ID": "",
+            "GEMINI_SESSION_ID": "",
+        }
+        first = self.run_oaw(
+            "task",
+            "start",
+            "OAW-TSK-cli",
+            "--note",
+            "Claude Code env start.",
+            env={**cleared, "CLAUDE_CODE_SESSION_ID": "shared-claude-session"},
+        )
+        second = self.run_oaw(
+            "task",
+            "start",
+            "OAW-TSK-cli",
+            "--note",
+            "Claude env refresh.",
+            env={**cleared, "CLAUDE_SESSION_ID": "shared-claude-session"},
+        )
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        records = list((self.vault / "Agents/Runs").glob("*.md"))
+        self.assertEqual(len(records), 1)
+        run_text = records[0].read_text(encoding="utf-8")
+        self.assertIn("agent_session_env: CLAUDE_CODE_SESSION_ID", run_text)
+        self.assertNotIn("agent_session_env: CLAUDE_SESSION_ID\n", run_text)
+        self.assertIn(" — start — Claude Code env start.", run_text)
+        self.assertIn(" — refresh — Claude env refresh.", run_text)
+        task_text = (
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("`CLAUDE_CODE_SESSION_ID=shared-claude-session`", task_text)
+        self.assertIn("`CLAUDE_SESSION_ID=shared-claude-session`", task_text)
+
+    @pytest.mark.parametrize(
+        ("command", "extra"),
+        [
+            ("start", []),
+            ("review", ["--checks", "pytest"]),
+            ("complete", ["--checks", "pytest"]),
+        ],
+    )
+    def test_lifecycle_rejects_corrupt_deterministic_run_before_writing(self, command, extra):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        run_path = self.run_record_for("test-thread")
+        run_path.write_text(
+            run_path.read_text(encoding="utf-8").replace(
+                "agent_session_env: CODEX_THREAD_ID",
+                "agent_session_env: CLAUDE_SESSION_ID",
+            ),
+            encoding="utf-8",
+        )
+        before = {
+            path.relative_to(self.vault): path.read_bytes()
+            for path in self.vault.rglob("*")
+            if path.is_file()
+        }
+
+        result = self.run_oaw(
+            "task",
+            command,
+            "OAW-TSK-cli",
+            "--note",
+            "Must reject corrupt record.",
+            *extra,
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("run record validation failed", result.stderr)
+        self.assertIn("unsupported provider/session environment", result.stderr)
+        after = {
+            path.relative_to(self.vault): path.read_bytes()
+            for path in self.vault.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before, after)
+
+    @pytest.mark.parametrize(
+        ("old", "new", "expected"),
+        [
+            (
+                'task_id: "OAW-TSK-cli"',
+                'task_id: "OAW-TSK-archived"',
+                "task_id does not match",
+            ),
+            (
+                'task: "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]"',
+                'task: "[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-cli]]"',
+                "task link does not match",
+            ),
+        ],
+    )
+    def test_refresh_rejects_misplaced_deterministic_task_scope(self, old, new, expected):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        run_path = self.run_record_for("test-thread")
+        run_path.write_text(
+            run_path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8"
+        )
+        before = run_path.read_bytes()
+
+        refreshed = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Must not refresh.")
+
+        self.assertEqual(refreshed.returncode, 1)
+        self.assertIn(expected, refreshed.stderr)
+        self.assertEqual(before, run_path.read_bytes())
+
+    def test_multiple_sessions_run_same_task_and_review_conflicts_even_when_stale(self):
+        first = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "First session.")
+        second = self.run_oaw(
+            "task",
+            "start",
+            "OAW-TSK-cli",
+            "--note",
+            "Second session.",
+            env={"CODEX_THREAD_ID": "other-thread"},
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(len(list((self.vault / "Agents/Runs").glob("*.md"))), 2)
+
+        other = self.run_record_for("other-thread")
+        other.write_text(
+            other.read_text(encoding="utf-8")
+            .replace(
+                next(
+                    line
+                    for line in other.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("started_at:")
+                ),
+                'started_at: "1999-01-01T00:00:00Z"',
+            )
+            .replace(
+                next(
+                    line
+                    for line in other.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("last_event_at:")
+                ),
+                'last_event_at: "2000-01-01T00:00:00Z"',
+            ),
+            encoding="utf-8",
+        )
+        review = self.run_oaw(
+            "task",
+            "review",
+            "OAW-TSK-cli",
+            "--note",
+            "Review handoff.",
+            "--checks",
+            "pytest",
+        )
+        self.assertEqual(review.returncode, 1)
+        self.assertIn("another session remains running", review.stderr)
+        self.assertIn(
+            "status: active",
+            (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text(),
+        )
+        listed = self.run_oaw("run", "list", "--json")
+        rows = json.loads(listed.stdout)
+        stale = next(row for row in rows if row["agent_session_id"] == "other-thread")
+        self.assertTrue(stale["stale"])
+        self.assertEqual(stale["run_state"], "running")
+
+    @pytest.mark.parametrize("command", ["review", "complete"])
+    @pytest.mark.parametrize(
+        ("old", "new", "expected"),
+        [
+            ("id: AGT-RUN-", "id: AGT-RUN-forged-", "id/filename mismatch"),
+            (
+                'task_id: "OAW-TSK-cli"',
+                'task_id: "OAW-TSK-archived"',
+                "run-id/identity mismatch",
+            ),
+        ],
+    )
+    def test_transition_fails_closed_on_corrupt_sibling_record(self, command, old, new, expected):
+        current = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Current.")
+        sibling = self.run_oaw(
+            "task",
+            "start",
+            "OAW-TSK-cli",
+            "--note",
+            "Sibling.",
+            env={"CODEX_THREAD_ID": "other-thread"},
+        )
+        self.assertEqual(current.returncode, 0, current.stderr)
+        self.assertEqual(sibling.returncode, 0, sibling.stderr)
+        sibling_path = self.run_record_for("other-thread")
+        sibling_path.write_text(
+            sibling_path.read_text(encoding="utf-8").replace(old, new, 1),
+            encoding="utf-8",
+        )
+        before = {
+            path.relative_to(self.vault): path.read_bytes()
+            for path in self.vault.rglob("*")
+            if path.is_file()
+        }
+
+        result = self.run_oaw(
+            "task",
+            command,
+            "OAW-TSK-cli",
+            "--note",
+            "Must fail closed.",
+            "--checks",
+            "pytest",
+        )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(expected, result.stderr)
+        after = {
+            path.relative_to(self.vault): path.read_bytes()
+            for path in self.vault.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before, after)
+
+    def test_legacy_direct_complete_refuses_another_running_session(self):
+        started = self.run_oaw(
+            "task",
+            "start",
+            "OAW-TSK-cli",
+            "--note",
+            "Other session owns the task.",
+            env={"CODEX_THREAD_ID": "other-thread"},
+        )
+        self.assertEqual(started.returncode, 0, started.stderr)
+        before = {
+            path.relative_to(self.vault): path.read_bytes()
+            for path in self.vault.rglob("*")
+            if path.is_file()
+        }
+        completed = self.run_oaw(
+            "task",
+            "complete",
+            "OAW-TSK-cli",
+            "--note",
+            "Cannot bypass concurrency.",
+            "--checks",
+            "pytest",
+        )
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("another session remains running", completed.stderr)
+        after = {
+            path.relative_to(self.vault): path.read_bytes()
+            for path in self.vault.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before, after)
+
+    def test_cross_task_run_does_not_block_one_shot_completion(self):
+        started = self.run_oaw(
+            "task",
+            "start",
+            "OAW-TSK-cli",
+            "--note",
+            "Unrelated task run.",
+            env={"CODEX_THREAD_ID": "other-thread"},
+        )
+        self.assertEqual(started.returncode, 0, started.stderr)
+        write(
+            self.vault / "Tasks/Independent.md",
+            """---
+type: task
+status: todo
+id: ROOT-TSK-independent
+aliases:
+  - ROOT-TSK-independent
+---
+
+# Independent
+""",
+        )
+        completed = self.run_oaw(
+            "task",
+            "complete",
+            "ROOT-TSK-independent",
+            "--note",
+            "Completed independently.",
+            "--checks",
+            "pytest",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        task = (self.vault / "Tasks/Independent.md").read_text(encoding="utf-8")
+        self.assertIn("status: done", task)
+        self.assertNotIn("execution:", task)
+        run = self.run_record_for("test-thread").read_text(encoding="utf-8")
+        self.assertIn("run_state: completed", run)
+        self.assertIn("verification: pytest", run)
+
+    def test_pause_changes_only_callers_run_and_preserves_task_status(self):
+        for session in ("test-thread", "other-thread"):
+            started = self.run_oaw(
+                "task",
+                "start",
+                "OAW-TSK-cli",
+                "--note",
+                f"Start {session}.",
+                env={"CODEX_THREAD_ID": session},
+            )
+            self.assertEqual(started.returncode, 0, started.stderr)
+        paused = self.run_oaw("task", "pause", "OAW-TSK-cli", "--note", "Pausing caller.")
+        self.assertEqual(paused.returncode, 0, paused.stderr)
+        self.assertIn("run_state: paused", self.run_record_for("test-thread").read_text())
+        self.assertIn("run_state: running", self.run_record_for("other-thread").read_text())
+        task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+        self.assertIn("status: active", task)
+
+    @pytest.mark.parametrize("execution", [None, "invalid"])
+    def test_pause_requires_explicit_agent_or_hybrid_execution(self, execution):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        if execution:
+            task_path.write_text(
+                task_path.read_text(encoding="utf-8").replace(
+                    "status: todo", f"status: todo\nexecution: {execution}"
+                ),
+                encoding="utf-8",
+            )
+        before = task_path.read_bytes()
+        paused = self.run_oaw("task", "pause", "OAW-TSK-cli", "--note", "No run.")
+        self.assertEqual(paused.returncode, 1)
+        self.assertIn("requires execution: agent or hybrid", paused.stderr)
+        self.assertEqual(before, task_path.read_bytes())
+
+    def test_human_task_refuses_agent_start_before_any_write(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace(
+                "status: todo", "status: todo\nexecution: human"
+            ),
+            encoding="utf-8",
+        )
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        before = (task_path.read_bytes(), board_path.read_bytes())
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Must refuse.")
+        self.assertEqual(started.returncode, 1)
+        self.assertIn("managed in Obsidian UI", started.stderr)
+        self.assertEqual(before, (task_path.read_bytes(), board_path.read_bytes()))
+        self.assertFalse((self.vault / "Agents/Runs").exists())
+
+    @pytest.mark.parametrize("command", ["backlog", "promote"])
+    def test_queue_transition_refuses_while_any_run_is_running(self, command):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Run remains active.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        run_path = self.run_record_for("test-thread")
+        before = (task_path.read_bytes(), board_path.read_bytes(), run_path.read_bytes())
+
+        moved = self.run_oaw("task", command, "OAW-TSK-cli", "--note", "Must wait.")
+
+        self.assertEqual(moved.returncode, 1)
+        self.assertIn("while an agent run is running", moved.stderr)
+        self.assertEqual(
+            before, (task_path.read_bytes(), board_path.read_bytes(), run_path.read_bytes())
+        )
+
+    def test_task_note_refreshes_only_existing_matching_running_run(self):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        noted = self.run_oaw(
+            "task", "note", "OAW-TSK-cli", "--note", "Progress.", "--checks", "pytest"
+        )
+        self.assertEqual(noted.returncode, 0, noted.stderr)
+        run_text = self.run_record_for("test-thread").read_text(encoding="utf-8")
+        self.assertIn(" — note — Progress. — verification: pytest", run_text)
+
+        write(
+            self.vault / "Tasks/Unstarted.md",
+            """---
+type: task
+status: todo
+id: ROOT-TSK-unstarted
+aliases:
+  - ROOT-TSK-unstarted
+---
+
+# Unstarted
+""",
+        )
+        count = len(list((self.vault / "Agents/Runs").glob("*.md")))
+        unstarted = self.run_oaw("task", "note", "ROOT-TSK-unstarted", "--note", "Trace only.")
+        self.assertEqual(unstarted.returncode, 0, unstarted.stderr)
+        self.assertEqual(len(list((self.vault / "Agents/Runs").glob("*.md"))), count)
+
+    def test_run_close_records_closer_without_changing_task(self):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task_before = task_path.read_bytes()
+        run_path = self.run_record_for("test-thread")
+        identifier = run_path.stem
+
+        closed = self.run_oaw(
+            "run",
+            "close",
+            identifier,
+            "--reason",
+            "true",
+            env={"CODEX_THREAD_ID": "closer-thread"},
+        )
+
+        self.assertEqual(closed.returncode, 0, closed.stderr)
+        text = run_path.read_text(encoding="utf-8")
+        self.assertIn('agent_session_id: "test-thread"', text)
+        self.assertIn('  - "test-thread"', text)
+        self.assertIn('  - "closer-thread"', text)
+        self.assertIn("run_state: closed", text)
+        self.assertIn('ended_reason: "true"', text)
+        self.assertEqual(task_before, task_path.read_bytes())
+
+    def test_run_close_rejects_an_unsafe_run_id_without_writes(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        before = task_path.read_bytes()
+
+        closed = self.run_oaw(
+            "run",
+            "close",
+            "../../Projects/Obsidian Agent Workflow/Tasks/Resolver CLI",
+            "--reason",
+            "unsafe lookup",
+        )
+
+        self.assertEqual(closed.returncode, 1)
+        self.assertIn("invalid run id", closed.stderr)
+        self.assertEqual(before, task_path.read_bytes())
+
+    @pytest.mark.parametrize(
+        ("old", "new", "expected"),
+        [
+            (
+                "agent_session_env: CODEX_THREAD_ID",
+                "agent_session_env: CLAUDE_SESSION_ID",
+                "unsupported provider/session environment",
+            ),
+            (
+                'task: "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]"',
+                'task: "[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-cli]]"',
+                "task link does not match resolved task path/id",
+            ),
+        ],
+    )
+    def test_run_close_rejects_forged_identity_or_task_scope(self, old, new, expected):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        run_path = self.run_record_for("test-thread")
+        run_path.write_text(
+            run_path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8"
+        )
+        before = run_path.read_bytes()
+
+        closed = self.run_oaw(
+            "run",
+            "close",
+            run_path.stem,
+            "--reason",
+            "Must reject forged record.",
+            env={"CODEX_THREAD_ID": "closer-thread"},
+        )
+
+        self.assertEqual(closed.returncode, 1)
+        self.assertIn(expected, closed.stderr)
+        self.assertEqual(before, run_path.read_bytes())
+
+    @pytest.mark.parametrize(
+        ("old", "new", "expected"),
+        [
+            (
+                'session-ids:\n  - "test-thread"',
+                "session-ids: owner",
+                "malformed session-ids",
+            ),
+            ("run_state: running", "run_state: unknown", "malformed run_state unknown"),
+            (
+                'started_at: "',
+                'started_at: "not-a-timestamp-',
+                "malformed started_at",
+            ),
+        ],
+    )
+    def test_run_close_rejects_malformed_mutable_schema_without_writes(self, old, new, expected):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        run_path = self.run_record_for("test-thread")
+        run_path.write_text(
+            run_path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8"
+        )
+        before = {
+            path.relative_to(self.vault): path.read_bytes()
+            for path in self.vault.rglob("*")
+            if path.is_file()
+        }
+
+        closed = self.run_oaw(
+            "run",
+            "close",
+            run_path.stem,
+            "--reason",
+            "must not mutate",
+            env={"CODEX_THREAD_ID": "closer-thread"},
+        )
+
+        self.assertEqual(closed.returncode, 1)
+        self.assertIn("run record validation failed", closed.stderr)
+        self.assertIn(expected, closed.stderr)
+        after = {
+            path.relative_to(self.vault): path.read_bytes()
+            for path in self.vault.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before, after)
+
+    @pytest.mark.parametrize("operation", ["list", "audit", "close", "start", "create-start"])
+    def test_symlinked_run_directory_fails_closed_without_writes(self, operation):
+        with tempfile.TemporaryDirectory() as outside_raw:
+            outside = Path(outside_raw)
+            marker = outside / "outside-marker.txt"
+            marker.write_text("outside must remain untouched\n", encoding="utf-8")
+            registry = self.vault / "Agents/Runs"
+            registry.symlink_to(outside, target_is_directory=True)
+            before_vault = snapshot_tree_without_following_symlinks(self.vault)
+            before_outside = snapshot_tree_without_following_symlinks(outside)
+            identifier = "AGT-RUN-OAW-TSK-cli-codex-0123456789ab"
+            arguments = {
+                "list": ("run", "list"),
+                "audit": ("run", "audit"),
+                "close": ("run", "close", identifier, "--reason", "must fail"),
+                "start": (
+                    "task",
+                    "start",
+                    "OAW-TSK-cli",
+                    "--note",
+                    "Must not follow registry symlink.",
+                ),
+                "create-start": (
+                    "task",
+                    "create",
+                    "--project",
+                    "Obsidian Agent Workflow",
+                    "--title",
+                    "Blocked directory symlink task",
+                    "--start",
+                ),
+            }[operation]
+
+            result = self.run_oaw(*arguments)
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("run registry directory must not be a symlink", result.stderr)
+            self.assertEqual(before_vault, snapshot_tree_without_following_symlinks(self.vault))
+            self.assertEqual(before_outside, snapshot_tree_without_following_symlinks(outside))
+
+    @pytest.mark.parametrize("operation", ["list", "audit", "close", "start", "create-start"])
+    def test_canonical_run_symlink_entry_fails_closed_without_writes(self, operation):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        canonical = self.run_record_for("test-thread")
+        with tempfile.TemporaryDirectory() as outside_raw:
+            outside = Path(outside_raw)
+            outside_run = outside / canonical.name
+            outside_run.write_bytes(canonical.read_bytes())
+            canonical.unlink()
+            canonical.symlink_to(outside_run)
+            before_vault = snapshot_tree_without_following_symlinks(self.vault)
+            before_outside = snapshot_tree_without_following_symlinks(outside)
+            arguments = {
+                "list": ("run", "list"),
+                "audit": ("run", "audit"),
+                "close": (
+                    "run",
+                    "close",
+                    canonical.stem,
+                    "--reason",
+                    "must fail",
+                ),
+                "start": (
+                    "task",
+                    "start",
+                    "OAW-TSK-cli",
+                    "--note",
+                    "Must not follow run symlink.",
+                ),
+                "create-start": (
+                    "task",
+                    "create",
+                    "--project",
+                    "Obsidian Agent Workflow",
+                    "--title",
+                    "Blocked entry symlink task",
+                    "--start",
+                ),
+            }[operation]
+
+            result = self.run_oaw(*arguments)
+
+            self.assertEqual(result.returncode, 1)
+            if operation == "audit":
+                self.assertIn("noncanonical registry artifact", result.stdout)
+            else:
+                self.assertIn("run registry contains symlink entries", result.stderr)
+            self.assertEqual(before_vault, snapshot_tree_without_following_symlinks(self.vault))
+            self.assertEqual(before_outside, snapshot_tree_without_following_symlinks(outside))
+
+    def test_run_audit_reports_clean_registry(self):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+
+        audited = self.run_oaw("run", "audit")
+
+        self.assertEqual(audited.returncode, 0, audited.stderr)
+        self.assertEqual(audited.stdout, "Run audit: clean\n")
+
+    def test_run_audit_reports_id_and_timestamp_inconsistencies(self):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        run_path = self.run_record_for("test-thread")
+        run_path.write_text(
+            run_path.read_text(encoding="utf-8")
+            .replace(f"id: {run_path.stem}", "id: AGT-RUN-wrong")
+            .replace(
+                next(
+                    line
+                    for line in run_path.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("last_event_at:")
+                ),
+                'last_event_at: "not-a-timestamp"',
+            ),
+            encoding="utf-8",
+        )
+
+        audited = self.run_oaw("run", "audit")
+
+        self.assertEqual(audited.returncode, 1)
+        self.assertIn("id/filename mismatch", audited.stdout)
+        self.assertIn("run-id/identity mismatch", audited.stdout)
+        self.assertIn("malformed last_event_at", audited.stdout)
+
+    def test_run_audit_reports_malformed_schema_and_terminal_metadata(self):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        run_path = self.run_record_for("test-thread")
+        run_path.write_text(
+            run_path.read_text(encoding="utf-8")
+            .replace("type: agent-run", "type: other")
+            .replace('  - "test-thread"', '  - "other-thread"\n  - "other-thread"')
+            .replace("run_state: running", "run_state: completed"),
+            encoding="utf-8",
+        )
+
+        audited = self.run_oaw("run", "audit")
+
+        self.assertEqual(audited.returncode, 1)
+        self.assertIn("malformed type other", audited.stdout)
+        self.assertIn("duplicate session-ids", audited.stdout)
+        self.assertIn("agent_session_id missing from session-ids", audited.stdout)
+        self.assertIn("terminal run missing valid ended_at", audited.stdout)
+        self.assertIn("terminal run missing ended_reason", audited.stdout)
+
+    def test_run_audit_reports_record_under_noncanonical_filename(self):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        canonical = self.run_record_for("test-thread")
+        write(self.vault / "Agents/Runs/misplaced.md", canonical.read_text(encoding="utf-8"))
+
+        audited = self.run_oaw("run", "audit")
+
+        self.assertEqual(audited.returncode, 1)
+        self.assertIn("misplaced.md: noncanonical registry artifact", audited.stdout)
+
+    def test_run_audit_reports_nested_and_non_markdown_artifacts(self):
+        directory = self.vault / "Agents/Runs"
+        write(directory / "README.txt", "not a run\n")
+        write(directory / "nested/AGT-RUN-hidden.md", "hidden run\n")
+
+        audited = self.run_oaw("run", "audit")
+
+        self.assertEqual(audited.returncode, 1)
+        self.assertIn("README.txt: noncanonical registry artifact", audited.stdout)
+        self.assertIn("nested/AGT-RUN-hidden.md: noncanonical registry artifact", audited.stdout)
+
+    def test_run_audit_rejects_extra_keys_project_shape_and_end_ordering(self):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        completed = self.run_oaw(
+            "task",
+            "complete",
+            "OAW-TSK-cli",
+            "--note",
+            "Complete.",
+            "--checks",
+            "pytest",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        run_path = self.run_record_for("test-thread")
+        text = run_path.read_text(encoding="utf-8")
+        ended_line = next(line for line in text.splitlines() if line.startswith("ended_at:"))
+        run_path.write_text(
+            text.replace('project: "obsidian-agent-workflow"', "project: [invalid]")
+            .replace("run_state: completed", "unexpected: value\nrun_state: completed")
+            .replace(ended_line, 'ended_at: "2000-01-01T00:00:00Z"'),
+            encoding="utf-8",
+        )
+
+        audited = self.run_oaw("run", "audit")
+
+        self.assertEqual(audited.returncode, 1)
+        self.assertIn("noncanonical schema keys: unexpected", audited.stdout)
+        self.assertIn("malformed project", audited.stdout)
+        self.assertIn("ended_at precedes started_at", audited.stdout)
+        self.assertIn("ended_at precedes last_event_at", audited.stdout)
+
     def test_task_review_requires_checks(self):
         missing = self.run_oaw("task", "review", "OAW-TSK-cli", "--note", "Ready for review.")
         self.assertNotEqual(missing.returncode, 0)
         self.assertIn("--checks", missing.stderr)
+
+    def test_review_does_not_default_missing_execution(self):
+        started = self.run_oaw(
+            "task", "start", "OAW-TSK-cli", "--note", "Established historical run."
+        )
+        self.assertEqual(started.returncode, 0, started.stderr)
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace("execution: agent\n", ""),
+            encoding="utf-8",
+        )
+
+        reviewed = self.run_oaw(
+            "task",
+            "review",
+            "OAW-TSK-cli",
+            "--note",
+            "Historical run ready.",
+            "--checks",
+            "pytest",
+        )
+
+        self.assertEqual(reviewed.returncode, 0, reviewed.stderr)
+        self.assertNotIn("execution:", task_path.read_text(encoding="utf-8"))
 
     @pytest.mark.parametrize(
         ("note", "checks", "expected"),
@@ -932,9 +1712,11 @@ aliases:
     def test_task_review_accepts_every_lifecycle_source_status(self, initial_status):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
         board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Established caller run.")
+        self.assertEqual(started.returncode, 0, started.stderr)
         task_path.write_text(
             task_path.read_text(encoding="utf-8").replace(
-                "status: todo", f"status: {initial_status}"
+                "status: active", f"status: {initial_status}"
             ),
             encoding="utf-8",
         )
@@ -973,7 +1755,10 @@ aliases:
     def test_task_review_transaction_failure_restores_task_and_board_bytes(self, monkeypatch):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
         board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
-        before = (task_path.read_bytes(), board_path.read_bytes())
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Established caller run.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        run_path = next((self.vault / "Agents/Runs").glob("*.md"))
+        before = (task_path.read_bytes(), board_path.read_bytes(), run_path.read_bytes())
         original_commit = lifecycle.VaultTransaction.commit
 
         def fail_second_replace(transaction):
@@ -1007,7 +1792,9 @@ aliases:
 
         self.assertEqual(result, 1)
         self.assertIn("transaction failed and was rolled back", stderr.getvalue())
-        self.assertEqual(before, (task_path.read_bytes(), board_path.read_bytes()))
+        self.assertEqual(
+            before, (task_path.read_bytes(), board_path.read_bytes(), run_path.read_bytes())
+        )
 
     def test_task_lifecycle_resolves_once_per_write(self, monkeypatch):
         monkeypatch.setenv("OAW_VAULT", str(self.vault))
@@ -1052,7 +1839,7 @@ aliases:
     def test_complete_requires_checks(self):
         proc = self.run_oaw("task", "complete", "OAW-TSK-cli", "--note", "Done.")
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("requires --checks", proc.stderr)
+        self.assertIn("required: --checks", proc.stderr)
 
     def test_task_note_appends_session_without_status_or_board_change(self):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
@@ -1171,7 +1958,7 @@ aliases:
         self.assertIn("OAW-TSK-cli", proc.stdout)
         self.assertIn("OAW-TSK-archived", proc.stdout)
 
-    def test_lifecycle_refuses_non_project_task(self):
+    def test_lifecycle_supports_agents_task_without_board(self):
         proc = self.run_oaw(
             "task",
             "start",
@@ -1179,8 +1966,11 @@ aliases:
             "--note",
             "Should fail.",
         )
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("Projects/*/Tasks", proc.stderr)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        note = (self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md").read_text()
+        self.assertIn("status: active", note)
+        self.assertIn("execution: agent", note)
+        self.assertIn("Board: not found", proc.stdout)
 
     def test_note_session_appends_agent_session_to_non_project_note(self):
         proc = self.run_oaw(
@@ -2901,7 +3691,7 @@ aliases:
         self.assertIn('  - "resolver-errors"', note)
         self.assertIn('  - "cli-contract"', note)
         self.assertIn("id: OAW-TSK-improve-resolver-errors", note)
-        self.assertIn("session-ids:\n  - test-thread", note)
+        self.assertIn('session-ids:\n  - "test-thread"', note)
         self.assertIn("Error messages should list candidates.", note)
         self.assertIn("- [[Projects/Obsidian Agent Workflow/Index|OAW-index]]", note)
         self.assertIn("## Agent sessions", note)
@@ -2965,6 +3755,52 @@ aliases:
         done_idx = board_lines.index("## Done")
         card_idx = next(idx for idx, line in enumerate(board_lines) if "OAW-TSK-todo-task" in line)
         self.assertTrue(todo_idx < card_idx < done_idx)
+
+    def test_task_create_start_is_atomic_without_capture(self):
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Atomic started task",
+            "--start",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("Status: active", proc.stdout)
+        self.assertIn("Run: AGT-RUN-OAW-TSK-atomic-started-task", proc.stdout)
+        task = (
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Atomic started task.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("status: active", task)
+        self.assertIn("execution: agent", task)
+        run = self.run_record_for("test-thread").read_text(encoding="utf-8")
+        self.assertIn('task_id: "OAW-TSK-atomic-started-task"', run)
+        self.assertIn("run_state: running", run)
+
+    def test_task_create_rejects_start_with_human_execution_without_writes(self):
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        before = board_path.read_bytes()
+
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Human task",
+            "--execution",
+            "human",
+            "--start",
+        )
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("cannot --start a task with human execution", proc.stderr)
+        self.assertEqual(before, board_path.read_bytes())
+        self.assertFalse(
+            (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Human task.md").exists()
+        )
 
     def test_task_create_duplicate_id_fails_without_writes(self):
         before_board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
@@ -3133,7 +3969,7 @@ aliases:
             self.vault / "Projects/Obsidian Agent Workflow/Tasks/Start capture work.md"
         ).read_text(encoding="utf-8")
         self.assertIn("status: active", task)
-        self.assertIn("session-ids:\n  - test-thread", task)
+        self.assertIn('session-ids:\n  - "test-thread"', task)
         board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
             encoding="utf-8"
         )

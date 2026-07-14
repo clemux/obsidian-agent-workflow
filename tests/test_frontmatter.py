@@ -28,6 +28,12 @@ indented: ignored
     }
 
 
+def test_parse_frontmatter_ignores_scalar_inline_comments_outside_quotes():
+    assert parse_frontmatter(
+        'status: active # managed in UI\nreason: "value # retained" # trailing\n'
+    ) == {"status": "active", "reason": "value # retained"}
+
+
 def test_set_frontmatter_scalar_replaces_or_inserts_without_changing_body():
     original = "---\nstatus: todo\nid: example\n---\nBody\n"
 
@@ -36,6 +42,17 @@ def test_set_frontmatter_scalar_replaces_or_inserts_without_changing_body():
 
     assert replaced == "---\nstatus: active\nid: example\n---\nBody\n"
     assert inserted == "---\nstatus: active\nid: example\npriority: 2\n---\nBody\n"
+
+
+def test_set_frontmatter_scalar_preserves_trailing_inline_comment():
+    original = '---\nstatus: todo  # managed in UI\nreason: "value # not a comment"\n---\n'
+
+    assert set_frontmatter_scalar(original, "status", "active") == (
+        '---\nstatus: active  # managed in UI\nreason: "value # not a comment"\n---\n'
+    )
+    assert set_frontmatter_scalar(original, "reason", '"new # value"') == (
+        '---\nstatus: todo  # managed in UI\nreason: "new # value"\n---\n'
+    )
 
 
 @pytest.mark.parametrize(

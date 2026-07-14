@@ -9,7 +9,7 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from .boards import move_project_board_card, updated_project_board_text
+from .boards import updated_project_board_text
 from .errors import OawError
 from .frontmatter import append_frontmatter_list_value, parse_frontmatter, set_frontmatter_scalar
 from .notes import VaultTransaction, append_markdown_block_to_section, split_note
@@ -18,10 +18,28 @@ from .resolver import (
     iter_markdown,
     matches_from_references,
     note_match,
+    resolve_id,
     resolve_id_from_references,
     resolve_project_root,
     resolve_project_root_from_references,
     scan_note_references,
+    strip_obs_prefix,
+)
+from .runs import (
+    audit_runs,
+    detect_identity,
+    find_run,
+    is_stale,
+    iter_runs,
+    matching_run,
+    new_run_text,
+    run_id,
+    run_path,
+    running_others,
+    runs_for_task,
+    transition_run_text,
+    utc_now,
+    yaml_quote,
 )
 from .sessions import detect_session
 from .tags import creation_tag_block, creation_tags
@@ -47,6 +65,25 @@ def project_root_for_task(path: Path, root: Path) -> Path:
         raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
     rel = path.relative_to(root)
     return root / rel.parts[0] / rel.parts[1]
+
+
+def is_lifecycle_task(path: Path, root: Path) -> bool:
+    try:
+        rel = path.relative_to(root)
+    except ValueError:
+        return False
+    parts = rel.parts
+    return (
+        is_project_task(path, root)
+        or (len(parts) == 3 and parts[:2] == ("Agents", "Tasks"))
+        or (len(parts) == 2 and parts[0] == "Tasks")
+    )
+
+
+def lifecycle_task_error() -> OawError:
+    return OawError(
+        "lifecycle writes are supported for Projects/*/Tasks, Agents/Tasks, and root Tasks"
+    )
 
 
 def append_session_id_frontmatter(text: str, session_ref: str) -> str:
@@ -104,8 +141,8 @@ def update_task(
     checks: str | None,
     allow_missing: bool,
 ) -> None:
-    if not is_project_task(match.path, root):
-        raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
+    if not is_lifecycle_task(match.path, root):
+        raise lifecycle_task_error()
     action = {
         "backlog": "backlog",
         "todo": "promote",
@@ -121,40 +158,248 @@ def update_task(
         raise OawError(f"task {action} requires non-empty --checks")
     if checks is not None and not checks.strip():
         raise OawError(f"task {action} requires non-empty --checks when provided")
-    provider, session_ref = detect_session(allow_missing)
+    task_id = str(match.note_id or "")
+    if not task_id:
+        raise OawError("lifecycle task requires a stable frontmatter id")
+    execution = match.frontmatter.get("execution")
+    if execution == "human":
+        raise OawError("task execution is human; lifecycle is managed in Obsidian UI")
+    if execution not in (None, "agent", "hybrid"):
+        raise OawError("task execution must be human, agent, or hybrid")
+
+    run_change: tuple[Path, str] | None = None
+    run_identifier: str | None = None
+
+    def resolve_task(candidate: str) -> NoteMatch:
+        return resolve_id(candidate, root)
+
+    if status in {"backlog", "todo"}:
+        if any(run.state == "running" for run in runs_for_task(root, task_id, resolve_task)):
+            raise OawError(f"task {status} refused while an agent run is running")
+        provider, session_ref = detect_session(allow_missing)
+    else:
+        identity = detect_identity()
+        provider = identity.provider_label
+        session_ref = f"{identity.env}={identity.session_id}"
+        now = utc_now()
+        current = matching_run(root, task_id, identity, match.path)
+        expected_id = run_id(task_id, identity)
+        if status == "active":
+            if current and current.state not in {"running", "paused", "completed", "closed"}:
+                raise OawError(f"run {current.id} has invalid state {current.state}")
+            if current and current.state == "completed":
+                raise OawError(f"run {current.id} is completed and cannot be reopened")
+            if current:
+                event = "refresh" if current.state == "running" else "resume"
+                run_text = transition_run_text(current, "running", event, now, note)
+                run_identifier = current.id
+            else:
+                run_identifier, run_text = new_run_text(
+                    root, match.path, match.frontmatter, identity, now, note=note
+                )
+            run_change = (run_path(root, run_identifier), run_text)
+        elif status in {"review", "done"}:
+            if current is None:
+                if status == "review":
+                    raise OawError("review requires the caller's existing run")
+                others = running_others(root, task_id, expected_id, resolve_task)
+                if others:
+                    raise OawError(
+                        "transition refused while another session remains running: "
+                        + ", ".join(run.id for run in others)
+                    )
+                run_identifier, run_text = new_run_text(
+                    root,
+                    match.path,
+                    match.frontmatter,
+                    identity,
+                    now,
+                    state="completed",
+                    event="completion",
+                    note=note,
+                    checks=checks,
+                )
+            else:
+                run_identifier = current.id
+                if current.state != "running":
+                    raise OawError(f"run {run_identifier} is {current.state}; expected running")
+                others = running_others(root, task_id, run_identifier, resolve_task)
+                if others:
+                    raise OawError(
+                        "transition refused while another session remains running: "
+                        + ", ".join(run.id for run in others)
+                    )
+                run_text = transition_run_text(
+                    current,
+                    "closed" if status == "review" else "completed",
+                    "review handoff" if status == "review" else "completion",
+                    now,
+                    note,
+                    checks,
+                    "review" if status == "review" else "completed",
+                )
+            run_change = (run_path(root, run_identifier), run_text)
+        else:
+            raise OawError(f"unsupported lifecycle status: {status}")
+
     text = match.path.read_text(encoding="utf-8")
+    if status == "active" and execution is None:
+        text = set_frontmatter_scalar(text, "execution", "agent")
     text = set_frontmatter_scalar(text, "status", status)
     text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
-    project_root = project_root_for_task(match.path, root)
-    board, board_text = updated_project_board_text(
-        project_root, match.path, match.title, match.note_id, status
-    )
+    board: Path | None = None
+    board_text: str | None = None
+    if is_project_task(match.path, root):
+        board, board_text = updated_project_board_text(
+            project_root_for_task(match.path, root), match.path, match.title, task_id, status
+        )
     transaction = VaultTransaction()
     transaction.stage(match.path, text)
+    if run_change:
+        transaction.stage(*run_change)
     if board and board_text:
         transaction.stage(board, board_text)
     transaction.commit()
-    moved = board is not None
     print(f"Updated: {match.relpath}")
     print(f"Status: {status}")
-    print(f"Board: {'updated' if moved else 'not found'}")
+    if run_identifier:
+        print(f"Run: {run_identifier}")
+    print(f"Board: {'updated' if board else 'not found'}")
+
+
+def pause_task(match: NoteMatch, root: Path, note: str) -> None:
+    if not is_lifecycle_task(match.path, root):
+        raise lifecycle_task_error()
+    if not note.strip():
+        raise OawError("task pause requires non-empty --note")
+    execution = match.frontmatter.get("execution")
+    if execution not in {"agent", "hybrid"}:
+        if execution == "human":
+            raise OawError("task execution is human; lifecycle is managed in Obsidian UI")
+        raise OawError("task pause requires execution: agent or hybrid")
+    task_id = str(match.note_id or "")
+    if not task_id:
+        raise OawError("lifecycle task requires a stable frontmatter id")
+    identity = detect_identity()
+    current = matching_run(root, task_id, identity, match.path)
+    if current is None or current.state != "running":
+        raise OawError("pause requires the caller's running record")
+    now = utc_now()
+    session_ref = f"{identity.env}={identity.session_id}"
+    task_text = append_session_id_frontmatter(match.path.read_text(encoding="utf-8"), session_ref)
+    task_text = append_session_entry(task_text, identity.provider_label, session_ref, note, None)
+    transaction = VaultTransaction()
+    transaction.stage(current.path, transition_run_text(current, "paused", "pause", now, note))
+    transaction.stage(match.path, task_text)
+    transaction.commit()
+    print(f"Updated: {match.relpath}")
+    print(f"Status: {match.frontmatter.get('status', '')}")
+    print(f"Run: {current.id}")
+    print("Run state: paused")
+    print("Board: unchanged")
 
 
 def append_task_note(
     match: NoteMatch, root: Path, note: str, checks: str | None, allow_missing: bool
 ) -> None:
-    if not is_project_task(match.path, root):
-        raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
+    if not is_lifecycle_task(match.path, root):
+        raise lifecycle_task_error()
     provider, session_ref = detect_session(allow_missing)
     text = match.path.read_text(encoding="utf-8")
     text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
-    match.path.write_text(text, encoding="utf-8")
+    transaction = VaultTransaction()
+    transaction.stage(match.path, text)
+    try:
+        identity = detect_identity()
+    except OawError:
+        identity = None
+    if identity and match.note_id:
+        current = matching_run(root, match.note_id, identity, match.path)
+        if current and current.state == "running":
+            transaction.stage(
+                current.path,
+                transition_run_text(current, "running", "note", utc_now(), note, checks),
+            )
+    transaction.commit()
     status = match.frontmatter.get("status", "")
     print(f"Updated: {match.relpath}")
     print(f"Status: {status}")
     print("Board: unchanged")
+
+
+def list_runs(task_id: str | None, state: str | None, as_json: bool, root: Path) -> None:
+    now = utc_now()
+    selected_task = strip_obs_prefix(task_id) if task_id else None
+    rows = [
+        run
+        for run in iter_runs(root)
+        if (not selected_task or run.data.get("task_id") == selected_task)
+        and (not state or run.state == state)
+    ]
+    if as_json:
+        print(
+            json.dumps(
+                [
+                    {
+                        **run.data,
+                        "path": run.path.relative_to(root).as_posix(),
+                        "stale": is_stale(run, now),
+                    }
+                    for run in rows
+                ],
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+    for run in rows:
+        print(
+            "\t".join(
+                (
+                    run.id,
+                    str(run.data.get("task_id", "")),
+                    run.state,
+                    str(run.data.get("provider", "")),
+                    "stale" if is_stale(run, now) else "current",
+                    str(run.data.get("last_event_at", "")),
+                )
+            )
+        )
+
+
+def close_run(identifier: str, reason: str, root: Path) -> None:
+    if not reason.strip():
+        raise OawError("run close requires a non-empty reason")
+    identity = detect_identity()
+    run = find_run(root, identifier, lambda task_id: resolve_id(task_id, root))
+    if run.state in {"completed", "closed"}:
+        raise OawError(f"run {identifier} is already {run.state}")
+    text = transition_run_text(
+        run,
+        "closed",
+        "administrative closure",
+        utc_now(),
+        reason,
+        ended_reason=reason,
+        closer=identity,
+    )
+    transaction = VaultTransaction()
+    transaction.stage(run.path, text)
+    transaction.commit()
+    print(f"Run: {identifier}")
+    print("Run state: closed")
+    print(f"Reason: {reason}")
+
+
+def audit_run_registry(root: Path) -> None:
+    findings = audit_runs(root, lambda task_id: resolve_id(task_id, root), utc_now())
+    if findings:
+        for finding in findings:
+            print(finding)
+        raise OawError(f"run audit found {len(findings)} issue(s)")
+    print("Run audit: clean")
 
 
 def _slugify(value: str) -> str:
@@ -185,6 +430,7 @@ def create_task(
     effort: str | None,
     note: str | None,
     tags: list[str] | None,
+    execution: str | None,
     allow_missing_session_id: bool,
 ) -> None:
     """Create a task from explicit CLI values, optionally promoting a capture."""
@@ -197,8 +443,6 @@ def create_task(
             raise OawError("from-capture source must have a stable frontmatter id")
         if capture.frontmatter.get("status") == "triaged":
             raise OawError(f"capture is already triaged: {capture.note_id}")
-    elif start:
-        raise OawError("--start is only supported with --from-capture")
     clean_title = (title or (capture.title if capture else "")).strip()
     if not clean_title:
         raise OawError("task create requires a non-empty --title")
@@ -216,7 +460,16 @@ def create_task(
             "task create requires --project unless --from-capture identifies a project capture"
         )
     project_root, alias = resolve_project_root_from_references(raw_project, root, references)
-    provider, session_ref = detect_session(allow_missing_session_id)
+    if execution not in {None, "human", "agent", "hybrid"}:
+        raise OawError("task execution must be human, agent, or hybrid")
+    if start and execution == "human":
+        raise OawError("cannot --start a task with human execution")
+    identity = detect_identity() if start else None
+    if identity:
+        provider = identity.provider_label
+        session_ref = f"{identity.env}={identity.session_id}"
+    else:
+        provider, session_ref = detect_session(allow_missing_session_id)
     if requested_id is not None:
         note_id = requested_id.strip()
         if not note_id:
@@ -239,6 +492,7 @@ def create_task(
     created = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
     project_slug = _slugify(project_root.name)
     task_status = "active" if start else status
+    task_execution = execution or ("agent" if start else None)
     lines = [
         "---",
         "type: task",
@@ -250,6 +504,8 @@ def create_task(
         lines.append(f"priority: {priority}")
     if effort:
         lines.append(f"effort: {effort}")
+    if task_execution:
+        lines.append(f"execution: {task_execution}")
     lines += [
         f"id: {note_id}",
         "aliases:",
@@ -263,7 +519,7 @@ def create_task(
         lines.append(f"source-capture: {capture.note_id}")
     session_id = session_ref.split("=", 1)[1] if "=" in session_ref else ""
     if session_id and session_id != "unavailable":
-        lines += ["session-ids:", f"  - {session_id}"]
+        lines += ["session-ids:", f"  - {yaml_quote(session_id)}"]
     lines += ["---", "", f"# {clean_title}", "", "## Problem", ""]
     lines.append(note.strip() if note else "_To be defined._")
     lines += ["", "## Related", ""]
@@ -281,6 +537,8 @@ def create_task(
         f"- {today} - {provider} - `{session_ref}` - Created task note.",
     ]
     task_text = "\n".join(lines) + "\n"
+    transaction = VaultTransaction()
+    transaction.stage(path, task_text)
     if capture:
         task_link = f"[[{relpath.with_suffix('').as_posix()}|{note_id}]]"
         capture_text = capture.path.read_text(encoding="utf-8")
@@ -290,20 +548,31 @@ def create_task(
         board, board_text = updated_project_board_text(
             project_root, path, clean_title, note_id, task_status
         )
-        transaction = VaultTransaction()
-        transaction.stage(path, task_text)
-        if board and board_text:
-            transaction.stage(board, board_text)
         transaction.stage(capture.path, capture_text)
-        transaction.commit()
-        moved = board is not None
     else:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(task_text, encoding="utf-8")
-        moved = move_project_board_card(project_root, path, clean_title, note_id, task_status)
+        board, board_text = updated_project_board_text(
+            project_root, path, clean_title, note_id, task_status
+        )
+    if board and board_text:
+        transaction.stage(board, board_text)
+    run_identifier: str | None = None
+    if identity:
+        run_identifier, run_text = new_run_text(
+            root,
+            path,
+            {"id": note_id, "project": project_slug, "execution": task_execution},
+            identity,
+            utc_now(),
+            note="Atomic task creation and start.",
+        )
+        transaction.stage(run_path(root, run_identifier), run_text)
+    transaction.commit()
+    moved = board is not None
     print(f"Created: {relpath.as_posix()}")
     print(f"ID: {note_id}")
     print(f"Status: {task_status}")
+    if run_identifier:
+        print(f"Run: {run_identifier}")
     print(f"Board: {'updated' if moved else 'not found'}")
     if capture:
         print(f"Capture: {capture.note_id} -> triaged")
