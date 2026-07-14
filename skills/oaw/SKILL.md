@@ -35,6 +35,22 @@ Short uppercase project aliases such as `obs:CDX` or `obs:OAW` resolve only thro
 
 On failure `oaw` exits non-zero with a clear message: "no note with frontmatter id or alias" for a miss, or a candidate-path list when an ID is duplicated. Surface that error to the user instead of guessing a path or falling back to text search.
 
+## Session phase titles
+
+When one resolved task owns the session and a rename operation is already
+available in the tool set, synchronize `[MARKER] CANONICAL-ID` on initial
+ownership, resume, and material phase changes: design `[DESIGN]`, implementation
+`[I]`, review or verification `[R]`, wrapping up `[W]`, and completed `[DONE]`.
+Incidental references do not transfer ownership. Titles never change OAW state:
+`[I]` normally accompanies `task start`, `[R]` does not imply `status: review`,
+and `[DONE]` is allowed only after `task complete` succeeds.
+
+If no agent-callable rename operation is already exposed, silently skip title
+synchronization. Do not investigate support, announce the limitation, ask the
+user to rename, spawn or resume a client, or mutate task data as compensation.
+Only when maintaining, evaluating, or explicitly discussing title sync, read
+`references/session-phase-title-evaluation.md` for rationale and client evidence.
+
 ## Session lookup
 
 Use `oaw session lookup <id>` when you need to trace a literal session/thread id quickly:

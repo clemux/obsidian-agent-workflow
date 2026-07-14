@@ -213,6 +213,29 @@ Lifecycle commands update task frontmatter, append an `## Agent sessions` trace,
 
 Tasks may declare `execution: human`, `agent`, or `hybrid`. An absent value becomes `agent` only when `start` begins a run. Human tasks remain UI-managed and reject agent lifecycle transitions. `start`, `pause`, `review`, and `complete` require a real harness session ID and do not offer `--allow-missing-session-id`; `backlog`, `promote`, `task note`, and `task priority` retain the explicit missing-ID trace path. With a real ID, session-writing commands append it as a quoted string to a deduplicated `session-ids` block list while preserving existing entries, comments, and any legacy scalar `session-id`.
 
+### Session phase titles
+
+The OAW skill also keeps the owning agent session recognizable as
+`[MARKER] CANONICAL-TASK-ID` when the client exposes an agent-callable rename
+operation. The markers are `[DESIGN]` for design, `[I]` for implementation,
+`[R]` for review or verification, `[W]` for wrap-up, and `[DONE]` for completed
+work. Design and done stay long because `[D]` would be ambiguous; the middle
+phases use compact markers to leave room for the task ID in narrow sidebars.
+
+The title describes current session work, not durable task state. Design and
+wrap-up do not change lifecycle status. `[R]` does not move a task to `review`;
+only a successful `oaw task review` does that. `[DONE]` is set only after a
+successful `oaw task complete`. Incidental references do not take title
+ownership from the primary task, and resuming a session re-synchronizes a stale
+title when task ownership and phase are clear.
+
+This is capability-gated. Codex Desktop can use its callable task rename. A
+Claude Code launcher can set a display name with `claude --name`, but that is
+not an in-session agent capability; the skill uses an in-session rename only if
+Claude actually exposes one as a callable tool. Clients without such a
+capability continue the OAW workflow unchanged and never mutate task state to
+compensate for the missing UI operation.
+
 Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It accepts optional `--checks`, works in any task status, and refreshes `last_event_at` only when the caller already has a matching running record; it never creates one.
 
 Use `oaw task priority` to set an existing task's vault-wide priority to `1`, `2`,
