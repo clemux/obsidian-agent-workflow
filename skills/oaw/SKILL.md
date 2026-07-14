@@ -156,6 +156,7 @@ oaw task pause OAW-TSK-cli --note "Paused this session's run."
 oaw task review OAW-TSK-cli --note "Ready for review." --checks "pytest"
 oaw task complete OAW-TSK-cli --note "Finished and verified." --checks "pytest"
 oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "pytest"
+oaw task priority OAW-TSK-cli --priority 1 --note "Raised after cross-project triage."
 ```
 
 - `create` makes a new project task with standard frontmatter, a `Problem` section, a durable project-index link, an `## Agent sessions` trace, and a board card. `--project` takes a project alias (`obs:OAW`) or folder name; the ID defaults to `<ALIAS>-TSK-<slug>`; status defaults to `backlog` (`--status todo` for selected work); optional values include `--priority 1|2|3`, `--effort S|M|L`, repeatable `--tag`, and `--execution human|agent|hybrid`. `--start` works with or without a capture and atomically creates the task, active card, and run. It defaults execution to `agent`, requires a real session ID, and rejects human execution.
@@ -163,9 +164,10 @@ oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "pyt
 - `backlog` sets `status: backlog`; `promote` sets `status: todo`; `start` sets `status: active`; `pause` pauses only the caller's run and leaves task status/board unchanged; `review` closes the caller's run with reason `review` and sets task status to `review`; `complete` completes the caller's run and sets task status to `done`.
 - `complete` requires `--checks` naming the verification actually run; do not fabricate checks.
 - `note` appends a dated entry without changing status or board. If the caller already has a matching running record it refreshes that record; it never creates a run.
+- `priority` sets an existing task's priority to `1`, `2`, or `3`, appends a dated agent-session trace, and leaves status, board, and run records unchanged. It preserves unrelated frontmatter formatting and inline priority comments, and rejects unsupported task locations or malformed/duplicate priority fields before writing.
 - `backlog`, `promote`, `start`, `review`, and `complete` append a dated entry under `## Agent sessions` and move the task's card to the matching column when the project has a board (`Projects/<Project>/Board.md`) — creating the card and column heading if missing. Cards keep the `- [ ]` marker in every column; the column heading, not the checkbox, reflects status. Task and board writes are transactional, so a failed board update does not leave a partially updated task note.
 - The command's output (`Updated:` / `Status:` / `Board:`) confirms the write. To report resulting state, rely on that output plus `oaw resolve --meta` if needed — do not re-read the whole note with `--full`.
-- The session ID is read automatically from the first supported harness variable. `start`, `pause`, `review`, `complete`, and `run close` require a real identity and never accept `--allow-missing-session-id`. Use that escape hatch only on non-run trace or administrative commands when the user explicitly accepts an untraceable entry.
+- The session ID is read automatically from the first supported harness variable. `start`, `pause`, `review`, `complete`, and `run close` require a real identity and never accept `--allow-missing-session-id`. `task priority` follows the non-run trace policy and accepts that escape hatch only when the user explicitly accepts an untraceable entry.
 - With a real harness ID, lifecycle and `task note` writes append it as a quoted string to a deduplicated `session-ids` frontmatter block list, preserving existing entries, comments, and any legacy scalar `session-id`. Unsupported inline, mapping, or ambiguous non-string `session-ids` shapes fail before the note is written. The explicit missing-ID path writes only the body trace; it does not add a synthetic list value.
 
 Agent runs are durable records under `Agents/Runs/`. The same task/provider/session

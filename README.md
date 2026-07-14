@@ -206,13 +206,20 @@ oaw task pause OAW-TSK-cli --note "Paused this session's run."
 oaw task review OAW-TSK-cli --note "Ready for review." --checks "pytest"
 oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "pytest"
 oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "pytest"
+oaw task priority OAW-TSK-cli --priority 1 --note "Raised after cross-project triage."
 ```
 
 Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on a project `Board.md` when one exists. The lifecycle order is `Backlog` -> `Todo` -> `Active` -> `Review` -> `Done`. Agent-run records live independently under `Agents/Runs/`: repeating `start` in the same provider/session refreshes one record, while another session gets a distinct record. `pause` changes only the caller's run to `paused`; task status and board remain active. `review` and `complete` refuse while another session is still running, including a run whose derived age is stale. Task, run, and board changes are committed together.
 
-Tasks may declare `execution: human`, `agent`, or `hybrid`. An absent value becomes `agent` only when `start` begins a run. Human tasks remain UI-managed and reject agent lifecycle transitions. `start`, `pause`, `review`, and `complete` require a real harness session ID and do not offer `--allow-missing-session-id`; `backlog`, `promote`, and `task note` retain the explicit missing-ID trace path. With a real ID, session-writing commands append it as a quoted string to a deduplicated `session-ids` block list while preserving existing entries, comments, and any legacy scalar `session-id`.
+Tasks may declare `execution: human`, `agent`, or `hybrid`. An absent value becomes `agent` only when `start` begins a run. Human tasks remain UI-managed and reject agent lifecycle transitions. `start`, `pause`, `review`, and `complete` require a real harness session ID and do not offer `--allow-missing-session-id`; `backlog`, `promote`, `task note`, and `task priority` retain the explicit missing-ID trace path. With a real ID, session-writing commands append it as a quoted string to a deduplicated `session-ids` block list while preserving existing entries, comments, and any legacy scalar `session-id`.
 
 Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It accepts optional `--checks`, works in any task status, and refreshes `last_event_at` only when the caller already has a matching running record; it never creates one.
+
+Use `oaw task priority` to set an existing task's vault-wide priority to `1`, `2`,
+or `3`. It preserves the task status, project board, run records, unrelated
+frontmatter formatting, and any inline priority comment while appending an agent
+session trace. Unsupported task locations and malformed or duplicate priority
+fields are rejected before writing.
 
 Inspect and administer the registry without changing task lifecycle state:
 
