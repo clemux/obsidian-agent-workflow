@@ -35,6 +35,7 @@ from .lifecycle import (
     pause_task,
     start_research_run,
     update_task,
+    update_task_priority,
 )
 from .links import link_check, link_ensure, link_ensure_bidirectional, link_lint, link_list
 from .resolver import list_project, notes_containing_literal, output_resolve, resolve_id, vault_root
@@ -65,7 +66,7 @@ USAGE_BY_COMMAND = {
     "                             [--force]\n",
     "oaw research start": "usage: oaw research start [-h] --project PROJECT --track TRACK --source SOURCE\n"
     "                          --url URL\n",
-    "oaw task": "usage: oaw task [-h] {backlog,promote,start,pause,review,complete,note,create} ...\n",
+    "oaw task": "usage: oaw task [-h] {backlog,promote,start,pause,review,complete,note,priority,create} ...\n",
     "oaw task backlog": "usage: oaw task backlog [-h] --note NOTE [--checks CHECKS]\n"
     "                        [--allow-missing-session-id]\n"
     "                        id\n",
@@ -78,6 +79,9 @@ USAGE_BY_COMMAND = {
     "oaw task note": "usage: oaw task note [-h] --note NOTE [--checks CHECKS]\n"
     "                     [--allow-missing-session-id]\n"
     "                     id\n",
+    "oaw task priority": "usage: oaw task priority [-h] --priority {1,2,3} --note NOTE\n"
+    "                         [--allow-missing-session-id]\n"
+    "                         id\n",
     "oaw task create": "usage: oaw task create [-h] [--project PROJECT] [--title TITLE]\n"
     "                       [--from-capture FROM_CAPTURE] [--start] [--id ID]\n"
     "                       [--status {backlog,todo}] [--priority {1,2,3}]\n"
@@ -560,6 +564,25 @@ def task_note(
     _run(
         lambda: append_task_note(
             resolve_id(note_id, root_path), root_path, note, checks, allow_missing_session_id
+        )
+    )
+
+
+@task_app.command("priority", help="update task priority without changing lifecycle status")
+def task_priority(
+    note_id: Annotated[str, typer.Argument()],
+    priority: Annotated[int, typer.Option("--priority", min=1, max=3)],
+    note: Annotated[str, typer.Option("--note")],
+    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
+) -> None:
+    root_path = vault_root()
+    _run(
+        lambda: update_task_priority(
+            resolve_id(note_id, root_path),
+            root_path,
+            priority,
+            note,
+            allow_missing_session_id,
         )
     )
 

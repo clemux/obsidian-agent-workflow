@@ -26,6 +26,7 @@ EXPECTED_COMMAND_PATHS = {
     ("task", "review"),
     ("task", "complete"),
     ("task", "note"),
+    ("task", "priority"),
     ("task", "create"),
     ("run",),
     ("run", "list"),
@@ -334,6 +335,27 @@ def test_typer_task_create_validates_every_choice_occurrence(
     assert result.exit_code == 2
     assert result.stdout == ""
     assert invalid_value in result.stderr
+
+
+@pytest.mark.parametrize("priority", ["0", "4", "invalid"])
+def test_typer_task_priority_rejects_values_outside_declared_choices(priority: str) -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "task",
+            "priority",
+            "PRT-TSK-example",
+            "--priority",
+            priority,
+            "--note",
+            "Re-rank.",
+        ],
+        env={"COLUMNS": "80"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert priority in result.stderr
 
 
 @pytest.mark.parametrize("arguments", [[], ["resolve"], ["unknown-command"]])

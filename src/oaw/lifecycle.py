@@ -11,7 +11,12 @@ from pathlib import Path
 
 from .boards import updated_project_board_text
 from .errors import OawError
-from .frontmatter import append_frontmatter_list_value, parse_frontmatter, set_frontmatter_scalar
+from .frontmatter import (
+    append_frontmatter_list_value,
+    parse_frontmatter,
+    set_frontmatter_scalar,
+    split_inline_comment,
+)
 from .notes import VaultTransaction, append_markdown_block_to_section, split_note
 from .resolver import (
     NoteMatch,
@@ -326,6 +331,55 @@ def append_task_note(
     status = match.frontmatter.get("status", "")
     print(f"Updated: {match.relpath}")
     print(f"Status: {status}")
+    print("Board: unchanged")
+
+
+def update_task_priority(
+    match: NoteMatch,
+    root: Path,
+    priority: int,
+    note: str,
+    allow_missing: bool,
+) -> None:
+    if not is_lifecycle_task(match.path, root):
+        raise lifecycle_task_error()
+    if match.frontmatter.get("type") != "task":
+        raise OawError("task priority requires frontmatter type: task")
+    if priority not in {1, 2, 3}:
+        raise OawError("task priority must be 1, 2, or 3")
+    if not note.strip():
+        raise OawError("task priority requires non-empty --note")
+
+    text = match.path.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise OawError("task note has no YAML frontmatter")
+    end = next((idx for idx in range(1, len(lines)) if lines[idx].strip() == "---"), None)
+    if end is None:
+        raise OawError("task note frontmatter is not closed")
+    priority_lines = [
+        line for line in lines[1:end] if re.match(r"^priority\s*:", line)
+    ]
+    if len(priority_lines) > 1:
+        raise OawError("task priority frontmatter must contain at most one priority field")
+    if priority_lines:
+        raw_value = priority_lines[0].split(":", 1)[1].rstrip("\r\n")
+        value, _ = split_inline_comment(raw_value.strip())
+        if value not in {"1", "2", "3"}:
+            raise OawError(
+                "task priority frontmatter must be a scalar 1, 2, or 3 before OAW can update it"
+            )
+
+    provider, session_ref = detect_session(allow_missing)
+    text = set_frontmatter_scalar(text, "priority", str(priority))
+    text = append_session_id_frontmatter(text, session_ref)
+    text = append_session_entry(text, provider, session_ref, note, None)
+    transaction = VaultTransaction()
+    transaction.stage(match.path, text)
+    transaction.commit()
+    print(f"Updated: {match.relpath}")
+    print(f"Priority: {priority}")
+    print(f"Status: {match.frontmatter.get('status', '')}")
     print("Board: unchanged")
 
 
