@@ -176,20 +176,35 @@ or edits to `Projects/Index.md`.
 
 ## Task lifecycle
 
-`oaw task` provides a conservative task lifecycle for project tasks under `Projects/*/Tasks`:
+`oaw task` provides a conservative lifecycle for tasks under `Projects/*/Tasks`,
+`Agents/Tasks`, and root `Tasks/`:
 
 ```bash
 oaw task backlog OAW-TSK-cli --note "Parked until the dependency is ready."
 oaw task promote OAW-TSK-cli --note "Selected for the next session."
 oaw task start OAW-TSK-cli --note "Implemented resolver and lifecycle CLI."
+oaw task pause OAW-TSK-cli --note "Paused this session's run."
 oaw task review OAW-TSK-cli --note "Ready for review." --checks "pytest"
 oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "pytest"
 oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "pytest"
 ```
 
-Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on the project `Board.md` when one exists. The lifecycle order is `Backlog` -> `Todo` -> `Active` -> `Review` -> `Done`: `backlog` sets `status: backlog`, `promote` sets `status: todo`, `start` sets `status: active`, `review` sets `status: review` (and requires `--checks`), and `complete` sets `status: done`. Task status and board-card changes are committed together, so a failed board write leaves the task note unchanged. With a real harness ID, session-writing commands also append it as a quoted string to a deduplicated `session-ids` frontmatter block list while preserving existing entries, comments, and any legacy scalar `session-id`. Unsupported inline, mapping, or ambiguous non-string `session-ids` shapes fail before the note is written instead of being normalized lossily. They never invent a session ID; pass a real ID through a known harness env var such as `CODEX_THREAD_ID`, or use `--allow-missing-session-id` explicitly. The explicit missing-ID path records the body trace only and does not add `unavailable` to frontmatter.
+Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on a project `Board.md` when one exists. The lifecycle order is `Backlog` -> `Todo` -> `Active` -> `Review` -> `Done`. Agent-run records live independently under `Agents/Runs/`: repeating `start` in the same provider/session refreshes one record, while another session gets a distinct record. `pause` changes only the caller's run to `paused`; task status and board remain active. `review` and `complete` refuse while another session is still running, including a run whose derived age is stale. Task, run, and board changes are committed together.
 
-Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It uses the same session-id handling as `start`, `review`, and `complete`, accepts optional `--checks`, and works on task notes regardless of current status.
+Tasks may declare `execution: human`, `agent`, or `hybrid`. An absent value becomes `agent` only when `start` begins a run. Human tasks remain UI-managed and reject agent lifecycle transitions. `start`, `pause`, `review`, and `complete` require a real harness session ID and do not offer `--allow-missing-session-id`; `backlog`, `promote`, and `task note` retain the explicit missing-ID trace path. With a real ID, session-writing commands append it as a quoted string to a deduplicated `session-ids` block list while preserving existing entries, comments, and any legacy scalar `session-id`.
+
+Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It accepts optional `--checks`, works in any task status, and refreshes `last_event_at` only when the caller already has a matching running record; it never creates one.
+
+Inspect and administer the registry without changing task lifecycle state:
+
+```bash
+oaw run list --task OAW-TSK-cli --state running
+oaw run list --json
+oaw run close AGT-RUN-OAW-TSK-cli-codex-0123456789ab --reason "superseded session"
+oaw run audit
+```
+
+`run list` marks records older than 24 hours as `stale` without changing them or releasing concurrency. `run close` requires the real closer session, preserves the original `agent_session_id`, appends the closer to `session-ids`, and changes only the run. `run audit` reports registry inconsistencies.
 
 New task notes are created with `oaw task create` instead of hand-writing frontmatter:
 
@@ -197,14 +212,21 @@ New task notes are created with `oaw task create` instead of hand-writing frontm
 oaw task create --project obs:OAW --title "Example task" \
   --note "Initial problem statement." --priority 2 --effort M
 oaw task create --project "Obsidian Agent Workflow" --title "Chosen task" --status todo
+oaw task create --project obs:OAW --title "Agent task" --execution agent --start
 oaw task create --from-capture obs:OAW-CAP-routing-regression \
   --title "Investigate routing regression" --status todo
 oaw task create --from-capture obs:OAW-CAP-urgent --title "Handle urgent request" --start
 ```
 
-`--project` accepts a project alias (`obs:OAW`) or a folder name under `Projects/`. The note is created under the project's `Tasks/` folder with standard frontmatter (`type`, `project`, `status`, `created`, `id`, `aliases`, tags, optional `priority`/`effort`), a `Problem` section from `--note`, a durable link to the project index, and an `## Agent sessions` trace. The `created` value is a timezone-aware ISO 8601 creation datetime in UTC; `file.mtime` remains the separate source for the file's Modified timestamp. Existing historical task values that contain only a date are intentionally left unchanged because their actual creation times cannot be recovered. The task ID defaults to `<ALIAS>-TSK-<slug>` derived from the title; pass `--id` to override. Status is `backlog` by default with an explicit `--status todo` option, and the board card is registered through the same code as the lifecycle commands. Repeatable `--tag` values must be lowercase safe identifiers, are deduplicated in first-seen order, and are emitted before any `source-capture` field. Duplicate IDs and existing paths fail without writing anything. Session recording follows the lifecycle rules: a real harness ID is required unless `--allow-missing-session-id` is passed, and no ID is ever fabricated.
+`--project` accepts a project alias (`obs:OAW`) or a folder name under `Projects/`. The note is created under the project's `Tasks/` folder with standard frontmatter and optional `priority`, `effort`, and `execution`. The task ID defaults to `<ALIAS>-TSK-<slug>`; status defaults to `backlog`, with `--status todo` for selected work. `--start` works with or without a capture and atomically creates the task, active board card, and running record; it defaults execution to `agent`, requires a real session, and rejects `--execution human`. Duplicate IDs and existing paths fail without writing anything.
 
-When an actionable capture becomes material work, pass its stable ID with `--from-capture`. The project and title default to the capture's project folder and heading, while explicit `--project` and `--title` still override them. The command preserves the capture note and body, records its ID as `source-capture` on the task, adds durable links in both directions, appends the task wikilink to the capture's `destinations` frontmatter, registers the task on the project board, and only then changes the capture to `status: triaged`. Those writes commit together and roll back together on failure. The capture's `Outcome` remains an expected-next-shape statement; promotion never replaces it with completion prose. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent. `--start` uses the same real session provenance as creation and is only valid with `--from-capture`.
+The generated `created` value is a timezone-aware UTC datetime. Repeatable `--tag`
+values must be lowercase safe identifiers, are deduplicated in first-seen order, and
+precede `source-capture` on promoted tasks. Non-started creation records a session
+trace and permits `--allow-missing-session-id` only when an untraceable trace is
+explicitly accepted.
+
+When an actionable capture becomes material work, pass its stable ID with `--from-capture`. The project and title default to the capture's project folder and heading, while explicit `--project` and `--title` still override them. The command preserves the capture note and body, records its ID as `source-capture` on the task, adds durable links in both directions, appends the task wikilink to the capture's `destinations` frontmatter, registers the task on the project board, and only then changes the capture to `status: triaged`. Those writes commit together and roll back together on failure. The capture's `Outcome` remains an expected-next-shape statement; promotion does not replace it with completion prose. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent.
 
 ## Research packet lifecycle
 

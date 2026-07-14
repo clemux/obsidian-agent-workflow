@@ -11,6 +11,28 @@ from .errors import OawError
 FRONTMATTER_READ_LIMIT = 64 * 1024
 
 
+def split_inline_comment(value: str) -> tuple[str, str]:
+    """Split a YAML-style trailing comment while respecting quoted strings."""
+    quote: str | None = None
+    escaped = False
+    for position, character in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if quote == '"' and character == "\\":
+            escaped = True
+            continue
+        if character in {'"', "'"}:
+            quote = None if quote == character else character if quote is None else quote
+            continue
+        if character == "#" and quote is None and position > 0 and value[position - 1].isspace():
+            comment_start = position - 1
+            while comment_start > 0 and value[comment_start - 1].isspace():
+                comment_start -= 1
+            return value[:comment_start].rstrip(), value[comment_start:]
+    return value.rstrip(), ""
+
+
 def unquote_scalar(value: str) -> str:
     value = value.strip()
     if (value.startswith("'") and value.endswith("'")) or (
@@ -39,7 +61,7 @@ def parse_frontmatter(fm: str) -> dict[str, object]:
             continue
         key, value = line.split(":", 1)
         key = key.strip()
-        value = value.strip()
+        value, _ = split_inline_comment(value.strip())
         if not value:
             data[key] = []
             current_list = key
@@ -106,7 +128,10 @@ def set_frontmatter_scalar(text: str, key: str, value: str) -> str:
     pattern = re.compile(rf"^{re.escape(key)}\s*:")
     for idx in range(1, end):
         if pattern.match(lines[idx]):
-            lines[idx] = f"{key}: {value}\n"
+            raw = lines[idx].rstrip("\r\n")
+            _, comment = split_inline_comment(raw)
+            newline = "\r\n" if lines[idx].endswith("\r\n") else "\n"
+            lines[idx] = f"{key}: {value}{comment}{newline}"
             return "".join(lines)
     lines.insert(end, f"{key}: {value}\n")
     return "".join(lines)

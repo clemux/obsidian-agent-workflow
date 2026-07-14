@@ -184,6 +184,27 @@ def test_project_board_new_card_and_duplicate_target_heading_contract():
     )
 
 
+def test_project_board_does_not_remove_prefix_sibling_card():
+    rendered = render_project_board(
+        """## Todo
+
+- [ ] [[Tasks/Resolver CLI extended|Resolver CLI extended]] - OAW-TSK-cli-extended
+- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli
+
+## Active
+""",
+        task_path=Path("/vault/Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"),
+        project_root=Path("/vault/Projects/Obsidian Agent Workflow"),
+        title="Resolver CLI",
+        note_id="OAW-TSK-cli",
+        status="active",
+    )
+
+    assert rendered.count("OAW-TSK-cli-extended") == 1
+    assert rendered.count(" - OAW-TSK-cli\n") == 1
+    assert "## Todo\n\n- [ ] [[Tasks/Resolver CLI extended" in rendered
+
+
 def test_next_steps_new_card_format_contract():
     card = next_steps_card(
         "Projects/Obsidian Agent Workflow/Tasks/Archived task.md",

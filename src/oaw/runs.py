@@ -20,6 +20,21 @@ RUNS_DIR = Path("Agents/Runs")
 RUN_STATES = {"running", "paused", "completed", "closed"}
 TERMINAL_TASK_STATES = {"done", "superseded", "archived"}
 STALE_AFTER = dt.timedelta(hours=24)
+TASK_LINK_PATTERN = re.compile(r"^\[\[([^]|]+)\|([^]|]+)\]\]$")
+RUN_REQUIRED_KEYS = {
+    "type",
+    "id",
+    "task",
+    "task_id",
+    "provider",
+    "agent_session_id",
+    "agent_session_env",
+    "session-ids",
+    "run_state",
+    "started_at",
+    "last_event_at",
+}
+RUN_OPTIONAL_KEYS = {"project", "ended_at", "ended_reason"}
 SESSION_ENV = (
     ("codex", "Codex", "CODEX_THREAD_ID"),
     ("claude-code", "Claude Code", "CLAUDE_SESSION_ID"),
@@ -86,7 +101,9 @@ def detect_identity(environ: dict[str, str] | None = None) -> Identity:
         if session_id:
             return Identity(provider, label, session_id, env)
     names = ", ".join(item[2] for item in SESSION_ENV)
-    raise OawError(f"run lifecycle requires a real session ID; set one of: {names}")
+    raise OawError(
+        f"no stable session ID found; run lifecycle requires a real session ID; set one of: {names}"
+    )
 
 
 def run_id(task_id: str, identity: Identity) -> str:
@@ -95,6 +112,13 @@ def run_id(task_id: str, identity: Identity) -> str:
 
 
 def run_path(root: Path, identifier: str) -> Path:
+    if (
+        not identifier.startswith("AGT-RUN-")
+        or Path(identifier).name != identifier
+        or "/" in identifier
+        or "\\" in identifier
+    ):
+        raise OawError(f"invalid run id: {identifier}")
     return root / RUNS_DIR / f"{identifier}.md"
 
 
@@ -109,34 +133,277 @@ def load_run(path: Path) -> Run:
     return Run(path, parse_frontmatter(fm), body)
 
 
+def run_scope_errors(
+    run: Run,
+    *,
+    expected_id: str,
+    task_id: str | None = None,
+    identity: Identity | None = None,
+    task_link: str | None = None,
+    require_canonical_id: bool = False,
+) -> list[str]:
+    """Return deterministic identity and task-scope mismatches for a loaded run."""
+    errors: list[str] = []
+    if run.id != expected_id:
+        errors.append(
+            f"id/filename mismatch: {run.id or '<missing>'!r} does not match {expected_id!r}"
+        )
+    if task_id is not None and run.data.get("task_id") != task_id:
+        errors.append(f"task_id does not match {task_id!r}")
+    if identity is not None:
+        expected_identity = {
+            "provider": identity.provider,
+            "agent_session_id": identity.session_id,
+        }
+        for key, expected in expected_identity.items():
+            if run.data.get(key) != expected:
+                errors.append(f"{key} does not match {expected!r}")
+    if task_link is not None and run.data.get("task") != task_link:
+        errors.append("task link does not match resolved task path/id")
+    if require_canonical_id:
+        stored_task_id = run.data.get("task_id")
+        provider = run.data.get("provider")
+        session_id = run.data.get("agent_session_id")
+        identity_values = (stored_task_id, provider, session_id)
+        if all(isinstance(value, str) and value for value in identity_values):
+            canonical = run_id(
+                str(stored_task_id),
+                Identity(str(provider), str(provider), str(session_id), ""),
+            )
+            if canonical != expected_id or canonical != run.id:
+                errors.append(f"run-id/identity mismatch: expected {canonical!r}")
+        else:
+            errors.append("deterministic id fields are missing or invalid")
+    return errors
+
+
+def run_schema_errors(run: Run) -> list[str]:
+    """Return mutable-record schema errors without resolving the linked task."""
+    errors: list[str] = []
+    missing = sorted(key for key in RUN_REQUIRED_KEYS if not run.data.get(key))
+    if missing:
+        errors.append(f"malformed: missing {', '.join(missing)}")
+    extra = sorted(set(run.data) - RUN_REQUIRED_KEYS - RUN_OPTIONAL_KEYS)
+    if extra:
+        errors.append(f"noncanonical schema keys: {', '.join(extra)}")
+    if run.data.get("type") != "agent-run":
+        errors.append(f"malformed type {run.data.get('type', '<missing>')}")
+    project = run.data.get("project")
+    if project is not None and (not isinstance(project, str) or not project):
+        errors.append("malformed project")
+
+    provider = run.data.get("provider")
+    session_id = run.data.get("agent_session_id")
+    session_env = run.data.get("agent_session_env")
+    identity_values = (provider, session_id, session_env)
+    if not all(isinstance(value, str) and value for value in identity_values):
+        errors.append("malformed run identity")
+    elif not any(
+        provider == supported_provider and session_env == supported_env
+        for supported_provider, _, supported_env in SESSION_ENV
+    ):
+        errors.append("unsupported provider/session environment")
+
+    session_ids = run.data.get("session-ids")
+    if not isinstance(session_ids, list) or not all(
+        isinstance(value, str) and value for value in session_ids
+    ):
+        errors.append("malformed session-ids")
+    else:
+        if len(session_ids) != len(set(session_ids)):
+            errors.append("duplicate session-ids")
+        if isinstance(session_id, str) and session_id not in session_ids:
+            errors.append("agent_session_id missing from session-ids")
+
+    started_at = parse_utc(run.data.get("started_at"))
+    last_event_at = parse_utc(run.data.get("last_event_at"))
+    if started_at is None:
+        errors.append("malformed started_at")
+    if last_event_at is None:
+        errors.append("malformed last_event_at")
+    if started_at and last_event_at and last_event_at < started_at:
+        errors.append("last_event_at precedes started_at")
+
+    ended_at_value = run.data.get("ended_at")
+    ended_reason = run.data.get("ended_reason")
+    ended_at = parse_utc(ended_at_value)
+    if run.state not in RUN_STATES:
+        errors.append(f"malformed run_state {run.state}")
+    elif run.state in {"completed", "closed"}:
+        if ended_at is None:
+            errors.append("terminal run missing valid ended_at")
+        if not isinstance(ended_reason, str) or not ended_reason:
+            errors.append("terminal run missing ended_reason")
+        if started_at and ended_at and ended_at < started_at:
+            errors.append("ended_at precedes started_at")
+        if last_event_at and ended_at and ended_at < last_event_at:
+            errors.append("ended_at precedes last_event_at")
+    elif ended_at_value is not None or ended_reason is not None:
+        errors.append("non-terminal run has end metadata")
+
+    task_value = run.data.get("task")
+    if not isinstance(task_value, str) or TASK_LINK_PATTERN.fullmatch(task_value) is None:
+        errors.append("malformed task link")
+    return errors
+
+
+def validate_run_schema(run: Run) -> None:
+    errors = run_schema_errors(run)
+    if errors:
+        raise OawError(f"run record validation failed for {run.path.stem}: {'; '.join(errors)}")
+
+
+def load_validated_run(
+    path: Path,
+    *,
+    expected_id: str,
+    task_id: str | None = None,
+    identity: Identity | None = None,
+    task_link: str | None = None,
+    require_canonical_id: bool = False,
+) -> Run:
+    """Load a run and reject deterministic identity or task-scope mismatches."""
+    run = load_run(path)
+    errors = [
+        *run_schema_errors(run),
+        *run_scope_errors(
+            run,
+            expected_id=expected_id,
+            task_id=task_id,
+            identity=identity,
+            task_link=task_link,
+            require_canonical_id=require_canonical_id,
+        ),
+    ]
+    if errors:
+        raise OawError(f"run record validation failed for {expected_id}: {'; '.join(errors)}")
+    return run
+
+
+def validate_resolved_task_scope(
+    run: Run,
+    root: Path,
+    resolve_task: Callable[[str], Any],
+) -> Any:
+    """Resolve and validate the canonical task link owned by a run."""
+    task_id = run.data.get("task_id")
+    if not isinstance(task_id, str) or not task_id:
+        raise OawError(f"run record validation failed for {run.path.stem}: invalid task_id")
+    try:
+        task = resolve_task(task_id)
+    except OawError as exc:
+        raise OawError(
+            f"run record validation failed for {run.path.stem}: dangling task id {task_id}"
+        ) from exc
+    expected_link = durable_task_link(task.path, root, task_id)
+    if getattr(task, "note_id", None) != task_id or run.data.get("task") != expected_link:
+        raise OawError(
+            f"run record validation failed for {run.path.stem}: "
+            "task link does not match resolved task path/id"
+        )
+    return task
+
+
+def noncanonical_registry_artifacts(root: Path) -> list[Path]:
+    """Return files or links outside the canonical flat Markdown run layout."""
+    directory = root / RUNS_DIR
+    if not directory.exists():
+        return []
+    return [
+        path
+        for path in sorted(directory.rglob("*"))
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or path.parent != directory
+            or path.suffix != ".md"
+            or not path.stem.startswith("AGT-RUN-")
+        )
+    ]
+
+
+def validated_registry_runs(
+    root: Path,
+    resolve_task: Callable[[str], Any],
+) -> list[Run]:
+    """Load the complete canonical registry, failing closed on any corrupt artifact."""
+    artifacts = noncanonical_registry_artifacts(root)
+    if artifacts:
+        rendered = ", ".join(path.relative_to(root).as_posix() for path in artifacts)
+        raise OawError(f"run registry contains noncanonical artifacts: {rendered}")
+    runs: list[Run] = []
+    for run in iter_runs(root):
+        validated = load_validated_run(
+            run.path,
+            expected_id=run.path.stem,
+            require_canonical_id=True,
+        )
+        validate_resolved_task_scope(validated, root, resolve_task)
+        runs.append(validated)
+    return runs
+
+
 def iter_runs(root: Path) -> list[Run]:
     directory = root / RUNS_DIR
     if not directory.exists():
         return []
-    return [load_run(path) for path in sorted(directory.glob("AGT-RUN-*.md"))]
+    return [load_run(path) for path in sorted(directory.glob("*.md"))]
 
 
-def find_run(root: Path, identifier: str) -> Run:
+def find_run(
+    root: Path,
+    identifier: str,
+    resolve_task: Callable[[str], Any],
+) -> Run:
     path = run_path(root, identifier)
     if not path.exists():
         raise OawError(f"run not found: {identifier}")
-    return load_run(path)
+    run = load_validated_run(path, expected_id=identifier, require_canonical_id=True)
+    validate_resolved_task_scope(run, root, resolve_task)
+    return run
 
 
-def runs_for_task(root: Path, task_id: str) -> list[Run]:
-    return [run for run in iter_runs(root) if run.data.get("task_id") == task_id]
-
-
-def matching_run(root: Path, task_id: str, identity: Identity) -> Run | None:
-    expected = run_id(task_id, identity)
-    path = run_path(root, expected)
-    return load_run(path) if path.exists() else None
-
-
-def running_others(root: Path, task_id: str, current_run_id: str) -> list[Run]:
+def runs_for_task(
+    root: Path,
+    task_id: str,
+    resolve_task: Callable[[str], Any],
+) -> list[Run]:
     return [
         run
-        for run in runs_for_task(root, task_id)
+        for run in validated_registry_runs(root, resolve_task)
+        if run.data.get("task_id") == task_id
+    ]
+
+
+def matching_run(
+    root: Path,
+    task_id: str,
+    identity: Identity,
+    task_path: Path | None = None,
+) -> Run | None:
+    expected = run_id(task_id, identity)
+    path = run_path(root, expected)
+    if not path.exists():
+        return None
+    return load_validated_run(
+        path,
+        expected_id=expected,
+        task_id=task_id,
+        identity=identity,
+        task_link=durable_task_link(task_path, root, task_id) if task_path else None,
+        require_canonical_id=True,
+    )
+
+
+def running_others(
+    root: Path,
+    task_id: str,
+    current_run_id: str,
+    resolve_task: Callable[[str], Any],
+) -> list[Run]:
+    return [
+        run
+        for run in runs_for_task(root, task_id, resolve_task)
         if run.state == "running" and run.id != current_run_id
     ]
 
@@ -154,6 +421,7 @@ def new_run_text(
     state: str = "running",
     event: str = "start",
     note: str | None = None,
+    checks: str | None = None,
 ) -> tuple[str, str]:
     task_id = str(task_data["id"])
     identifier = run_id(task_id, identity)
@@ -179,8 +447,10 @@ def new_run_text(
         f"last_event_at: {yaml_quote(stamp)}",
     ]
     if state in {"completed", "closed"}:
-        lines += [f"ended_at: {yaml_quote(stamp)}", f"ended_reason: {state}"]
+        lines += [f"ended_at: {yaml_quote(stamp)}", f"ended_reason: {yaml_quote(state)}"]
     detail = f" — {note.strip()}" if note and note.strip() else ""
+    if checks and checks.strip():
+        detail += f" — verification: {checks.strip()}"
     lines += ["---", "", f"# {identifier}", "", "## Events", "", f"- {stamp} — {event}{detail}", ""]
     return identifier, "\n".join(lines)
 
@@ -219,7 +489,7 @@ def transition_run_text(
     text = set_frontmatter_scalar(text, "last_event_at", yaml_quote(format_utc(now)))
     if state in {"completed", "closed"}:
         text = set_frontmatter_scalar(text, "ended_at", yaml_quote(format_utc(now)))
-        text = set_frontmatter_scalar(text, "ended_reason", ended_reason or state)
+        text = set_frontmatter_scalar(text, "ended_reason", yaml_quote(ended_reason or state))
     if state == "running":
         text = remove_frontmatter_keys(text, {"ended_at", "ended_reason"})
     if closer:
@@ -264,48 +534,66 @@ def append_session_id(text: str, session_id: str) -> str:
 def audit_runs(root: Path, resolve_task: Callable[[str], Any], now: dt.datetime) -> list[str]:
     findings: list[str] = []
     live_keys: dict[tuple[str, str, str], list[str]] = {}
-    link_pattern = re.compile(r"^\[\[([^]|]+)\|([^]|]+)\]\]$")
-    for run in iter_runs(root):
-        prefix = run.id or run.path.stem
-        required = {
-            "task",
-            "task_id",
-            "provider",
-            "agent_session_id",
-            "agent_session_env",
-            "run_state",
-            "started_at",
-            "last_event_at",
-        }
-        missing = sorted(key for key in required if not run.data.get(key))
-        if missing:
-            findings.append(f"{prefix}: malformed: missing {', '.join(missing)}")
+    directory = root / RUNS_DIR
+    paths = sorted(directory.rglob("*")) if directory.exists() else []
+    for path in paths:
+        relative = path.relative_to(directory).as_posix()
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or path.parent != directory
+            or path.suffix != ".md"
+            or not path.stem.startswith("AGT-RUN-")
+        ):
+            findings.append(f"{relative}: noncanonical registry artifact")
             continue
-        task_id = str(run.data["task_id"])
-        match = link_pattern.fullmatch(str(run.data["task"]))
-        if not match:
-            findings.append(f"{prefix}: malformed task link")
-            continue
-        target, label = match.groups()
+        prefix = path.stem
         try:
-            task = resolve_task(task_id)
-        except OawError:
-            findings.append(f"{prefix}: dangling task id {task_id}")
+            run = load_run(path)
+        except (OawError, OSError) as exc:
+            findings.append(f"{prefix}: malformed: {exc}")
             continue
-        expected = task.path.relative_to(root).with_suffix("").as_posix()
-        if target != expected or label != task_id or getattr(task, "note_id", None) != task_id:
-            findings.append(f"{prefix}: task-link/id mismatch")
-        if run.state not in RUN_STATES:
-            findings.append(f"{prefix}: malformed run_state {run.state}")
+        findings.extend(f"{prefix}: {error}" for error in run_schema_errors(run))
+        scope_errors = run_scope_errors(
+            run,
+            expected_id=prefix,
+            require_canonical_id=True,
+        )
+        findings.extend(f"{prefix}: malformed: {error}" for error in scope_errors)
+
+        task_id_value = run.data.get("task_id")
+        task_id = task_id_value if isinstance(task_id_value, str) else ""
+        provider = run.data.get("provider")
+        session_id = run.data.get("agent_session_id")
+
+        task_value = run.data.get("task")
+        match = TASK_LINK_PATTERN.fullmatch(task_value) if isinstance(task_value, str) else None
+        task = None
+        if task_id:
+            try:
+                task = resolve_task(task_id)
+            except OawError:
+                findings.append(f"{prefix}: dangling task id {task_id}")
+        if match and task is not None:
+            target, label = match.groups()
+            expected = task.path.relative_to(root).with_suffix("").as_posix()
+            if target != expected or label != task_id or getattr(task, "note_id", None) != task_id:
+                findings.append(f"{prefix}: task-link/id mismatch")
         if is_stale(run, now):
             findings.append(f"{prefix}: stale")
         if (
             run.state == "running"
+            and task is not None
             and str(task.frontmatter.get("status", "")) in TERMINAL_TASK_STATES
         ):
             findings.append(f"{prefix}: running on terminal task")
-        if run.state == "running":
-            key = (task_id, str(run.data["provider"]), str(run.data["agent_session_id"]))
+        if (
+            run.state == "running"
+            and task_id
+            and isinstance(provider, str)
+            and isinstance(session_id, str)
+        ):
+            key = (task_id, provider, session_id)
             live_keys.setdefault(key, []).append(prefix)
     for key, identifiers in live_keys.items():
         if len(identifiers) > 1:

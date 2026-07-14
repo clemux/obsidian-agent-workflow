@@ -245,12 +245,12 @@ def default_plugin_data_root() -> Path:
 
 
 def detect_session(allow_missing: bool) -> tuple[str, str]:
-    for provider, env_name in SESSION_ENV:
-        value = os.environ.get(env_name)
-        if value:
-            return provider, f"{env_name}={value}"
-    if allow_missing:
-        return "Unknown", "session_id=unavailable"
-    raise OawError(
-        "no stable session ID found; set CODEX_THREAD_ID or pass --allow-missing-session-id"
-    )
+    from .runs import detect_identity
+
+    try:
+        identity = detect_identity()
+    except OawError:
+        if allow_missing:
+            return "Unknown", "session_id=unavailable"
+        raise
+    return identity.provider_label, f"{identity.env}={identity.session_id}"

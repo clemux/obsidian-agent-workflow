@@ -22,10 +22,15 @@ EXPECTED_COMMAND_PATHS = {
     ("task", "backlog"),
     ("task", "promote"),
     ("task", "start"),
+    ("task", "pause"),
     ("task", "review"),
     ("task", "complete"),
     ("task", "note"),
     ("task", "create"),
+    ("run",),
+    ("run", "list"),
+    ("run", "close"),
+    ("run", "audit"),
     ("note",),
     ("note", "session"),
     ("note", "observe"),
@@ -117,6 +122,23 @@ def vault_state(vault: Path) -> dict[str, bytes | None]:
 
 def test_typer_command_tree_matches_declared_contract() -> None:
     assert command_paths() == EXPECTED_COMMAND_PATHS
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["task", "start"],
+        ["task", "pause"],
+        ["task", "review"],
+        ["task", "complete"],
+        ["run", "close"],
+    ],
+)
+def test_run_changing_commands_do_not_offer_missing_session_escape_hatch(command):
+    result = CliRunner().invoke(cli.app, [*command, "--help"])
+
+    assert result.exit_code == 0, result.stderr
+    assert "--allow-missing-session-id" not in result.stdout
 
 
 def test_typer_frontend_has_no_argparse_or_cli_dependency() -> None:
@@ -256,6 +278,11 @@ aliases:
             "oaw task create: error: argument --status: not allowed with argument --start\n",
         ),
         (
+            ["task", "create", "--start", "--allow-missing-session-id"],
+            "oaw task create: error: argument --allow-missing-session-id: "
+            "not allowed with argument --start\n",
+        ),
+        (
             ["ingest", "safe-export", "--dry-run", "--write"],
             "oaw ingest safe-export: error: argument --write: "
             "not allowed with argument --dry-run\n",
@@ -384,7 +411,6 @@ def test_typer_domain_error_does_not_write_the_vault(tmp_path: Path) -> None:
             "PRT-TSK-missing",
             "--note",
             "Must not write",
-            "--allow-missing-session-id",
         ],
         env={"OAW_VAULT": str(tmp_path)},
     )
