@@ -375,6 +375,8 @@ def _validate_frontmatter_value(key: str, value: str) -> None:
             raise OawError(f"task frontmatter field {key} must not use structured JSON")
     elif value.startswith("'") and not re.fullmatch(r"'(?:[^']|'')*'", value):
         raise OawError(f"task frontmatter field {key} has an invalid quoted value")
+    elif re.search(r":\s", value) or value.startswith(("&", "*", "!", "@", "`", "? ", "- ")):
+        raise OawError(f"task frontmatter field {key} contains an unsupported YAML value")
 
 
 def _validate_priority_update_frontmatter(lines: list[str], end: int) -> None:

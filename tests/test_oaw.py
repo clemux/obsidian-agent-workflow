@@ -1954,6 +1954,11 @@ aliases:
             ("'priority': 2\n", "unsupported or malformed field"),
             ("priority: 2\n  continuation\n", "flat scalar fields and flat block lists"),
             ("broken: [\n", "field broken has an unclosed flow value"),
+            ("broken: foo: bar\n", "field broken contains an unsupported YAML value"),
+            (
+                "broken-list:\n  - foo: bar\n",
+                "field broken-list contains an unsupported YAML value",
+            ),
         ],
     )
     def test_task_priority_rejects_malformed_priority_without_writing(
