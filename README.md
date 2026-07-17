@@ -1,6 +1,6 @@
 # obsidian-agent-workflow
 
-Local-first tooling for agent-driven Obsidian workflows: the `oaw` CLI resolves vault reference IDs from note frontmatter and records agent work — task lifecycle, board moves, session traces — on project notes.
+Local-first tooling for agent-driven Obsidian workflows: the `oaw` CLI resolves vault reference IDs from note frontmatter and records task lifecycle and session traces on project notes.
 
 ## Status and caveats
 
@@ -107,7 +107,7 @@ The default vault path is machine-specific legacy debt; override with `OAW_VAULT
 - [Resolving references](#resolving-references)
 - [Listing notes](#listing-notes)
 - [Task lifecycle](#task-lifecycle)
-- [Boards](#boards)
+- [Task views](#task-views)
 - [Sessions](#sessions)
   - [Session lookup](#session-lookup)
   - [Session snapshots](#session-snapshots)
@@ -128,7 +128,6 @@ The default vault path is machine-specific legacy debt; override with `OAW_VAULT
 | [`oaw resolve`](#resolving-references) | Resolve a reference ID or `obs:` alias to a vault note |
 | [`oaw list`](#listing-notes) | List a project's tasks or captures by frontmatter type |
 | [`oaw task`](#task-lifecycle) | Update task lifecycle status with an agent-session trace |
-| [`oaw board`](#boards) | Add, move, and complete kanban cards on project boards |
 | [`oaw session`](#sessions) | Look up a session ID across notes and artifacts; snapshot session artifacts |
 | [`oaw note` / `oaw retro`](#notes-and-retrospectives) | Append session traces or observations; create retrospective drafts |
 | [`oaw feedback`](#agent-feedback) | Create dated, durable agent-feedback notes |
@@ -190,8 +189,9 @@ Extra `--tag` values must be lowercase safe identifiers and retain first-seen or
 validated before writing. Existing project folders, duplicate IDs or aliases,
 malformed templates, and unsafe paths fail without creating a partial project. A
 stable harness session ID is required unless `--allow-missing-session-id` is explicit.
-The command deliberately does not create a board, local Base, task notes, bookmarks,
-or edits to `Projects/Index.md`.
+The command deliberately creates only the project index. It does not create a
+project-local Base, task notes, bookmarks, or edits to `Projects/Index.md`; the
+index embeds the shared project workspace Base supplied by the vault template.
 
 ## Task lifecycle
 
@@ -209,7 +209,7 @@ oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "pytest"
 oaw task priority OAW-TSK-cli --priority 1 --note "Raised after cross-project triage."
 ```
 
-Lifecycle commands update task frontmatter, append an `## Agent sessions` trace, and move the matching card on a project `Board.md` when one exists. The lifecycle order is `Backlog` -> `Todo` -> `Active` -> `Review` -> `Done`. Agent-run records live independently under `Agents/Runs/`: repeating `start` in the same provider/session refreshes one record, while another session gets a distinct record. `pause` changes only the caller's run to `paused`; task status and board remain active. `review` and `complete` refuse while another session is still running, including a run whose derived age is stale. Task, run, and board changes are committed together.
+Lifecycle commands update task frontmatter and append an `## Agent sessions` trace. Task-note status is the single lifecycle source of truth, surfaced through project and cross-project Bases. The lifecycle order is `Backlog` -> `Todo` -> `Active` -> `Review` -> `Done`. Agent-run records live independently under `Agents/Runs/`: repeating `start` in the same provider/session refreshes one record, while another session gets a distinct record. `pause` changes only the caller's run to `paused`; task status remains active. `review` and `complete` refuse while another session is still running, including a run whose derived age is stale. Task and run changes are committed together.
 
 Tasks may declare `execution: human`, `agent`, or `hybrid`. An absent value becomes `agent` only when `start` begins a run. Human tasks remain UI-managed and reject agent lifecycle transitions. `start`, `pause`, `review`, and `complete` require a real harness session ID and do not offer `--allow-missing-session-id`; `backlog`, `promote`, `task note`, and `task priority` retain the explicit missing-ID trace path. With a real ID, session-writing commands append it as a quoted string to a deduplicated `session-ids` block list while preserving existing entries, comments, and any legacy scalar `session-id`.
 
@@ -239,10 +239,10 @@ A Claude Code title is instead set out of band by a hook, which reads the `oaw
 task` commands the agent already runs and asks nothing of the skill. See
 [docs/claude-code.md](docs/claude-code.md).
 
-Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status` or moving any board card. It accepts optional `--checks`, works in any task status, and refreshes `last_event_at` only when the caller already has a matching running record; it never creates one.
+Use `oaw task note` when you need to append a dated `## Agent sessions` entry without changing `status`. It accepts optional `--checks`, works in any task status, and refreshes `last_event_at` only when the caller already has a matching running record; it never creates one.
 
 Use `oaw task priority` to set an existing task's vault-wide priority to `1`, `2`,
-or `3`. It preserves the task status, project board, run records, unrelated
+or `3`. It preserves the task status, run records, unrelated
 frontmatter formatting, and any inline priority comment while appending an agent
 session trace. Unsupported task locations and malformed or duplicate priority
 fields are rejected before writing.
@@ -270,7 +270,7 @@ oaw task create --from-capture obs:OAW-CAP-routing-regression \
 oaw task create --from-capture obs:OAW-CAP-urgent --title "Handle urgent request" --start
 ```
 
-`--project` accepts a project alias (`obs:OAW`) or a folder name under `Projects/`. The note is created under the project's `Tasks/` folder with standard frontmatter and optional `priority`, `effort`, and `execution`. The task ID defaults to `<ALIAS>-TSK-<slug>`; status defaults to `backlog`, with `--status todo` for selected work. `--start` works with or without a capture and atomically creates the task, active board card, and running record; it defaults execution to `agent`, requires a real session, and rejects `--execution human`. Duplicate IDs and existing paths fail without writing anything.
+`--project` accepts a project alias (`obs:OAW`) or a folder name under `Projects/`. The note is created under the project's `Tasks/` folder with standard frontmatter and optional `priority`, `effort`, and `execution`. The task ID defaults to `<ALIAS>-TSK-<slug>`; status defaults to `backlog`, with `--status todo` for selected work. `--start` works with or without a capture and atomically creates the active task and running record; it defaults execution to `agent`, requires a real session, and rejects `--execution human`. Duplicate IDs and existing paths fail without writing anything.
 
 The generated `created` value is a timezone-aware UTC datetime. Repeatable `--tag`
 values must be lowercase safe identifiers, are deduplicated in first-seen order, and
@@ -278,7 +278,7 @@ precede `source-capture` on promoted tasks. Non-started creation records a sessi
 trace and permits `--allow-missing-session-id` only when an untraceable trace is
 explicitly accepted.
 
-When an actionable capture becomes material work, pass its stable ID with `--from-capture`. The project and title default to the capture's project folder and heading, while explicit `--project` and `--title` still override them. The command preserves the capture note and body, records its ID as `source-capture` on the task, adds durable links in both directions, appends the task wikilink to the capture's `destinations` frontmatter, registers the task on the project board, and only then changes the capture to `status: triaged`. Those writes commit together and roll back together on failure. The capture's `Outcome` remains an expected-next-shape statement; promotion does not replace it with completion prose. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent.
+When an actionable capture becomes material work, pass its stable ID with `--from-capture`. The project and title default to the capture's project folder and heading, while explicit `--project` and `--title` still override them. The command preserves the capture note and body, records its ID as `source-capture` on the task, adds durable links in both directions, appends the task wikilink to the capture's `destinations` frontmatter, and only then changes the capture to `status: triaged`. Those writes commit together and roll back together on failure. The capture's `Outcome` remains an expected-next-shape statement; promotion does not replace it with completion prose. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent.
 
 ## Research packet lifecycle
 
@@ -310,33 +310,20 @@ OAW_VAULT=~/vaults/example oaw research start \
 
 Use the `obsidian-research` helper to preflight and print the exact fenced-block contents, then to ingest the finished report while preserving its raw artifact. Native report intake is intentionally outside `oaw`.
 
-## Boards
+## Task views
 
-Project boards use the column convention `Backlog` -> `Todo` -> `Active` -> `Review` -> `Done`. `Todo` is for near-term chosen work; `Backlog` is for unscheduled known work. When implementation is ready for verification, review the matching task so the board reflects that handoff.
+Task-note frontmatter is the only lifecycle state store. Project indexes embed the
+shared `Templates/Project workspace.base#Work queue` view, while the aggregate
+cross-project task Base lives at `Projects/Cross-project tasks.base`. Use the
+cross-project view when choosing work across OAW and adjacent queues: it includes
+`Projects/*/Tasks`, `Agents/Tasks`, and root `Tasks/`; keeps `backlog`, `todo`,
+`active`, `review`, and legacy `open` tasks visible; and excludes terminal `done`
+and `superseded` work.
 
-Use `oaw board ensure-backlog --project "Project Name"` to add the `Backlog` column to an existing project board before `Todo` without rewriting cards.
-
-The cross-project Next steps board is a hand-curated priority layer at `Projects/Next steps.md`. Use `oaw board` commands for routine card edits instead of manually moving kanban lines:
-
-```bash
-oaw board add \
-  --column "Next session(s)" \
-  --link "Projects/Obsidian Agent Workflow/Tasks/Next steps board integration" \
-  --title "Next steps board integration" \
-  --why "document conventions and wire wrap-up handling" \
-  --id OAW-TSK-next-board
-
-oaw board move OAW-TSK-next-board --column "Now (current session)"
-oaw board done OAW-TSK-next-board
-```
-
-`move` and `done` require the token to match exactly one card. `done` moves the card to `Done` and marks it `[x]`; other moves preserve the existing card text and keep the checkbox open.
-
-`ensure-backlog` and task lifecycle commands target a project-local
-`Projects/<Project>/Board.md`. The `add`, `move`, and `done` commands target the
-cross-project `Projects/Next steps.md` board.
-
-The aggregate cross-project task Base lives at `Projects/Cross-project tasks.base`. Use it when choosing what to work on next across OAW and adjacent agent-tooling queues: its open-task view includes `Projects/*/Tasks` and `Agents/Tasks`, keeps `backlog`, `todo`, `active`, and legacy `open` tasks visible, and excludes terminal `done` and `superseded` work. Priority is a vault-wide 1/2/3 scale: `1` is urgent, blocking, or unusually high-leverage; `2` is normal next-session work with clear value; `3` is useful backlog work. Cross-project usefulness can raise priority, and the Base sorts by priority, then effort (`S`, `M`, `L`), then title.
+Priority is a vault-wide 1/2/3 scale: `1` is urgent, blocking, or unusually
+high-leverage; `2` is normal next-session work with clear value; `3` is useful
+backlog work. Cross-project usefulness can raise priority, and the Base sorts by
+priority, then effort (`S`, `M`, `L`), then title.
 
 ## Sessions
 
@@ -513,7 +500,7 @@ display text.
 
 ## Installed vs checkout CLI
 
-Use installed `oaw ...` commands for operational vault writes such as task lifecycle updates, board moves, and session snapshots. Reserve `uv run python bin/oaw ...` for development checks against this checkout, preferably with temp vaults. This keeps approval prompts scoped to stable commands instead of broad interpreter entrypoints; see `AGT-FDBK-allow-listed-skill-scripts`.
+Use installed `oaw ...` commands for operational vault writes such as task lifecycle updates and session snapshots. Reserve `uv run python bin/oaw ...` for development checks against this checkout, preferably with temp vaults. This keeps approval prompts scoped to stable commands instead of broad interpreter entrypoints; see `AGT-FDBK-allow-listed-skill-scripts`.
 
 After refreshing the uv-managed installation, run
 `uv run python scripts/check_cli_parity.py`.
@@ -604,7 +591,7 @@ Copied: 81
 Transcript: complete
 ```
 
-Record an integration checkpoint without changing task status or moving its board card:
+Record an integration checkpoint without changing task status:
 
 ```bash
 python bin/oaw task note OAW-TSK-overnight-branch-review \
@@ -615,25 +602,19 @@ python bin/oaw task note OAW-TSK-overnight-branch-review \
 ```text
 Updated: Projects/Obsidian Agent Workflow/Tasks/Overnight branch review and merge.md
 Status: active
-Board: unchanged
 ```
 
-Complete the task and then move its cross-project priority card to Done:
+Complete the task after verification:
 
 ```bash
 python bin/oaw task complete OAW-TSK-overnight-branch-review \
   --note "Merged and verified the reviewed overnight branches." \
   --checks "uv run pytest (tests passed)"
-python bin/oaw board done OAW-TSK-overnight-branch-review
 ```
 
 ```text
 Updated: Projects/Obsidian Agent Workflow/Tasks/Overnight branch review and merge.md
 Status: done
-Board: updated
-Board: Projects/Next steps.md
-Column: Done
-Matched: OAW-TSK-overnight-branch-review
 ```
 
 </details>
@@ -800,7 +781,7 @@ FAB-CAP-sous-chef-delegation-routing	active	Investigate sous-chef for delegation
 FAB-CAP-reframe-wrap-up-receipt	active	Wrap-up receipt: reframe session	Projects/Fable/Inbox/2026-07-07 - wrap-up receipt reframe session.md
 ```
 
-Record implementation provenance on the task itself. Lifecycle commands capture the current agent session, update task status, and keep the project board in sync:
+Record implementation provenance on the task itself. Lifecycle commands capture the current agent session and update task status:
 
 ```bash
 CODEX_THREAD_ID=019f3b71-14db-7480-b0c5-8836714deacc \
@@ -818,7 +799,6 @@ Example lifecycle output:
 ```text
 Updated: Projects/Obsidian Agent Workflow/Tasks/Resolver and lifecycle CLI.md
 Status: done
-Board: updated
 ```
 
 </details>

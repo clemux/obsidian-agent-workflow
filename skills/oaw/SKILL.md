@@ -137,7 +137,8 @@ OAW_VAULT=~/vaults/example oaw project create \
 ```
 
 - `create` writes only `Projects/<name>/Index.md`. It does not create `Tasks/`, a
-  board, a project-local Base, bookmarks, or an entry in `Projects/Index.md`.
+  project-local Base, bookmarks, or an entry in `Projects/Index.md`; the index
+  embeds the vault's shared project workspace Base.
 - The default template is `Templates/Small project index.md`; `--template` accepts one
   alternative vault-relative path. The template must have exactly one H1 containing
   `{{title}}`, one `## Goal`, and one `## Current state`. OAW also resolves optional
@@ -157,7 +158,7 @@ OAW_VAULT=~/vaults/example oaw project create \
 ## Project task lifecycle
 
 Lifecycle writes apply to task notes under `Projects/*/Tasks`, `Agents/Tasks`, and
-root `Tasks/` (only project tasks have a local board):
+root `Tasks/`:
 
 ```bash
 oaw task create --project obs:OAW --title "Example task" --note "Initial problem statement."
@@ -175,14 +176,14 @@ oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "pyt
 oaw task priority OAW-TSK-cli --priority 1 --note "Raised after cross-project triage."
 ```
 
-- `create` makes a new project task with standard frontmatter, a `Problem` section, a durable project-index link, an `## Agent sessions` trace, and a board card. `--project` takes a project alias (`obs:OAW`) or folder name; the ID defaults to `<ALIAS>-TSK-<slug>`; status defaults to `backlog` (`--status todo` for selected work); optional values include `--priority 1|2|3`, `--effort S|M|L`, repeatable `--tag`, and `--execution human|agent|hybrid`. `--start` works with or without a capture and atomically creates the task, active card, and run. It defaults execution to `agent`, requires a real session ID, and rejects human execution.
-- An actionable request on an `obs:CAP-*` or project capture ID is a promotion trigger: before investigation, implementation, or other material work, run `task create --from-capture <CAP-ID>`. The project and title default from a capture under `Projects/<Project>/`, or may be explicit. Promotion preserves the capture note, body, stable ID, and expected-next-shape `Outcome`; records `source-capture` on the task; adds durable links in both directions; appends the task wikilink to the capture's `destinations` frontmatter; registers the project-board card; and changes the capture to `triaged` only when every write succeeds. Failure rolls all writes back. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent. `--start` does not relax session-ID requirements or invent provenance.
-- `backlog` sets `status: backlog`; `promote` sets `status: todo`; `start` sets `status: active`; `pause` pauses only the caller's run and leaves task status/board unchanged; `review` closes the caller's run with reason `review` and sets task status to `review`; `complete` completes the caller's run and sets task status to `done`.
+- `create` makes a new project task with standard frontmatter, a `Problem` section, a durable project-index link, and an `## Agent sessions` trace. `--project` takes a project alias (`obs:OAW`) or folder name; the ID defaults to `<ALIAS>-TSK-<slug>`; status defaults to `backlog` (`--status todo` for selected work); optional values include `--priority 1|2|3`, `--effort S|M|L`, repeatable `--tag`, and `--execution human|agent|hybrid`. `--start` works with or without a capture and atomically creates the active task and run. It defaults execution to `agent`, requires a real session ID, and rejects human execution.
+- An actionable request on an `obs:CAP-*` or project capture ID is a promotion trigger: before investigation, implementation, or other material work, run `task create --from-capture <CAP-ID>`. The project and title default from a capture under `Projects/<Project>/`, or may be explicit. Promotion preserves the capture note, body, stable ID, and expected-next-shape `Outcome`; records `source-capture` on the task; adds durable links in both directions; appends the task wikilink to the capture's `destinations` frontmatter; and changes the capture to `triaged` only when every write succeeds. Failure rolls all writes back. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent. `--start` does not relax session-ID requirements or invent provenance.
+- `backlog` sets `status: backlog`; `promote` sets `status: todo`; `start` sets `status: active`; `pause` pauses only the caller's run and leaves task status unchanged; `review` closes the caller's run with reason `review` and sets task status to `review`; `complete` completes the caller's run and sets task status to `done`.
 - `complete` requires `--checks` naming the verification actually run; do not fabricate checks.
-- `note` appends a dated entry without changing status or board. If the caller already has a matching running record it refreshes that record; it never creates a run.
-- `priority` sets an existing task's priority to `1`, `2`, or `3`, appends a dated agent-session trace, and leaves status, board, and run records unchanged. It preserves unrelated frontmatter formatting and inline priority comments, and rejects unsupported task locations or malformed/duplicate priority fields before writing.
-- `backlog`, `promote`, `start`, `review`, and `complete` append a dated entry under `## Agent sessions` and move the task's card to the matching column when the project has a board (`Projects/<Project>/Board.md`) — creating the card and column heading if missing. Cards keep the `- [ ]` marker in every column; the column heading, not the checkbox, reflects status. Task and board writes are transactional, so a failed board update does not leave a partially updated task note.
-- The command's output (`Updated:` / `Status:` / `Board:`) confirms the write. To report resulting state, rely on that output plus `oaw resolve --meta` if needed — do not re-read the whole note with `--full`.
+- `note` appends a dated entry without changing status. If the caller already has a matching running record it refreshes that record; it never creates a run.
+- `priority` sets an existing task's priority to `1`, `2`, or `3`, appends a dated agent-session trace, and leaves status and run records unchanged. It preserves unrelated frontmatter formatting and inline priority comments, and rejects unsupported task locations or malformed/duplicate priority fields before writing.
+- `backlog`, `promote`, `start`, `review`, and `complete` append a dated entry under `## Agent sessions`; task-note frontmatter is the single lifecycle source of truth and is surfaced through project and cross-project Bases.
+- The command's output (`Updated:` / `Status:` / optional `Run:`) confirms the write. To report resulting state, rely on that output plus `oaw resolve --meta` if needed — do not re-read the whole note with `--full`.
 - The session ID is read automatically from the first supported harness variable. `start`, `pause`, `review`, `complete`, and `run close` require a real identity and never accept `--allow-missing-session-id`. `task priority` follows the non-run trace policy and accepts that escape hatch only when the user explicitly accepts an untraceable entry.
 - With a real harness ID, lifecycle and `task note` writes append it as a quoted string to a deduplicated `session-ids` frontmatter block list, preserving existing entries, comments, and any legacy scalar `session-id`. Unsupported inline, mapping, or ambiguous non-string `session-ids` shapes fail before the note is written. The explicit missing-ID path writes only the body trace; it does not add a synthetic list value.
 
@@ -195,7 +196,7 @@ state or releases concurrency. Use `oaw run list [--task ID] [--state STATE] [--
 records the real closer while preserving the original agent identity and never
 changes task lifecycle state.
 
-Project boards should use the column order `Backlog` → `Todo` → `Active` → `Review` → `Done`. Keep `Todo` for near-term chosen work. Put unscheduled known work in `Backlog`, and when implementation is ready for verification, run `oaw task review ... --checks ...` so the board reflects the handoff.
+Keep `Todo` for near-term chosen work and put unscheduled known work in `Backlog`. When implementation is ready for verification, run `oaw task review ... --checks ...` so the task note records the handoff.
 
 At wrap-up, check whether substantive work occurred. If it did and no task owns it, create or promote the source capture into a task before retrospective closeout. A retrospective may close only after that task is `done` via `oaw task complete ... --checks "<verification actually run>"`; link the retrospective primarily to the completed task and retain the source-capture link as provenance. Do not treat a capture `Outcome` as a completion report.
 
@@ -205,8 +206,6 @@ tracked repository design document until implementation makes it part of the
 project's durable documentation, unless the user explicitly asks for a tracked
 artifact. This keeps proposals from looking like shipped behavior and leaves
 the working tree clean for a fresh implementation session.
-
-Use `oaw board ensure-backlog --project "Project Name"` to add a missing `Backlog` column before `Todo` on an existing project board without rewriting cards.
 
 ## Research packet lifecycle
 
@@ -325,36 +324,9 @@ oaw export validate ~/obsidian-export/OAW-TSK-export-example --target work
 - Manifest paths are vault-relative, not absolute local paths.
 - `validate` confines manifest paths to the bundle and checks the safe marker, target, note checksum, artifact checksums, and artifact presence.
 
-## Cross-project Next steps board
-
-The vault-wide priority board lives at `Projects/Next steps.md` (`id: NEXT-board`). It is a hand-curated layer over project task notes, so routine card edits should use `oaw board` instead of manual kanban line surgery.
-
-Add a linked card with the board's standard card shape:
-
-```bash
-oaw board add \
-  --column "Next session(s)" \
-  --link "Projects/Obsidian Agent Workflow/Tasks/Next steps board integration" \
-  --title "Next steps board integration" \
-  --why "document conventions and wire wrap-up handling" \
-  --id OAW-TSK-next-board
-```
-
-Move or complete an existing card by a stable ID or unique text token already present in the card:
-
-```bash
-oaw board move OAW-TSK-next-board --column "Now (current session)"
-oaw board done OAW-TSK-next-board
-```
-
-- `move` and `done` require exactly one matching card; a zero-match or duplicate match is an error.
-- `move` preserves card text and keeps the card unchecked.
-- `done` moves the card to `Done` and changes the checkbox to `- [x]`.
-- The command targets `Projects/Next steps.md`; project-local boards use `oaw task start/review/complete` for the implementation-to-verification handoff.
-
 ## Cross-project task Base
 
-When deciding what work to pick up next, consult the aggregate task Base at `Projects/Cross-project tasks.base` before relying on one project board. Its `Open cross-project tasks` view includes task notes from `Projects/*/Tasks`, `Agents/Tasks`, and root `Tasks/`; keeps `active`, `review`, `todo`, `backlog`, and legacy `open` tasks visible; and excludes terminal `done` and `superseded` work. The display order is Active, Review, Todo, Open / untriaged, then Backlog. New tasks should use `todo` when deliberately selected or `backlog` when unscheduled; do not create new `open` tasks.
+When deciding what work to pick up next, consult the aggregate task Base at `Projects/Cross-project tasks.base`. Its `Open cross-project tasks` view includes task notes from `Projects/*/Tasks`, `Agents/Tasks`, and root `Tasks/`; keeps `active`, `review`, `todo`, `backlog`, and legacy `open` tasks visible; and excludes terminal `done` and `superseded` work. The display order is Active, Review, Todo, Open / untriaged, then Backlog. New tasks should use `todo` when deliberately selected or `backlog` when unscheduled; do not create new `open` tasks.
 
 Priority uses a vault-wide 1/2/3 scale:
 
@@ -412,10 +384,9 @@ oaw session snapshot "$CODEX_THREAD_ID" --codex-only --partial --slug codex-dogf
 ## Rules
 
 - Use `oaw` before any manual vault search. Do not resolve IDs by searching agent state directories (`.codex`, `.claude`, `.agents`) or session transcripts unless the user explicitly asks for forensic work.
-- When changing `NEXT-board`, prefer `oaw board add/move/done`; edit the markdown directly only for convention text, bulk cleanup, or cases the command cannot express.
 - Keep durable written links as path links with the ID as display text, e.g. `[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]` — the link target is the vault-relative path without the `.md` extension. Reuse the path from resolve output already in hand; run `oaw resolve --path` only when no resolve has been done yet.
 - When `oaw` lacks a needed capability, capture a new OAW task describing the gap, then do the minimal manual workaround and keep moving.
-- For real vault writes, prefer stable installed commands: `oaw task ...`, `oaw board ...`, `oaw session snapshot ...`, or `obsidian ...` for note/metadata writes. Use `uv run python bin/oaw ...` only for CLI development, temp-vault fixtures, or deliberately testing the checkout copy (the CLI depends on `typer`, so bare `python bin/oaw` fails). This follows the approval-scope lesson from [[Agents/Feedback/2026-07-08 allow-listed skill scripts for vault writes|AGT-FDBK-allow-listed-skill-scripts]].
+- For real vault writes, prefer stable installed commands: `oaw task ...`, `oaw session snapshot ...`, or `obsidian ...` for note/metadata writes. Use `uv run python bin/oaw ...` only for CLI development, temp-vault fixtures, or deliberately testing the checkout copy (the CLI depends on `typer`, so bare `python bin/oaw` fails). This follows the approval-scope lesson from [[Agents/Feedback/2026-07-08 allow-listed skill scripts for vault writes|AGT-FDBK-allow-listed-skill-scripts]].
 - If a needed capability is not documented here, check `oaw --help` before reaching for filesystem search.
 - For `PMX-*` IDs, prefer the dedicated `pmx` skill and CLI.
 
@@ -426,7 +397,6 @@ When a Codex approval prompt offers to persist a command prefix for OAW vault wr
 ```text
 ["oaw", "session", "snapshot"]
 ["oaw", "task"]
-["oaw", "board"]
 ```
 
 Do not persist broad interpreter or shell prefixes for OAW work, such as:

@@ -5,7 +5,7 @@ description: Interactively review and reconcile OAW project-task statuses one ta
 
 # OAW Task Review
 
-Review a fixed snapshot of one project's `active`, `todo`, and `backlog` tasks. Keep the interaction compact, ask for one decision at a time, and mutate task notes or boards only after the user confirms a status.
+Review a fixed snapshot of one project's `active`, `todo`, and `backlog` tasks. Keep the interaction compact, ask for one decision at a time, and mutate task notes only after the user confirms a status.
 
 Use the `oaw` skill for ID resolution and lifecycle command rules. Read its `SKILL.md` completely before beginning a review.
 
@@ -77,14 +77,14 @@ done    -> oaw task complete <ID> --note "<concise completion evidence>" --check
 
 For `review` or `done`, run an appropriate verification first. Reuse an already-run check from the current review only when its result is still applicable. Never invent a check string or treat note inspection alone as implementation verification. If verification cannot be performed safely or fails, report the evidence and ask the user to choose another status; do not issue the lifecycle command.
 
-Rely on successful OAW output to confirm synchronized note and board writes. If the command fails, keep the plan step `in_progress`, surface the error, and resolve it before advancing. After success, update the plan, make the next queued task `in_progress`, and present only that task.
+Rely on successful OAW output to confirm the task-note lifecycle write. If the command fails, keep the plan step `in_progress`, surface the error, and resolve it before advancing. After success, update the plan, make the next queued task `in_progress`, and present only that task.
 
 ## 4. Investigate “not sure” with Luna
 
 On the first `not sure` decision for a task, launch exactly one read-only subagent using model `gpt-5.6-luna`. Use an explorer agent when repository inspection is involved. Give it the task ID, resolved task path, project index or repository path, and this neutral assignment:
 
 ```text
-Investigate whether this OAW task is implementation-ready or already satisfied. Inspect current task-note and repository evidence read-only. Report: material progress, missing work, dependencies/blockers, verification evidence, and the best-supported lifecycle status among active, review, todo, backlog, and done. Cite paths or commands. Do not modify files, notes, boards, git state, or external services.
+Investigate whether this OAW task is implementation-ready or already satisfied. Inspect current task-note and repository evidence read-only. Report: material progress, missing work, dependencies/blockers, verification evidence, and the best-supported lifecycle status among active, review, todo, backlog, and done. Cite paths or commands. Do not modify files, notes, git state, or external services.
 ```
 
 Do not tell the subagent the current recommendation or desired answer. Wait for it, reconcile its findings with the primary evidence, report a compact findings summary, update the recommendation if warranted, and ask for the same task's decision again. Keep the plan step `in_progress` throughout.

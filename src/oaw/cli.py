@@ -16,7 +16,6 @@ from typer._click import types as click_types
 from typer.core import TyperGroup
 from typer.main import get_command
 
-from .boards import ensure_project_backlog_column, next_steps_card, update_next_steps_board
 from .errors import OawError
 from .exports import validate_export_bundle, write_export_bundle
 from .feedback import FEEDBACK_TYPES, FeedbackType, create_feedback, read_feedback_body
@@ -52,7 +51,7 @@ from .snapshot import session_snapshot
 
 USAGE_BY_COMMAND = {
     "oaw": "usage: oaw [-h]\n"
-    "           {resolve,list,project,research,task,run,note,board,ingest,link,export,session,retro,feedback} ...\n",
+    "           {resolve,list,project,research,task,run,note,ingest,link,export,session,retro,feedback} ...\n",
     "oaw resolve": "usage: oaw resolve [-h] [--full] [--path] [--meta] [--outline] [--json] id\n",
     "oaw list": "usage: oaw list [-h] --project PROJECT [--type TYPE] [--status STATUS]\n"
     "                [--include-archived]\n",
@@ -98,12 +97,6 @@ USAGE_BY_COMMAND = {
     "                        id\n",
     "oaw task review": "usage: oaw task review [-h] --note NOTE --checks CHECKS id\n",
     "oaw note observe": "usage: oaw note observe [-h] [--section SECTION] --title TITLE --body BODY id\n",
-    "oaw board": "usage: oaw board [-h] {add,move,done,ensure-backlog} ...\n",
-    "oaw board add": "usage: oaw board add [-h] --column COLUMN --link LINK --title TITLE --why WHY\n"
-    "                     --id ID\n",
-    "oaw board move": "usage: oaw board move [-h] --column COLUMN token\n",
-    "oaw board done": "usage: oaw board done [-h] token\n",
-    "oaw board ensure-backlog": "usage: oaw board ensure-backlog [-h] --project PROJECT\n",
     "oaw ingest": "usage: oaw ingest [-h] {safe-export} ...\n",
     "oaw ingest safe-export": "usage: oaw ingest safe-export [-h] [--ingestion-root INGESTION_ROOT]\n"
     "                              [--destination DESTINATION] [--dry-run |\n"
@@ -154,7 +147,6 @@ SUBCOMMAND_DESTINATIONS = {
     "oaw task": "task_command",
     "oaw run": "run_command",
     "oaw note": "note_command",
-    "oaw board": "board_command",
     "oaw ingest": "ingest_command",
     "oaw link": "link_command",
     "oaw export": "export_command",
@@ -327,7 +319,6 @@ research_app = _app("Research packet utilities")
 task_app = _app("Project task lifecycle")
 run_app = _app("Inspect and administer agent-run records")
 note_app = _app("Append session traces or observations to resolved notes")
-board_app = _app("Update the cross-project Next steps board")
 ingest_app = _app("Ingest approved handoff files")
 link_app = _app("Inspect and maintain durable wikilinks")
 export_app = _app("Safe outbound note export utilities")
@@ -365,7 +356,6 @@ app.add_typer(research_app, name="research")
 app.add_typer(task_app, name="task")
 app.add_typer(run_app, name="run")
 app.add_typer(note_app, name="note")
-app.add_typer(board_app, name="board")
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(link_app, name="link")
 app.add_typer(export_app, name="export")
@@ -686,39 +676,6 @@ def note_observe(
     section: Annotated[str, typer.Option("--section", help="target heading")] = "Observations",
 ) -> None:
     _run(lambda: update_note_observation(vault_root(), note_id, section, title, body))
-
-
-@board_app.command("add", help="add a linked card to Projects/Next steps.md")
-def board_add(
-    column: Annotated[str, typer.Option("--column")],
-    link: Annotated[str, typer.Option("--link", help="vault-relative note path")],
-    title: Annotated[str, typer.Option("--title")],
-    why: Annotated[str, typer.Option("--why", help="one-line routing note")],
-    card_id: Annotated[str, typer.Option("--id", help="stable reference ID")],
-) -> None:
-    _run(
-        lambda: update_next_steps_board(
-            vault_root(), column, None, next_steps_card(link, title, why, card_id), False
-        )
-    )
-
-
-@board_app.command("move", help="move a matching card to another column")
-def board_move(
-    token: Annotated[str, typer.Argument(help="stable ID or unique card text")],
-    column: Annotated[str, typer.Option("--column")],
-) -> None:
-    _run(lambda: update_next_steps_board(vault_root(), column, token, None, False))
-
-
-@board_app.command("done", help="move a matching card to Done and check it")
-def board_done(token: Annotated[str, typer.Argument(help="stable ID or unique card text")]) -> None:
-    _run(lambda: update_next_steps_board(vault_root(), "Done", token, None, True))
-
-
-@board_app.command("ensure-backlog", help="add a Backlog column to a project board if missing")
-def board_ensure_backlog(project: Annotated[str, typer.Option("--project")]) -> None:
-    _run(lambda: ensure_project_backlog_column(vault_root(), project))
 
 
 @ingest_app.command("safe-export", help="ingest frontmatter-approved Markdown files")

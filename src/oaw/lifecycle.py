@@ -9,7 +9,6 @@ import unicodedata
 import urllib.parse
 from pathlib import Path
 
-from .boards import updated_project_board_text
 from .errors import OawError
 from .frontmatter import (
     append_frontmatter_list_value,
@@ -63,13 +62,6 @@ def is_project_task(path: Path, root: Path) -> bool:
         return False
     parts = rel.parts
     return len(parts) == 4 and parts[0] == "Projects" and parts[2] == "Tasks"
-
-
-def project_root_for_task(path: Path, root: Path) -> Path:
-    if not is_project_task(path, root):
-        raise OawError("lifecycle writes are only supported for Projects/*/Tasks notes in v1")
-    rel = path.relative_to(root)
-    return root / rel.parts[0] / rel.parts[1]
 
 
 def is_lifecycle_task(path: Path, root: Path) -> bool:
@@ -253,24 +245,15 @@ def update_task(
     text = set_frontmatter_scalar(text, "status", status)
     text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
-    board: Path | None = None
-    board_text: str | None = None
-    if is_project_task(match.path, root):
-        board, board_text = updated_project_board_text(
-            project_root_for_task(match.path, root), match.path, match.title, task_id, status
-        )
     transaction = VaultTransaction()
     transaction.stage(match.path, text)
     if run_change:
         transaction.stage(*run_change)
-    if board and board_text:
-        transaction.stage(board, board_text)
     transaction.commit()
     print(f"Updated: {match.relpath}")
     print(f"Status: {status}")
     if run_identifier:
         print(f"Run: {run_identifier}")
-    print(f"Board: {'updated' if board else 'not found'}")
 
 
 def pause_task(match: NoteMatch, root: Path, note: str) -> None:
@@ -302,7 +285,6 @@ def pause_task(match: NoteMatch, root: Path, note: str) -> None:
     print(f"Status: {match.frontmatter.get('status', '')}")
     print(f"Run: {current.id}")
     print("Run state: paused")
-    print("Board: unchanged")
 
 
 def append_task_note(
@@ -331,7 +313,6 @@ def append_task_note(
     status = match.frontmatter.get("status", "")
     print(f"Updated: {match.relpath}")
     print(f"Status: {status}")
-    print("Board: unchanged")
 
 
 def _validate_frontmatter_value(key: str, value: str) -> None:
@@ -392,9 +373,7 @@ def _validate_priority_update_frontmatter(lines: list[str], end: int) -> None:
                 raise OawError("task frontmatter indentation must use spaces")
             item = re.fullmatch(r"\s+-\s+(\S.*)", line)
             if block_list_key is None or item is None:
-                raise OawError(
-                    "task frontmatter must use flat scalar fields and flat block lists"
-                )
+                raise OawError("task frontmatter must use flat scalar fields and flat block lists")
             item_value, _ = split_inline_comment(item.group(1))
             _validate_frontmatter_value(block_list_key, item_value)
             continue
@@ -456,7 +435,6 @@ def update_task_priority(
     print(f"Updated: {match.relpath}")
     print(f"Priority: {priority}")
     print(f"Status: {match.frontmatter.get('status', '')}")
-    print("Board: unchanged")
 
 
 def list_runs(task_id: str | None, state: str | None, as_json: bool, root: Path) -> None:
@@ -675,16 +653,7 @@ def create_task(
         capture_text = _append_to_section(capture_text, "Related", task_link)
         capture_text = append_frontmatter_list_value(capture_text, "destinations", task_link)
         capture_text = set_frontmatter_scalar(capture_text, "status", "triaged")
-        board, board_text = updated_project_board_text(
-            project_root, path, clean_title, note_id, task_status
-        )
         transaction.stage(capture.path, capture_text)
-    else:
-        board, board_text = updated_project_board_text(
-            project_root, path, clean_title, note_id, task_status
-        )
-    if board and board_text:
-        transaction.stage(board, board_text)
     run_identifier: str | None = None
     if identity:
         run_identifier, run_text = new_run_text(
@@ -697,13 +666,11 @@ def create_task(
         )
         transaction.stage(run_path(root, run_identifier), run_text)
     transaction.commit()
-    moved = board is not None
     print(f"Created: {relpath.as_posix()}")
     print(f"ID: {note_id}")
     print(f"Status: {task_status}")
     if run_identifier:
         print(f"Run: {run_identifier}")
-    print(f"Board: {'updated' if moved else 'not found'}")
     if capture:
         print(f"Capture: {capture.note_id} -> triaged")
 

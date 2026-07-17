@@ -11,7 +11,7 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 - Each skill's `agents/openai.yaml` contains OpenAI display metadata.
 - `README.md` is the user-facing overview and install guide.
 
-Keep small workflow changes close to `bin/oaw` and mirror behavior changes in tests and docs. For board-related changes, update the CLI, `tests/test_oaw.py`, `README.md`, and `skills/oaw/SKILL.md` together so agent-facing behavior does not drift from implementation.
+Keep small workflow changes close to `bin/oaw` and mirror behavior changes in tests and docs. Update the CLI, `tests/test_oaw.py`, `README.md`, and `skills/oaw/SKILL.md` together so agent-facing behavior does not drift from implementation.
 
 The Typer frontend is the current CLI implementation. Native command-contract
 coverage lives in `tests/test_typer_cli.py` and covers command-tree completeness,
@@ -52,9 +52,9 @@ Prefer `pathlib.Path`, UTF-8 file reads/writes, and `json.dumps` for machine-rea
 
 ## Testing Guidelines
 
-Tests use `unittest` and temporary vault fixtures via `tempfile.TemporaryDirectory`. Name new tests `test_<behavior>` and verify return codes plus important stdout/stderr text. For lifecycle changes, assert task note and board contents, not only command success.
+Tests use `unittest` and temporary vault fixtures via `tempfile.TemporaryDirectory`. Name new tests `test_<behavior>` and verify return codes plus important stdout/stderr text. For lifecycle changes, assert task-note and agent-run contents, not only command success. Retired legacy board fixtures may be used only to prove lifecycle commands leave them untouched.
 
-Run `uv run pytest` before submitting changes. Update tests whenever resolver matching, frontmatter parsing, board movement, session detection, or CLI arguments change.
+Run `uv run pytest` before submitting changes. Update tests whenever resolver matching, frontmatter parsing, lifecycle behavior, session detection, or CLI arguments change.
 
 ## Commit & Pull Request Guidelines
 

@@ -34,7 +34,6 @@ src/oaw/
     resolver.py      # vault walk, id/alias matching, project aliases, NoteMatch
     links.py         # wikilink parse, durable links, link commands
     lifecycle.py     # task create/status transitions/notes
-    boards.py        # ONE column engine for project boards + Next steps board
     sessions.py      # session env detection, session lookup
     snapshot.py      # session artifact snapshots
     exports.py       # safe outbound export + validate
@@ -49,8 +48,7 @@ tests/
 
 Reserved seams (do not build yet, per the agent-run planning constraints on
 the task note). Two distinct modules, mirroring the two extraction seams the
-constraints require, both behind the existing task, resolver, and board
-contracts:
+constraints require, both behind the existing task and resolver contracts:
 
 - `run_registry.py` — the agent-run registry: run identity and session
   provenance, kept distinct from task identity.
@@ -62,8 +60,8 @@ plus the vault-relative Tasks path it resolves to. Every run references a
 support the three execution modes (human, agent, hybrid: missing execution
 becomes agent only at agent start; explicit human execution refuses agent
 lifecycle writes) and multiple concurrently active provider/session runs per
-task. Registry + task + board mutations sit inside transaction/journal
-boundaries with rollback or a recoverable journal; partial writes are
+task. Registry + task mutations sit inside transaction/journal boundaries
+with rollback or a recoverable journal; partial writes are
 rejected or recovered, never silently kept.
 
 ## Dependency rules
@@ -73,7 +71,7 @@ Explicit acyclic layer graph — imports flow strictly downward:
 ```
 cli.py
   → command domains: lifecycle, links, snapshot, exports, ingest, retro
-      → shared services: resolver, boards, sessions
+      → shared services: resolver, sessions
           → note model: notes, frontmatter
           → leaf utilities: session_metrics
               → errors (+ stdlib)
@@ -84,7 +82,7 @@ cli.py
 model rather than under it — nothing in the note-model layer depends on it.
 
 `cli.py` additionally dispatches straight to shared-service command
-entrypoints for the stable `resolve`, `list`, `board`, and `session`
+entrypoints for the stable `resolve`, `list`, and `session`
 subcommands — still a strictly downward edge, skipping the command-domain
 layer. Those modules are dual-role: shared service for the command domains,
 and direct command implementation for their own subcommands. Rename-only
@@ -96,7 +94,7 @@ adapter modules above them would violate the non-goals.
   they never import each other. Shared services never import command domains
   or `cli.py`. Cross-cutting behavior (e.g. lifecycle writes appending session
   traces) lives in a shared layer.
-- Shared services (`resolver`, `boards`, `sessions`) may import `notes` and
+- Shared services (`resolver`, `sessions`) may import `notes` and
   `frontmatter` — `resolver` in particular consumes frontmatter parsing and
   pre-filtering. The note model imports only `errors` and the stdlib.
 - The YAML-library exception is confined to `frontmatter.py`: it alone may
@@ -149,14 +147,14 @@ the script is not importable, and the environment leaks (a real
 Target:
 
 1. **Unit** — import modules directly, no subprocess, no vault: frontmatter
-   round-trips, wikilink parsing, board column engine, slug/id derivation.
+   round-trips, wikilink parsing, slug/id derivation.
    Millisecond-fast; this is where most new coverage goes.
-2. **Integration** — tmp-vault pytest fixtures exercising resolver, lifecycle,
-   boards through function calls. A session-env-scrubbing autouse fixture
+2. **Integration** — tmp-vault pytest fixtures exercising resolver and lifecycle
+   through function calls. A session-env-scrubbing autouse fixture
    fixes the harness-leak class of flake.
 3. **CLI contract** — a small retained subprocess suite pinning exit codes and
-   stable output lines that agents and skills rely on (`Updated:`/`Status:`/
-   `Board:`, error phrasing). These focused native tests gate every
+   stable output lines that agents and skills rely on (`Updated:`/`Status:`,
+   error phrasing). These focused native tests gate every
    extraction step.
 4. **Perf smoke** (optional, marked, excluded by default): resolve on a
    generated 5k-note fixture, gated relative to a measured baseline on that
@@ -167,7 +165,7 @@ Target:
    transaction/journal contract tests, independent of the CLI frontend — canonical
    `TaskRef` scope, stale runs, multiple concurrent provider/session runs,
    execution-mode policy (human/agent/hybrid), and rejection or recovery of
-   partial registry/task/board writes.
+   partial registry/task writes.
 
 ## Incremental extraction order
 
@@ -189,15 +187,13 @@ Each step: suite green, committed, behavior identical unless stated.
    real-vault figures (387 ms resolve over 6,189 notes, ~270 ms in
    frontmatter parsing) remain observational data, not a threshold on the
    fixture, since the workloads differ. Lifecycle writes must scan once.
-3. **`boards`**: unify the two board implementations behind one column engine
-   (contract tests pin both card formats first).
-4. **`lifecycle`**: task create/transitions/notes on top of 1–3.
-5. **`sessions` + `snapshot`**, then **`links`**, **`exports`/`ingest`**,
+3. **`lifecycle`**: task create/transitions/notes on top of 1–2.
+4. **`sessions` + `snapshot`**, then **`links`**, **`exports`/`ingest`**,
    **`retro`**: mostly mechanical moves once the shared layers exist.
-6. **Frontmatter swap**: introduce `ruamel.yaml` behind the `frontmatter`
+5. **Frontmatter swap**: introduce `ruamel.yaml` behind the `frontmatter`
    interface with round-trip contract tests (comments, ordering, unknown
    keys, quoting preserved). Unlocks safe writes the hand parser refuses.
-7. **Reserved**: `run_registry.py` and `run_lifecycle.py` seams per the
+6. **Reserved**: `run_registry.py` and `run_lifecycle.py` seams per the
    agent-run constraints (see "Reserved seams" above) — separate proposal
    once task contracts are approved.
 

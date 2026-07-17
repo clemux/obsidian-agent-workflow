@@ -56,7 +56,7 @@ Context: a primary-task session moves from design to explicit wrap-up while the
 task remains `todo`.
 
 Expected: the title changes from `[DESIGN] OAW-TSK-example` to
-`[W] OAW-TSK-example`. The task status and board do not change.
+`[W] OAW-TSK-example`. The task status does not change.
 
 ## Review title versus review lifecycle
 

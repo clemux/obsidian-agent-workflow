@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from oaw import cli, lifecycle, resolver
-from oaw.boards import render_project_board
 from oaw.errors import OawError
 
 from .assertions import Assertions
@@ -213,33 +212,6 @@ aliases:
 
 ## Done
 
-""",
-        )
-        write(
-            self.vault / "Projects/Next steps.md",
-            """---
-kanban-plugin: board
-type: board
-id: NEXT-board
-aliases:
-  - NEXT-board
----
-
-# Next steps board
-
-## Now (current session)
-
-## Next session(s)
-
-- [ ] [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|Resolver CLI]] - finish lifecycle work (OAW-TSK-cli)
-
-## Done
-
-%% kanban:settings
-```
-{"kanban-plugin":"board"}
-```
-%%
 """,
         )
         write(
@@ -901,16 +873,17 @@ aliases:
         self.assertEqual(len(parsed), 1)
         self.assertIn("id: PERF-TARGET", parsed[0])
 
-    def test_task_start_updates_status_board_and_session(self):
+    def test_task_start_updates_status_and_session_without_touching_legacy_board(self):
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        board_before = board_path.read_bytes()
         proc = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Started work.")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
-        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
         self.assertIn("status: active", task)
         self.assertIn("CODEX_THREAD_ID=test-thread", task)
         self.assertIn('session-ids:\n  - "test-thread"\n', task)
-        self.assertGreater(board.index("OAW-TSK-cli"), board.index("## Active"))
-        self.assertLess(board.index("OAW-TSK-cli"), board.index("## Done"))
+        self.assertNotIn("Board:", proc.stdout)
+        self.assertEqual(board_before, board_path.read_bytes())
 
     def test_task_start_is_idempotent_for_same_identity(self):
         first = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "First start.")
@@ -1712,6 +1685,7 @@ aliases:
     def test_task_review_accepts_every_lifecycle_source_status(self, initial_status):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
         board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        board_before = board_path.read_bytes()
         started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Established caller run.")
         self.assertEqual(started.returncode, 0, started.stderr)
         task_path.write_text(
@@ -1720,18 +1694,6 @@ aliases:
             ),
             encoding="utf-8",
         )
-        board_path.write_text(
-            render_project_board(
-                board_path.read_text(encoding="utf-8"),
-                task_path=task_path,
-                project_root=task_path.parents[1],
-                title="Resolver CLI",
-                note_id="OAW-TSK-cli",
-                status=initial_status,
-            ),
-            encoding="utf-8",
-        )
-
         proc = self.run_oaw(
             "task",
             "review",
@@ -1743,16 +1705,15 @@ aliases:
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         task = task_path.read_text(encoding="utf-8")
-        board = board_path.read_text(encoding="utf-8")
         self.assertIn("status: review", task)
         self.assertIn("Ready for review.; checks: pytest", task)
         self.assertIn("CODEX_THREAD_ID=test-thread", task)
-        card = "- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli"
-        self.assertEqual(board.count(card), 1)
-        self.assertGreater(board.index(card), board.index("## Review"))
-        self.assertLess(board.index(card), board.index("## Done"))
+        self.assertNotIn("Board:", proc.stdout)
+        self.assertEqual(board_before, board_path.read_bytes())
 
-    def test_task_review_transaction_failure_restores_task_and_board_bytes(self, monkeypatch):
+    def test_task_review_transaction_failure_restores_task_run_and_legacy_board_bytes(
+        self, monkeypatch
+    ):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
         board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
         started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Established caller run.")
@@ -1768,7 +1729,7 @@ aliases:
                 nonlocal calls
                 calls += 1
                 if calls == 2:
-                    raise OSError("injected board replacement failure")
+                    raise OSError("injected run replacement failure")
                 Path(source).replace(destination)
 
             return original_commit(transaction, replace=replace)
@@ -1867,7 +1828,7 @@ aliases:
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn(f"Priority: {priority}", proc.stdout)
         self.assertIn("Status: todo", proc.stdout)
-        self.assertIn("Board: unchanged", proc.stdout)
+        self.assertNotIn("Board:", proc.stdout)
         task = task_path.read_text(encoding="utf-8")
         self.assertIn(f"status: todo\npriority: {priority} # retained comment\neffort: M\n", task)
         self.assertIn('session-ids:\n  - "test-thread"\n', task)
@@ -1915,7 +1876,7 @@ aliases:
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("priority: 2", path.read_text(encoding="utf-8"))
-        self.assertIn("Board: unchanged", proc.stdout)
+        self.assertNotIn("Board:", proc.stdout)
 
     def test_task_priority_allows_explicit_missing_session_trace(self):
         cleared = {
@@ -1961,12 +1922,12 @@ aliases:
             ),
         ],
     )
-    def test_task_priority_rejects_malformed_priority_without_writing(
-        self, replacement, expected
-    ):
+    def test_task_priority_rejects_malformed_priority_without_writing(self, replacement, expected):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
         task_path.write_text(
-            task_path.read_text(encoding="utf-8").replace("status: todo\n", "status: todo\n" + replacement),
+            task_path.read_text(encoding="utf-8").replace(
+                "status: todo\n", "status: todo\n" + replacement
+            ),
             encoding="utf-8",
         )
         before = task_path.read_bytes()
@@ -2021,7 +1982,9 @@ aliases:
     ):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
         match = resolver.resolve_id("OAW-TSK-cli", self.vault)
-        malformed = task_path.read_text(encoding="utf-8").replace("\n---\n\n# Resolver CLI", "\n\n# Resolver CLI")
+        malformed = task_path.read_text(encoding="utf-8").replace(
+            "\n---\n\n# Resolver CLI", "\n\n# Resolver CLI"
+        )
         task_path.write_text(malformed, encoding="utf-8")
         before = task_path.read_bytes()
 
@@ -2075,7 +2038,7 @@ aliases:
         self.assertIn("requires non-empty --note", proc.stderr)
         self.assertEqual(before, task_path.read_bytes())
 
-    def test_task_note_appends_session_without_status_or_board_change(self):
+    def test_task_note_appends_session_without_status_or_legacy_board_change(self):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
         board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
         before_board = board_path.read_text(encoding="utf-8")
@@ -2103,7 +2066,7 @@ aliases:
             "Updated: Projects/Obsidian Agent Workflow/Tasks/Archived task.md", proc.stdout
         )
         self.assertIn("Status: archived", proc.stdout)
-        self.assertIn("Board: unchanged", proc.stdout)
+        self.assertNotIn("Board:", proc.stdout)
         task = task_path.read_text(encoding="utf-8")
         self.assertIn("status: archived", task)
         self.assertIn("CODEX_THREAD_ID=test-thread", task)
@@ -2162,29 +2125,27 @@ aliases:
         self.assertIn("session_id=unavailable", task)
         self.assertNotIn("session-ids:", task)
 
-    def test_task_backlog_updates_status_board_and_session(self):
+    def test_task_backlog_updates_status_and_session_without_touching_legacy_board(self):
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        board_before = board_path.read_bytes()
         proc = self.run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later.")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
-        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
-        card = "- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli"
         self.assertIn("status: backlog", task)
         self.assertIn("CODEX_THREAD_ID=test-thread", task)
-        self.assertIn("## Backlog", board)
-        self.assertEqual(board.count(card), 1)
-        self.assertLess(board.index(card), board.index("## Active"))
+        self.assertNotIn("Board:", proc.stdout)
+        self.assertEqual(board_before, board_path.read_bytes())
 
-    def test_task_promote_updates_status_and_moves_card_to_todo(self):
+    def test_task_promote_updates_status_without_touching_legacy_board(self):
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        board_before = board_path.read_bytes()
         self.run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later.")
         proc = self.run_oaw("task", "promote", "OAW-TSK-cli", "--note", "Selected next.")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
-        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
-        card = "- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli"
         self.assertIn("status: todo", task)
-        self.assertEqual(board.count(card), 1)
-        self.assertGreater(board.index(card), board.index("## Todo"))
-        self.assertLess(board.index(card), board.index("## Done"))
+        self.assertNotIn("Board:", proc.stdout)
+        self.assertEqual(board_before, board_path.read_bytes())
 
     def test_list_tasks_preserves_archived_rows(self):
         proc = self.run_oaw("list", "--project", "Obsidian Agent Workflow")
@@ -2192,7 +2153,7 @@ aliases:
         self.assertIn("OAW-TSK-cli", proc.stdout)
         self.assertIn("OAW-TSK-archived", proc.stdout)
 
-    def test_lifecycle_supports_agents_task_without_board(self):
+    def test_lifecycle_supports_agents_task_without_board_output(self):
         proc = self.run_oaw(
             "task",
             "start",
@@ -2204,7 +2165,7 @@ aliases:
         note = (self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md").read_text()
         self.assertIn("status: active", note)
         self.assertIn("execution: agent", note)
-        self.assertIn("Board: not found", proc.stdout)
+        self.assertNotIn("Board:", proc.stdout)
 
     def test_note_session_appends_agent_session_to_non_project_note(self):
         proc = self.run_oaw(
@@ -2648,102 +2609,6 @@ export-scope: work
         self.assertEqual(archived.returncode, 0, archived.stderr)
         self.assertNotIn("OAW-CAP-active", archived.stdout)
         self.assertIn("OAW-CAP-archived", archived.stdout)
-
-    def test_board_add_writes_linked_card_to_column(self):
-        proc = self.run_oaw(
-            "board",
-            "add",
-            "--column",
-            "Queued",
-            "--link",
-            "Projects/Obsidian Agent Workflow/Tasks/Archived task.md",
-            "--title",
-            "Archived task",
-            "--why",
-            "review later",
-            "--id",
-            "OAW-TSK-archived",
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        board = (self.vault / "Projects/Next steps.md").read_text()
-        self.assertIn("## Queued", board)
-        self.assertIn(
-            "- [ ] [[Projects/Obsidian Agent Workflow/Tasks/Archived task|Archived task]] - review later (OAW-TSK-archived)",
-            board,
-        )
-        self.assertIn("%% kanban:settings", board)
-
-    def test_board_move_preserves_card_text_and_removes_original(self):
-        proc = self.run_oaw(
-            "board",
-            "move",
-            "OAW-TSK-cli",
-            "--column",
-            "Now (current session)",
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        board = (self.vault / "Projects/Next steps.md").read_text()
-        card = "- [ ] [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|Resolver CLI]] - finish lifecycle work (OAW-TSK-cli)"
-        self.assertEqual(board.count(card), 1)
-        self.assertLess(board.index(card), board.index("## Next session(s)"))
-
-    def test_board_done_moves_to_done_and_checks_card(self):
-        proc = self.run_oaw("board", "done", "OAW-TSK-cli")
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        board = (self.vault / "Projects/Next steps.md").read_text()
-        card = "- [x] [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|Resolver CLI]] - finish lifecycle work (OAW-TSK-cli)"
-        self.assertIn(card, board)
-        self.assertGreater(board.index(card), board.index("## Done"))
-
-    def test_board_move_fails_on_ambiguous_match(self):
-        path = self.vault / "Projects/Next steps.md"
-        path.write_text(
-            path.read_text() + "- [ ] [[Other|Other]] - duplicate reminder (OAW-TSK-cli)\n",
-            encoding="utf-8",
-        )
-        proc = self.run_oaw("board", "move", "OAW-TSK-cli", "--column", "Queued")
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("multiple board cards match", proc.stderr)
-
-    def test_board_ensure_backlog_adds_column_before_todo(self):
-        proc = self.run_oaw(
-            "board",
-            "ensure-backlog",
-            "--project",
-            "Obsidian Agent Workflow",
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("Backlog: added", proc.stdout)
-        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
-        self.assertLess(board.index("## Backlog"), board.index("## Active"))
-
-    def test_board_ensure_backlog_adds_blank_line_when_appending(self):
-        project = self.vault / "Projects/Archive Only"
-        write(project / "Board.md", "# Archive board\n\n## Archive\n")
-
-        proc = self.run_oaw(
-            "board",
-            "ensure-backlog",
-            "--project",
-            "Archive Only",
-        )
-
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        board = (project / "Board.md").read_text(encoding="utf-8")
-        self.assertIn("## Archive\n\n## Backlog\n", board)
-
-    def test_board_ensure_backlog_is_idempotent(self):
-        self.run_oaw("board", "ensure-backlog", "--project", "Obsidian Agent Workflow")
-        proc = self.run_oaw(
-            "board",
-            "ensure-backlog",
-            "--project",
-            "Obsidian Agent Workflow",
-        )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("Backlog: present", proc.stdout)
-        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text()
-        self.assertEqual(board.count("## Backlog"), 1)
 
     def test_safe_export_ingest_dry_run_reads_markers_and_leaves_files(self):
         ingestion = self.vault / "handoff"
@@ -3886,6 +3751,8 @@ aliases:
         self.assertIn("matched multiple Codex rollouts", proc.stderr)
 
     def test_task_create_defaults_to_backlog_with_derived_id(self):
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        board_before = board_path.read_bytes()
         proc = self.run_oaw(
             "task",
             "create",
@@ -3913,7 +3780,7 @@ aliases:
         )
         self.assertIn("ID: OAW-TSK-improve-resolver-errors", proc.stdout)
         self.assertIn("Status: backlog", proc.stdout)
-        self.assertIn("Board: updated", proc.stdout)
+        self.assertNotIn("Board:", proc.stdout)
         note = (
             self.vault / "Projects/Obsidian Agent Workflow/Tasks/Improve resolver errors.md"
         ).read_text(encoding="utf-8")
@@ -3929,18 +3796,75 @@ aliases:
         self.assertIn("Error messages should list candidates.", note)
         self.assertIn("- [[Projects/Obsidian Agent Workflow/Index|OAW-index]]", note)
         self.assertIn("## Agent sessions", note)
-        board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("## Backlog", board)
-        self.assertIn(
-            "- [ ] [[Tasks/Improve resolver errors|Improve resolver errors]] - OAW-TSK-improve-resolver-errors",
-            board,
-        )
+        self.assertEqual(board_before, board_path.read_bytes())
         resolved = self.run_oaw("resolve", "--json", "OAW-TSK-improve-resolver-errors")
         self.assertEqual(resolved.returncode, 0, resolved.stderr)
         listing = self.run_oaw("list", "--project", "Obsidian Agent Workflow")
         self.assertIn("OAW-TSK-improve-resolver-errors", listing.stdout)
+
+    def test_boardless_project_task_lifecycle_never_creates_a_board(self):
+        created_project = self.run_oaw(
+            "project",
+            "create",
+            "--name",
+            "Boardless Example",
+            "--alias",
+            "BLE",
+            "--goal",
+            "Exercise the task lifecycle without a duplicate board surface.",
+        )
+        self.assertEqual(created_project.returncode, 0, created_project.stderr)
+        project_root = self.vault / "Projects/Boardless Example"
+        board_path = project_root / "Board.md"
+        self.assertFalse(board_path.exists())
+
+        created_task = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:BLE",
+            "--title",
+            "Boardless lifecycle",
+            "--start",
+        )
+        self.assertEqual(created_task.returncode, 0, created_task.stderr)
+        self.assertNotIn("Board:", created_task.stdout)
+        self.assertFalse(board_path.exists())
+
+        reviewed = self.run_oaw(
+            "task",
+            "review",
+            "BLE-TSK-boardless-lifecycle",
+            "--note",
+            "Ready for verification.",
+            "--checks",
+            "focused lifecycle check",
+        )
+        self.assertEqual(reviewed.returncode, 0, reviewed.stderr)
+        self.assertNotIn("Board:", reviewed.stdout)
+        self.assertFalse(board_path.exists())
+
+        restarted = self.run_oaw(
+            "task",
+            "start",
+            "BLE-TSK-boardless-lifecycle",
+            "--note",
+            "Verification accepted; finishing.",
+        )
+        self.assertEqual(restarted.returncode, 0, restarted.stderr)
+        completed = self.run_oaw(
+            "task",
+            "complete",
+            "BLE-TSK-boardless-lifecycle",
+            "--note",
+            "Lifecycle verified.",
+            "--checks",
+            "focused lifecycle check",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        task = (project_root / "Tasks/Boardless lifecycle.md").read_text(encoding="utf-8")
+        self.assertIn("status: done", task)
+        self.assertFalse(board_path.exists())
 
     def test_task_create_writes_timezone_aware_iso8601_created_timestamp(self):
         before = dt.datetime.now(dt.timezone.utc)
@@ -3967,7 +3891,9 @@ aliases:
         self.assertTrue(parsed >= before - dt.timedelta(seconds=1))
         self.assertTrue(parsed <= after + dt.timedelta(seconds=1))
 
-    def test_task_create_todo_places_card_in_todo_column(self):
+    def test_task_create_todo_sets_status_without_touching_legacy_board(self):
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        board_before = board_path.read_bytes()
         proc = self.run_oaw(
             "task",
             "create",
@@ -3980,15 +3906,12 @@ aliases:
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("ID: OAW-TSK-todo-task", proc.stdout)
-        board_lines = (
-            (self.vault / "Projects/Obsidian Agent Workflow/Board.md")
-            .read_text(encoding="utf-8")
-            .splitlines()
+        task = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Todo task.md").read_text(
+            encoding="utf-8"
         )
-        todo_idx = board_lines.index("## Todo")
-        done_idx = board_lines.index("## Done")
-        card_idx = next(idx for idx, line in enumerate(board_lines) if "OAW-TSK-todo-task" in line)
-        self.assertTrue(todo_idx < card_idx < done_idx)
+        self.assertIn("status: todo", task)
+        self.assertNotIn("Board:", proc.stdout)
+        self.assertEqual(board_before, board_path.read_bytes())
 
     def test_task_create_start_is_atomic_without_capture(self):
         proc = self.run_oaw(
@@ -4185,7 +4108,7 @@ aliases:
         board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("OAW-TSK-investigate-routing-regression", board)
+        self.assertNotIn("OAW-TSK-investigate-routing-regression", board)
 
     def test_task_create_from_capture_start_creates_active_task(self):
         proc = self.run_oaw(
@@ -4207,8 +4130,7 @@ aliases:
         board = (self.vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
             encoding="utf-8"
         )
-        active = board.split("## Active", 1)[1].split("## Todo", 1)[0]
-        self.assertIn("OAW-TSK-start-capture-work", active)
+        self.assertNotIn("OAW-TSK-start-capture-work", board)
 
     def test_task_create_from_capture_start_requires_real_session_provenance(self):
         capture_path = self.vault / "Projects/Obsidian Agent Workflow/Inbox/Active capture.md"
