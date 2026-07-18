@@ -460,7 +460,8 @@ def list_notes(
         str | None, typer.Option("--fields", help="comma-separated columns to project")
     ] = None,
     goal: Annotated[
-        bool, typer.Option("--goal", help="add a goal snippet column from the note's ## Problem section")
+        bool,
+        typer.Option("--goal", help="add a goal snippet column from the note's ## Problem section"),
     ] = False,
     json_output: Annotated[
         bool, typer.Option("--json", help="emit projected records as JSON")

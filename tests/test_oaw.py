@@ -2304,9 +2304,7 @@ Work that has no priority or effort assigned yet.
             "---\ntype: task\nstatus: todo\npriority: 1\neffort: S\n"
             "id: TIE-TSK-c\n---\n\n# Antelope\n",
         )
-        proc = self.run_oaw(
-            "list", "--project", "Ties", "--sort", "priority", "--fields", "id"
-        )
+        proc = self.run_oaw("list", "--project", "Ties", "--sort", "priority", "--fields", "id")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         # effort S before L; within equal effort, title Antelope before Zebra.
         self.assertEqual(
@@ -2340,9 +2338,7 @@ Work that has no priority or effort assigned yet.
 
     def test_list_goal_column_snippets_problem_section(self):
         self._seed_ranked_tasks()
-        proc = self.run_oaw(
-            "list", "--project", "Ranking", "--fields", "id", "--goal"
-        )
+        proc = self.run_oaw("list", "--project", "Ranking", "--fields", "id", "--goal")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn(
             "RNK-TSK-high\tHigh priority work that must ship the ranked view first.",
@@ -2363,7 +2359,9 @@ Work that has no priority or effort assigned yet.
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         payload = json.loads(proc.stdout)
-        self.assertEqual([row["id"] for row in payload], ["RNK-TSK-high", "RNK-TSK-mid", "RNK-TSK-untriaged"])
+        self.assertEqual(
+            [row["id"] for row in payload], ["RNK-TSK-high", "RNK-TSK-mid", "RNK-TSK-untriaged"]
+        )
         self.assertEqual(payload[0]["priority"], "1")
         self.assertEqual(payload[-1]["priority"], "")
         self.assertEqual(
