@@ -440,12 +440,86 @@ def note_status(data: dict[str, object]) -> str:
     return str(value) if value is not None else ""
 
 
-def read_project_note_row(
+# Fields the list command can project as tab-separated or JSON columns.
+LIST_PROJECTABLE_FIELDS = (
+    "id",
+    "status",
+    "title",
+    "path",
+    "goal",
+    "priority",
+    "effort",
+    "preparedness",
+    "type",
+    "project",
+    "created",
+    "execution",
+)
+DEFAULT_LIST_FIELDS = ("id", "status", "title", "path")
+LIST_SORT_KEYS = ("priority", "effort", "title")
+
+# The goal snippet is sourced from the note's first `## Problem` content line.
+GOAL_SECTION = "Problem"
+GOAL_MAX_CHARS = 120
+
+# Vault-wide 1/2/3 priority and S/M/L effort ranks; missing values sort last.
+PRIORITY_RANK = {"1": 0, "2": 1, "3": 2}
+EFFORT_RANK = {"S": 0, "M": 1, "L": 2}
+_MISSING_RANK = 99
+
+
+@dataclass(frozen=True)
+class ProjectNoteRecord:
+    note_id: str
+    status: str
+    title: str
+    relpath: str
+    goal: str
+    frontmatter: dict[str, object]
+
+
+def _goal_snippet(line: str) -> str:
+    """Collapse whitespace and truncate a `## Problem` line into one column."""
+    text = " ".join(line.split())
+    if len(text) > GOAL_MAX_CHARS:
+        text = text[:GOAL_MAX_CHARS].rstrip() + "…"
+    return text
+
+
+def _scan_title_and_goal(handle, default_title: str, want_goal: bool) -> tuple[str, str]:
+    """Read the note body once for its H1 title and optional goal snippet."""
+    title = default_title
+    title_found = False
+    goal = ""
+    in_goal_section = False
+    for line in handle:
+        stripped = line.rstrip("\n")
+        if stripped.startswith("## "):
+            if want_goal and not goal:
+                in_goal_section = stripped[3:].strip() == GOAL_SECTION
+            continue
+        if not title_found and stripped.startswith("# "):
+            title = stripped[2:].strip()
+            title_found = True
+            if not want_goal:
+                break
+            continue
+        if want_goal and in_goal_section and not goal and stripped.strip():
+            goal = _goal_snippet(stripped)
+            in_goal_section = False
+        if title_found and (not want_goal or goal):
+            break
+    return title, goal
+
+
+def read_project_note_record(
     path: Path,
+    root: Path,
     note_type: str,
     status: str | None,
     include_archived: bool,
-) -> tuple[str, str, str] | None:
+    want_goal: bool,
+) -> ProjectNoteRecord | None:
     with path.open("r", encoding="utf-8") as handle:
         if handle.readline().strip() != "---":
             return None
@@ -464,30 +538,89 @@ def read_project_note_row(
             return None
         if not status and current_status == "archived" and not include_archived:
             return None
-        title = path.stem
-        for line in handle:
-            if line.startswith("# "):
-                title = line[2:].strip()
-                break
-        return str(data.get("id", "")), current_status, title
+        title, goal = _scan_title_and_goal(handle, path.stem, want_goal)
+    return ProjectNoteRecord(
+        note_id=str(data.get("id", "")),
+        status=current_status,
+        title=title,
+        relpath=path.relative_to(root).as_posix(),
+        goal=goal,
+        frontmatter=data,
+    )
 
 
-def project_note_rows(
+def project_note_records(
     project_root: Path,
     root: Path,
     note_type: str,
     status: str | None,
     include_archived: bool,
-) -> list[tuple[str, str, str, str]]:
-    rows = []
-    root_prefix_length = len(root.as_posix().rstrip("/") + "/")
+    want_goal: bool,
+) -> list[ProjectNoteRecord]:
+    records: list[ProjectNoteRecord] = []
     for path in sorted(project_root.rglob("*.md"), key=os.fspath):
-        row = read_project_note_row(path, note_type, status, include_archived)
-        if row is None:
-            continue
-        relative_path = path.as_posix()[root_prefix_length:]
-        rows.append((*row, relative_path))
-    return rows
+        record = read_project_note_record(
+            path, root, note_type, status, include_archived, want_goal
+        )
+        if record is not None:
+            records.append(record)
+    return records
+
+
+def _frontmatter_str(record: ProjectNoteRecord, field: str) -> str:
+    value = record.frontmatter.get(field)
+    return "" if value is None else str(value).strip()
+
+
+def _priority_rank(record: ProjectNoteRecord) -> int:
+    return PRIORITY_RANK.get(_frontmatter_str(record, "priority"), _MISSING_RANK)
+
+
+def _effort_rank(record: ProjectNoteRecord) -> int:
+    return EFFORT_RANK.get(_frontmatter_str(record, "effort"), _MISSING_RANK)
+
+
+_SORT_KEYS = {
+    "priority": lambda r: (_priority_rank(r), _effort_rank(r), r.title.lower()),
+    "effort": lambda r: (_effort_rank(r), _priority_rank(r), r.title.lower()),
+    "title": lambda r: (r.title.lower(),),
+}
+
+
+def _record_field(record: ProjectNoteRecord, field: str) -> str:
+    if field == "id":
+        return record.note_id
+    if field == "status":
+        return record.status
+    if field == "title":
+        return record.title
+    if field == "path":
+        return record.relpath
+    if field == "goal":
+        return record.goal
+    return _frontmatter_str(record, field)
+
+
+def resolve_list_fields(fields: str | None, goal: bool) -> list[str]:
+    """Turn the --fields / --goal request into an ordered, validated column list."""
+    if fields is None:
+        columns = list(DEFAULT_LIST_FIELDS)
+    else:
+        columns = []
+        for raw in fields.split(","):
+            name = raw.strip()
+            if not name:
+                continue
+            if name not in LIST_PROJECTABLE_FIELDS:
+                allowed = ", ".join(LIST_PROJECTABLE_FIELDS)
+                raise OawError(f"unknown list field: {name} (choose from {allowed})")
+            if name not in columns:
+                columns.append(name)
+        if not columns:
+            raise OawError("--fields requires at least one field name")
+    if goal and "goal" not in columns:
+        columns.append("goal")
+    return columns
 
 
 def list_project(
@@ -496,8 +629,15 @@ def list_project(
     note_type: str,
     status: str | None,
     include_archived: bool,
+    *,
+    sort: str | None = None,
+    fields: str | None = None,
+    goal: bool = False,
+    json_output: bool = False,
 ) -> None:
     """List project notes for the stable list subcommand."""
+    columns = resolve_list_fields(fields, goal)
+    want_goal = "goal" in columns
     project_root = root / "Projects" / project
     if not project_root.exists():
         raise OawError(f"project not found: {project_root}")
@@ -505,8 +645,16 @@ def list_project(
         tasks = project_root / "Tasks"
         if not tasks.exists():
             raise OawError(f"project tasks folder not found: {tasks}")
-        rows = project_note_rows(tasks, root, note_type, status, True)
+        records = project_note_records(tasks, root, note_type, status, True, want_goal)
     else:
-        rows = project_note_rows(project_root, root, note_type, status, include_archived)
-    for row in rows:
-        print("\t".join(row))
+        records = project_note_records(
+            project_root, root, note_type, status, include_archived, want_goal
+        )
+    if sort is not None:
+        records.sort(key=_SORT_KEYS[sort])
+    if json_output:
+        payload = [{field: _record_field(record, field) for field in columns} for record in records]
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+    for record in records:
+        print("\t".join(_record_field(record, field) for field in columns))

@@ -85,6 +85,25 @@ oaw list --project "Obsidian Agent Workflow" --status active
 
 The project name is the folder name under `Projects/` in the vault. `task` is the default note type.
 
+To build a priority-ranked, goal-annotated view of a project's tasks, use the
+list command's own sort and projection instead of a shell loop over each note's
+frontmatter and body:
+
+```bash
+oaw list --project "Obsidian Agent Workflow" --status todo \
+  --sort priority --fields id,priority,effort,goal --json
+```
+
+- `--sort {priority,effort,title}` orders rows by the vault-wide 1/2/3 priority
+  rank, then effort rank (`S`, `M`, `L`), then title; missing values sort last.
+- `--fields` projects a comma-separated column set (default `id,status,title,path`);
+  unknown fields error clearly. Projectable fields: `id`, `status`, `title`,
+  `path`, `goal`, `priority`, `effort`, `preparedness`, `type`, `project`,
+  `created`, `execution`.
+- `--goal` adds a snippet from each note's `## Problem` first content line.
+- `--json` emits the projected, sorted records as an object array so no shell
+  frontmatter parsing is needed.
+
 Some projects also use atomic capture notes for evidence/inbox items. List captures by frontmatter instead of opening a long inbox note:
 
 ```bash

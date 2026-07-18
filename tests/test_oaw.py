@@ -2204,6 +2204,178 @@ aliases:
         self.assertIn("OAW-TSK-cli", proc.stdout)
         self.assertIn("OAW-TSK-archived", proc.stdout)
 
+    def _seed_ranked_tasks(self):
+        tasks = self.vault / "Projects/Ranking/Tasks"
+        write(
+            tasks / "High.md",
+            """---
+type: task
+project: ranking
+status: todo
+priority: 1
+effort: M
+id: RNK-TSK-high
+---
+
+# High leverage task
+
+## Problem
+
+High priority work that must ship the ranked view first.
+""",
+        )
+        write(
+            tasks / "Mid.md",
+            """---
+type: task
+project: ranking
+status: todo
+priority: 2
+effort: S
+id: RNK-TSK-mid
+---
+
+# Mid priority task
+
+## Problem
+
+Normal next-session work with clear value.
+""",
+        )
+        write(
+            tasks / "Untriaged.md",
+            """---
+type: task
+project: ranking
+status: todo
+id: RNK-TSK-untriaged
+---
+
+# Untriaged task
+
+## Problem
+
+Work that has no priority or effort assigned yet.
+""",
+        )
+
+    def test_list_default_output_unchanged_by_new_flags(self):
+        proc = self.run_oaw("list", "--project", "Obsidian Agent Workflow")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        for line in proc.stdout.splitlines():
+            self.assertEqual(len(line.split("\t")), 4, line)
+        self.assertIn(
+            "OAW-TSK-cli\ttodo\tResolver CLI\t"
+            "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md",
+            proc.stdout,
+        )
+
+    def test_list_sort_priority_orders_by_rank_then_effort_then_title(self):
+        self._seed_ranked_tasks()
+        proc = self.run_oaw(
+            "list",
+            "--project",
+            "Ranking",
+            "--sort",
+            "priority",
+            "--fields",
+            "id",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(
+            proc.stdout.splitlines(),
+            ["RNK-TSK-high", "RNK-TSK-mid", "RNK-TSK-untriaged"],
+        )
+
+    def test_list_sort_priority_tie_breaks_on_effort_and_title(self):
+        tasks = self.vault / "Projects/Ties/Tasks"
+        write(
+            tasks / "A.md",
+            "---\ntype: task\nstatus: todo\npriority: 1\neffort: L\n"
+            "id: TIE-TSK-a\n---\n\n# Aardvark\n",
+        )
+        write(
+            tasks / "B.md",
+            "---\ntype: task\nstatus: todo\npriority: 1\neffort: S\n"
+            "id: TIE-TSK-b\n---\n\n# Zebra\n",
+        )
+        write(
+            tasks / "C.md",
+            "---\ntype: task\nstatus: todo\npriority: 1\neffort: S\n"
+            "id: TIE-TSK-c\n---\n\n# Antelope\n",
+        )
+        proc = self.run_oaw(
+            "list", "--project", "Ties", "--sort", "priority", "--fields", "id"
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        # effort S before L; within equal effort, title Antelope before Zebra.
+        self.assertEqual(
+            proc.stdout.splitlines(),
+            ["TIE-TSK-c", "TIE-TSK-b", "TIE-TSK-a"],
+        )
+
+    def test_list_field_projection_adds_frontmatter_columns(self):
+        self._seed_ranked_tasks()
+        proc = self.run_oaw(
+            "list",
+            "--project",
+            "Ranking",
+            "--sort",
+            "priority",
+            "--fields",
+            "id,priority,effort,title",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        lines = proc.stdout.splitlines()
+        self.assertEqual(lines[0], "RNK-TSK-high\t1\tM\tHigh leverage task")
+        # Missing priority/effort project as empty columns and sort last.
+        self.assertEqual(lines[-1], "RNK-TSK-untriaged\t\t\tUntriaged task")
+
+    def test_list_unknown_field_errors_clearly(self):
+        self._seed_ranked_tasks()
+        proc = self.run_oaw("list", "--project", "Ranking", "--fields", "id,bogus")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout, "")
+        self.assertIn("unknown list field: bogus", proc.stderr)
+
+    def test_list_goal_column_snippets_problem_section(self):
+        self._seed_ranked_tasks()
+        proc = self.run_oaw(
+            "list", "--project", "Ranking", "--fields", "id", "--goal"
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(
+            "RNK-TSK-high\tHigh priority work that must ship the ranked view first.",
+            proc.stdout,
+        )
+
+    def test_list_json_emits_sorted_projected_records(self):
+        self._seed_ranked_tasks()
+        proc = self.run_oaw(
+            "list",
+            "--project",
+            "Ranking",
+            "--sort",
+            "priority",
+            "--fields",
+            "id,priority,goal",
+            "--json",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout)
+        self.assertEqual([row["id"] for row in payload], ["RNK-TSK-high", "RNK-TSK-mid", "RNK-TSK-untriaged"])
+        self.assertEqual(payload[0]["priority"], "1")
+        self.assertEqual(payload[-1]["priority"], "")
+        self.assertEqual(
+            payload[0]["goal"], "High priority work that must ship the ranked view first."
+        )
+
+    def test_list_invalid_sort_choice_is_usage_error(self):
+        proc = self.run_oaw("list", "--project", "Obsidian Agent Workflow", "--sort", "nope")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("usage: oaw list", proc.stderr)
+        self.assertIn("invalid choice: 'nope'", proc.stderr)
+
     def test_lifecycle_supports_agents_task_without_board_output(self):
         proc = self.run_oaw(
             "task",

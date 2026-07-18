@@ -167,6 +167,28 @@ Use `--status <value>` to select one exact frontmatter status. When `--status`
 is omitted, `--include-archived` adds archived notes to the normal listing;
 otherwise archived notes are hidden.
 
+Rank, project extra columns, and emit a machine-readable view without a shell
+loop over each note:
+
+```bash
+oaw list --project "Obsidian Agent Workflow" --status todo --sort priority
+oaw list --project "Obsidian Agent Workflow" --fields id,priority,effort,title
+oaw list --project "Obsidian Agent Workflow" --sort priority --goal
+oaw list --project "Obsidian Agent Workflow" --sort priority \
+  --fields id,priority,effort,goal --json
+```
+
+- `--sort {priority,effort,title}` orders rows by the vault-wide 1/2/3 priority
+  rank, then effort rank (`S`, `M`, `L`), then title; missing priority or effort
+  sorts last. Without `--sort`, rows stay in vault order.
+- `--fields` replaces the default `id,status,title,path` columns with a
+  comma-separated projection; unknown fields error clearly. Projectable fields
+  are `id`, `status`, `title`, `path`, `goal`, `priority`, `effort`,
+  `preparedness`, `type`, `project`, `created`, and `execution`.
+- `--goal` adds a snippet column sourced from each note's `## Problem` section
+  first content line, without opening the whole body in the caller.
+- `--json` emits the same projected, sorted records as an array of objects.
+
 ## Project workspace creation
 
 Create the minimal index for a first-class project from the vault's native template:

@@ -57,7 +57,8 @@ USAGE_BY_COMMAND = {
     "           {resolve,list,project,research,task,run,note,ingest,link,export,session,retro,feedback} ...\n",
     "oaw resolve": "usage: oaw resolve [-h] [--full] [--path] [--meta] [--outline] [--json] id\n",
     "oaw list": "usage: oaw list [-h] --project PROJECT [--type TYPE] [--status STATUS]\n"
-    "                [--include-archived]\n",
+    "                [--include-archived] [--sort {priority,effort,title}]\n"
+    "                [--fields FIELDS] [--goal] [--json]\n",
     "oaw project": "usage: oaw project [-h] {create} ...\n",
     "oaw project create": "usage: oaw project create [-h] --name NAME --alias ALIAS --goal GOAL\n"
     "                          [--repo REPO] [--tag TAG] [--template TEMPLATE]\n"
@@ -185,6 +186,7 @@ ARGPARSE_CHOICES = {
     "preparedness_state": ("needs-triage", "needs-design", "prepared"),
     "relation_type": RELATION_TYPES,
     "execution": ("human", "agent", "hybrid"),
+    "sort": ("priority", "effort", "title"),
     "state": ("running", "paused", "completed", "closed"),
     "feedback_type": FEEDBACK_TYPES,
 }
@@ -385,6 +387,12 @@ class RunState(str, Enum):
     CLOSED = "closed"
 
 
+class ListSort(str, Enum):
+    PRIORITY = "priority"
+    EFFORT = "effort"
+    TITLE = "title"
+
+
 app.add_typer(project_app, name="project")
 app.add_typer(research_app, name="research")
 app.add_typer(task_app, name="task")
@@ -445,8 +453,33 @@ def list_notes(
     include_archived: Annotated[
         bool, typer.Option("--include-archived", help="include archived notes without --status")
     ] = False,
+    sort: Annotated[
+        ListSort | None, typer.Option("--sort", help="sort rows by priority, effort, or title")
+    ] = None,
+    fields: Annotated[
+        str | None, typer.Option("--fields", help="comma-separated columns to project")
+    ] = None,
+    goal: Annotated[
+        bool, typer.Option("--goal", help="add a goal snippet column from the note's ## Problem section")
+    ] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="emit projected records as JSON")
+    ] = False,
 ) -> None:
-    _run(lambda: list_project(vault_root(), project, note_type, status, include_archived))
+    sort_value = sort.value if sort is not None else None
+    _run(
+        lambda: list_project(
+            vault_root(),
+            project,
+            note_type,
+            status,
+            include_archived,
+            sort=sort_value,
+            fields=fields,
+            goal=goal,
+            json_output=json_output,
+        )
+    )
 
 
 @project_app.command("create", help="create a project Index.md from the vault template")
