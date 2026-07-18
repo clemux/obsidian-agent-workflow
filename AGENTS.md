@@ -63,7 +63,11 @@ Run `uv run pytest` before submitting changes. Update tests whenever resolver ma
 
 ## Commit & Pull Request Guidelines
 
-Recent history uses short imperative subjects, with optional scopes such as `docs(oaw): ...`. Keep commits focused and mention the affected area when useful.
+Commit messages must follow Conventional Commits 1.0.0:
+`<type>[optional scope][!]: <description>`. Use established types and scopes from
+recent history, such as `docs(oaw): ...`, and omit the scope rather than inventing
+one. Mark breaking changes with `!` or a `BREAKING CHANGE:` footer. Keep commits
+focused and use concise imperative descriptions.
 
 Pull requests should include a behavior summary, the test command run, and any vault/schema assumptions. Link related task IDs such as `OAW-TSK-cli`, and include terminal snippets only when they clarify CLI behavior.
 
