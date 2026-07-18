@@ -8,7 +8,7 @@ import tempfile
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import TextIO
+from typing import IO
 
 from .errors import OawError
 
@@ -83,8 +83,8 @@ def write_new_note_atomic(
     text: str,
     *,
     link: Callable[[str, str], None] = os.link,
-    write: Callable[[TextIO, str], None] | None = None,
-    flush: Callable[[TextIO], None] | None = None,
+    write: Callable[[IO[str], str], None] | None = None,
+    flush: Callable[[IO[str]], None] | None = None,
     fsync: Callable[[int], None] = os.fsync,
     mkdir: Callable[[Path], None] | None = None,
 ) -> None:

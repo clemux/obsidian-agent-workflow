@@ -1,6 +1,7 @@
 import os
 import threading
 from pathlib import Path
+from typing import IO
 
 import pytest
 
@@ -36,22 +37,22 @@ def test_write_new_note_atomic_cleans_temp_and_new_directories_on_stage_failure(
 ):
     destination = tmp_path / "Agents/Feedback/failure.md"
 
-    def fail_write(_handle, _text: str) -> None:
+    def fail_write(_handle: IO[str], _text: str) -> None:
         raise OSError("injected write failure")
 
-    def fail_flush(_handle) -> None:
+    def fail_flush(_handle: IO[str]) -> None:
         raise OSError("injected flush failure")
 
     def fail_fsync(_fd: int) -> None:
         raise OSError("injected fsync failure")
 
-    options = {
-        "write": {"write": fail_write},
-        "flush": {"flush": fail_flush},
-        "fsync": {"fsync": fail_fsync},
-    }[stage]
     with pytest.raises(OSError, match=f"injected {stage} failure"):
-        write_new_note_atomic(destination, "complete note", **options)
+        if stage == "write":
+            write_new_note_atomic(destination, "complete note", write=fail_write)
+        elif stage == "flush":
+            write_new_note_atomic(destination, "complete note", flush=fail_flush)
+        else:
+            write_new_note_atomic(destination, "complete note", fsync=fail_fsync)
     assert not destination.exists()
     assert not (tmp_path / "Agents").exists()
 
