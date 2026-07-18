@@ -39,6 +39,11 @@ project environment: use `uv run python bin/oaw ...`, not bare `python bin/oaw .
 
 When changing the CLI, use the updated version from the active checkout or worktree for subsequent OAW operations: run `uv run python bin/oaw ...` instead of the separately installed `oaw` until the change is integrated. This prevents an older installed version from hiding integration problems and continuously exercises argument parsing, output, resolution, and lifecycle behavior.
 
+When repository work interacts with the user's real Obsidian vault or runs any
+`obsidian` CLI command, load and follow the `obsidian-clemux` skill first. It
+contains required machine-specific targeting, verified command behavior, and
+known CLI limitations; the OAW skill is not a substitute for it.
+
 - Exercise changed or newly combined behavior against a temporary vault with `OAW_VAULT` before any real-vault write.
 - When the operation is safe and relevant, use the checkout CLI for the current task's real-vault resolution and lifecycle bookkeeping too. Do not dogfood experimental or destructive writes against the real vault; prefer dry-run modes and temporary fixtures.
 - Treat friction found while dogfooding as evidence: record the command and observed behavior in the related OAW task, or create a focused OAW task when no suitable note exists. Add a regression test and fix it immediately when the correction is small and in scope.
