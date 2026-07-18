@@ -33,6 +33,7 @@ src/oaw/
                      # round-trip YAML behind one interface
     resolver.py      # vault walk, id/alias matching, project aliases, NoteMatch
     links.py         # wikilink parse, durable links, link commands
+    relations.py     # semantic task-link parsing, graph validation, blocker state
     lifecycle.py     # task create/status transitions/notes
     sessions.py      # session env detection, session lookup
     snapshot.py      # session artifact snapshots
@@ -71,6 +72,7 @@ Explicit acyclic layer graph — imports flow strictly downward:
 ```
 cli.py
   → command domains: lifecycle, links, snapshot, exports, ingest, retro
+      → task graph service: relations
       → shared services: resolver, sessions
           → note model: notes, frontmatter
           → leaf utilities: session_metrics
@@ -90,10 +92,13 @@ adapter modules above them would violate the non-goals.
 
 - `cli.py` sits at the top and may import any lower layer; in practice it
   imports the command domains plus the shared-service command entrypoints
-  named above. Command domains import the shared services and the note model;
-  they never import each other. Shared services never import command domains
+  named above. Command domains import lower services and the note model;
+  they never import peer command domains. Shared services never import command domains
   or `cli.py`. Cross-cutting behavior (e.g. lifecycle writes appending session
   traces) lives in a shared layer.
+- `lifecycle.py` imports the lower semantic graph service in `relations.py` to
+  enforce hard blockers during review and completion. `relations.py` depends on
+  resolver, link, frontmatter, and note services and never imports lifecycle.
 - Shared services (`resolver`, `sessions`) may import `notes` and
   `frontmatter` — `resolver` in particular consumes frontmatter parsing and
   pre-filtering. The note model imports only `errors` and the stdlib.

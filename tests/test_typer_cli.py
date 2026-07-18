@@ -27,6 +27,12 @@ EXPECTED_COMMAND_PATHS = {
     ("task", "complete"),
     ("task", "note"),
     ("task", "priority"),
+    ("task", "preparedness"),
+    ("task", "relation"),
+    ("task", "relation", "add"),
+    ("task", "relation", "remove"),
+    ("task", "relation", "list"),
+    ("task", "relation", "validate"),
     ("task", "create"),
     ("run",),
     ("run", "list"),
@@ -374,6 +380,9 @@ def test_typer_ordinary_usage_errors_preserve_usage_diagnostics(
         ("--effort", "S"),
         ("--effort", "M"),
         ("--effort", "L"),
+        ("--preparedness", "needs-triage"),
+        ("--preparedness", "needs-design"),
+        ("--preparedness", "prepared"),
     ],
 )
 def test_typer_task_create_accepts_each_declared_value(
@@ -402,6 +411,84 @@ def test_typer_task_create_accepts_each_declared_value(
     assert result.exit_code == 0, result.stderr
     assert result.stderr == ""
     assert f"Status: {'backlog' if option != '--status' else value}" in result.stdout
+
+
+@pytest.mark.parametrize("state", ["needs-triage", "needs-design", "prepared"])
+def test_typer_task_preparedness_accepts_each_declared_value(state: str, tmp_path: Path) -> None:
+    write_project_index(tmp_path)
+    task = tmp_path / "Projects/Parity/Tasks/Example.md"
+    write(
+        task,
+        """---
+type: task
+status: todo
+id: PRT-TSK-example
+aliases:
+  - PRT-TSK-example
+---
+
+# Example
+""",
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "task",
+            "preparedness",
+            "PRT-TSK-example",
+            "--state",
+            state,
+            "--note",
+            "Assessed.",
+            "--allow-missing-session-id",
+        ],
+        env={"OAW_VAULT": str(tmp_path)},
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert f"Preparedness: {state}" in result.stdout
+
+
+def test_typer_task_preparedness_rejects_invalid_state() -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "task",
+            "preparedness",
+            "PRT-TSK-example",
+            "--state",
+            "unknown",
+            "--note",
+            "Assess.",
+        ],
+        env={"COLUMNS": "80"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "argument --state: invalid choice: 'unknown'" in result.stderr
+
+
+def test_typer_task_relation_rejects_invalid_type() -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "task",
+            "relation",
+            "add",
+            "PRT-TSK-source",
+            "unknown",
+            "PRT-TSK-target",
+            "--note",
+            "Invalid.",
+        ],
+        env={"COLUMNS": "80"},
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "argument relation_type: invalid choice: 'unknown'" in result.stderr
 
 
 def test_typer_domain_error_uses_stderr_and_exit_class_one(tmp_path: Path) -> None:

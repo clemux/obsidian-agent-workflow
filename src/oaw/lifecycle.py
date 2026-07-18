@@ -17,6 +17,7 @@ from .frontmatter import (
     split_inline_comment,
 )
 from .notes import VaultTransaction, append_markdown_block_to_section, split_note
+from .relations import blocker_problems, prepare_relation_add, prepare_relation_remove
 from .resolver import (
     NoteMatch,
     iter_markdown,
@@ -53,6 +54,7 @@ PROJECT_INDEX_TEMPLATE = Path("Templates/Small project index.md")
 DEEP_RESEARCH_HEADING = "## Deep research prompt"
 RUNNING_RESEARCH_HEADING = "## Running research sessions"
 RESEARCH_PACKET_BASE = Path("Bases/Research packet.base")
+TASK_PREPAREDNESS_STATES = ("needs-triage", "needs-design", "prepared")
 
 
 def is_project_task(path: Path, root: Path) -> bool:
@@ -164,6 +166,13 @@ def update_task(
     if execution not in (None, "agent", "hybrid"):
         raise OawError("task execution must be human, agent, or hybrid")
 
+    dependency_problems = (
+        blocker_problems(root, match) if status in {"active", "review", "done"} else []
+    )
+    if status in {"review", "done"} and dependency_problems:
+        details = "; ".join(problem.message for problem in dependency_problems)
+        raise OawError(f"task {action} refused by blocked-by relationships: {details}")
+
     run_change: tuple[Path, str] | None = None
     run_identifier: str | None = None
 
@@ -254,6 +263,13 @@ def update_task(
     print(f"Status: {status}")
     if run_identifier:
         print(f"Run: {run_identifier}")
+    if status == "active" and dependency_problems:
+        state = (
+            "invalid" if any(item.state == "invalid" for item in dependency_problems) else "blocked"
+        )
+        print(f"Dependency state: {state}")
+        for problem in dependency_problems:
+            print(f"Blocked by: {problem.message}")
 
 
 def pause_task(match: NoteMatch, root: Path, note: str) -> None:
@@ -437,6 +453,88 @@ def update_task_priority(
     print(f"Status: {match.frontmatter.get('status', '')}")
 
 
+def update_task_preparedness(
+    match: NoteMatch,
+    root: Path,
+    preparedness: str,
+    note: str,
+    allow_missing: bool,
+) -> None:
+    if not is_lifecycle_task(match.path, root):
+        raise lifecycle_task_error()
+    if match.frontmatter.get("type") != "task":
+        raise OawError("task preparedness requires frontmatter type: task")
+    if preparedness not in TASK_PREPAREDNESS_STATES:
+        raise OawError("task preparedness must be needs-triage, needs-design, or prepared")
+    if not note.strip():
+        raise OawError("task preparedness requires non-empty --note")
+
+    text = match.path.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise OawError("task note has no YAML frontmatter")
+    end = next((idx for idx in range(1, len(lines)) if lines[idx].strip() == "---"), None)
+    if end is None:
+        raise OawError("task note frontmatter is not closed")
+    _validate_priority_update_frontmatter(lines, end)
+    current = match.frontmatter.get("preparedness")
+    if current is not None and current not in TASK_PREPAREDNESS_STATES:
+        raise OawError(
+            "task preparedness frontmatter must be a scalar needs-triage, "
+            "needs-design, or prepared before OAW can update it"
+        )
+
+    provider, session_ref = detect_session(allow_missing)
+    text = set_frontmatter_scalar(text, "preparedness", preparedness)
+    text = append_session_id_frontmatter(text, session_ref)
+    text = append_session_entry(text, provider, session_ref, note, None)
+    transaction = VaultTransaction()
+    transaction.stage(match.path, text)
+    transaction.commit()
+    print(f"Updated: {match.relpath}")
+    print(f"Preparedness: {preparedness}")
+    print(f"Status: {match.frontmatter.get('status', '')}")
+
+
+def update_task_relation(
+    root: Path,
+    source_value: str,
+    relation_type: str,
+    target_value: str,
+    note: str,
+    allow_missing: bool,
+    remove: bool,
+) -> None:
+    action = "remove" if remove else "add"
+    if not note.strip():
+        raise OawError(f"task relation {action} requires non-empty --note")
+    mutation = (
+        prepare_relation_remove(root, source_value, relation_type, target_value)
+        if remove
+        else prepare_relation_add(root, source_value, relation_type, target_value)
+    )
+    if not mutation.changed:
+        print(f"Source: {mutation.source.note_id}")
+        print(f"Relation: {relation_type}")
+        print(f"Target: {mutation.target.note_id}")
+        print("State: present")
+        return
+
+    provider, session_ref = detect_session(allow_missing)
+    verb = "Removed" if remove else "Added"
+    detail = f"{verb} {relation_type} relationship to {mutation.target.note_id}. {note.strip()}"
+    text = append_session_id_frontmatter(mutation.updated_text, session_ref)
+    text = append_session_entry(text, provider, session_ref, detail, None)
+    transaction = VaultTransaction()
+    transaction.stage(mutation.source.path, text)
+    transaction.commit()
+    print(f"Updated: {mutation.source.relpath}")
+    print(f"Relation: {relation_type}")
+    print(f"Target: {mutation.target.note_id}")
+    print(f"Action: {action}")
+    print(f"Status: {mutation.source.frontmatter.get('status', '')}")
+
+
 def list_runs(task_id: str | None, state: str | None, as_json: bool, root: Path) -> None:
     now = utc_now()
     selected_task = strip_obs_prefix(task_id) if task_id else None
@@ -536,6 +634,7 @@ def create_task(
     status: str,
     priority: int | None,
     effort: str | None,
+    preparedness: str,
     note: str | None,
     tags: list[str] | None,
     execution: str | None,
@@ -570,6 +669,8 @@ def create_task(
     project_root, alias = resolve_project_root_from_references(raw_project, root, references)
     if execution not in {None, "human", "agent", "hybrid"}:
         raise OawError("task execution must be human, agent, or hybrid")
+    if preparedness not in TASK_PREPAREDNESS_STATES:
+        raise OawError("task preparedness must be needs-triage, needs-design, or prepared")
     if start and execution == "human":
         raise OawError("cannot --start a task with human execution")
     identity = detect_identity() if start else None
@@ -606,6 +707,7 @@ def create_task(
         "type: task",
         f"project: {project_slug}",
         f"status: {task_status}",
+        f"preparedness: {preparedness}",
         f"created: {created}",
     ]
     if priority is not None:

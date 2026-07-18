@@ -34,9 +34,12 @@ from .lifecycle import (
     pause_task,
     start_research_run,
     update_task,
+    update_task_preparedness,
     update_task_priority,
+    update_task_relation,
 )
 from .links import link_check, link_ensure, link_ensure_bidirectional, link_lint, link_list
+from .relations import RELATION_TYPES, list_task_relations, validate_task_relations
 from .resolver import list_project, notes_containing_literal, output_resolve, resolve_id, vault_root
 from .retro import create_retrospective, update_note_observation
 from .sessions import (
@@ -65,7 +68,7 @@ USAGE_BY_COMMAND = {
     "                             [--force]\n",
     "oaw research start": "usage: oaw research start [-h] --project PROJECT --track TRACK --source SOURCE\n"
     "                          --url URL\n",
-    "oaw task": "usage: oaw task [-h] {backlog,promote,start,pause,review,complete,note,priority,create} ...\n",
+    "oaw task": "usage: oaw task [-h] {backlog,promote,start,pause,review,complete,note,priority,preparedness,relation,create} ...\n",
     "oaw task backlog": "usage: oaw task backlog [-h] --note NOTE [--checks CHECKS]\n"
     "                        [--allow-missing-session-id]\n"
     "                        id\n",
@@ -81,10 +84,24 @@ USAGE_BY_COMMAND = {
     "oaw task priority": "usage: oaw task priority [-h] --priority {1,2,3} --note NOTE\n"
     "                         [--allow-missing-session-id]\n"
     "                         id\n",
+    "oaw task preparedness": "usage: oaw task preparedness [-h] --state {needs-triage,needs-design,prepared}\n"
+    "                              --note NOTE [--allow-missing-session-id]\n"
+    "                              id\n",
+    "oaw task relation": "usage: oaw task relation [-h] {add,remove,list,validate} ...\n",
+    "oaw task relation add": "usage: oaw task relation add [-h] --note NOTE\n"
+    "                             [--allow-missing-session-id]\n"
+    "                             source {blocked-by,follows,follow-up-to} target\n",
+    "oaw task relation remove": "usage: oaw task relation remove [-h] --note NOTE\n"
+    "                                [--allow-missing-session-id]\n"
+    "                                source {blocked-by,follows,follow-up-to} target\n",
+    "oaw task relation list": "usage: oaw task relation list [-h] [--incoming] [--json] task\n",
+    "oaw task relation validate": "usage: oaw task relation validate [-h] [--json] [task]\n",
     "oaw task create": "usage: oaw task create [-h] [--project PROJECT] [--title TITLE]\n"
     "                       [--from-capture FROM_CAPTURE] [--start] [--id ID]\n"
     "                       [--status {backlog,todo}] [--priority {1,2,3}]\n"
-    "                       [--effort {S,M,L}] [--note NOTE] [--tag TAG]\n"
+    "                       [--effort {S,M,L}]\n"
+    "                       [--preparedness {needs-triage,needs-design,prepared}]\n"
+    "                       [--note NOTE] [--tag TAG]\n"
     "                       [--execution {human,agent,hybrid}]\n"
     "                       [--allow-missing-session-id]\n",
     "oaw run": "usage: oaw run [-h] {list,close,audit} ...\n",
@@ -145,6 +162,7 @@ SUBCOMMAND_DESTINATIONS = {
     "oaw project": "project_command",
     "oaw research": "research_command",
     "oaw task": "task_command",
+    "oaw task relation": "relation_command",
     "oaw run": "run_command",
     "oaw note": "note_command",
     "oaw ingest": "ingest_command",
@@ -163,6 +181,9 @@ ARGPARSE_CHOICES = {
     "status": ("backlog", "todo"),
     "priority": ("1", "2", "3"),
     "effort": ("S", "M", "L"),
+    "preparedness": ("needs-triage", "needs-design", "prepared"),
+    "preparedness_state": ("needs-triage", "needs-design", "prepared"),
+    "relation_type": RELATION_TYPES,
     "execution": ("human", "agent", "hybrid"),
     "state": ("running", "paused", "completed", "closed"),
     "feedback_type": FEEDBACK_TYPES,
@@ -317,6 +338,7 @@ app = _app("OAW command-line interface.")
 project_app = _app("Project workspace lifecycle")
 research_app = _app("Research packet utilities")
 task_app = _app("Project task lifecycle")
+relation_app = _app("Semantic task relationships")
 run_app = _app("Inspect and administer agent-run records")
 note_app = _app("Append session traces or observations to resolved notes")
 ingest_app = _app("Ingest approved handoff files")
@@ -344,6 +366,18 @@ class TaskExecution(str, Enum):
     HYBRID = "hybrid"
 
 
+class TaskPreparedness(str, Enum):
+    NEEDS_TRIAGE = "needs-triage"
+    NEEDS_DESIGN = "needs-design"
+    PREPARED = "prepared"
+
+
+class RelationType(str, Enum):
+    BLOCKED_BY = "blocked-by"
+    FOLLOWS = "follows"
+    FOLLOW_UP_TO = "follow-up-to"
+
+
 class RunState(str, Enum):
     RUNNING = "running"
     PAUSED = "paused"
@@ -354,6 +388,7 @@ class RunState(str, Enum):
 app.add_typer(project_app, name="project")
 app.add_typer(research_app, name="research")
 app.add_typer(task_app, name="task")
+task_app.add_typer(relation_app, name="relation")
 app.add_typer(run_app, name="run")
 app.add_typer(note_app, name="note")
 app.add_typer(ingest_app, name="ingest")
@@ -577,6 +612,85 @@ def task_priority(
     )
 
 
+@task_app.command("preparedness", help="update task preparedness without changing lifecycle status")
+def task_preparedness(
+    note_id: Annotated[str, typer.Argument()],
+    preparedness_state: Annotated[TaskPreparedness, typer.Option("--state")],
+    note: Annotated[str, typer.Option("--note")],
+    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
+) -> None:
+    root_path = vault_root()
+    _run(
+        lambda: update_task_preparedness(
+            resolve_id(note_id, root_path),
+            root_path,
+            preparedness_state.value,
+            note,
+            allow_missing_session_id,
+        )
+    )
+
+
+def _task_relation_mutation(
+    source: str,
+    relation_type: RelationType,
+    target: str,
+    note: str,
+    allow_missing_session_id: bool,
+    remove: bool,
+) -> None:
+    _run(
+        lambda: update_task_relation(
+            vault_root(),
+            source,
+            relation_type.value,
+            target,
+            note,
+            allow_missing_session_id,
+            remove,
+        )
+    )
+
+
+@relation_app.command("add", help="add a canonical semantic relationship")
+def task_relation_add(
+    source: Annotated[str, typer.Argument()],
+    relation_type: Annotated[RelationType, typer.Argument()],
+    target: Annotated[str, typer.Argument()],
+    note: Annotated[str, typer.Option("--note")],
+    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
+) -> None:
+    _task_relation_mutation(source, relation_type, target, note, allow_missing_session_id, False)
+
+
+@relation_app.command("remove", help="remove a semantic relationship")
+def task_relation_remove(
+    source: Annotated[str, typer.Argument()],
+    relation_type: Annotated[RelationType, typer.Argument()],
+    target: Annotated[str, typer.Argument()],
+    note: Annotated[str, typer.Option("--note")],
+    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
+) -> None:
+    _task_relation_mutation(source, relation_type, target, note, allow_missing_session_id, True)
+
+
+@relation_app.command("list", help="list outgoing or derived incoming relationships")
+def task_relation_list(
+    task: Annotated[str, typer.Argument()],
+    incoming: Annotated[bool, typer.Option("--incoming")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    _run(lambda: list_task_relations(vault_root(), task, incoming, json_output))
+
+
+@relation_app.command("validate", help="validate one reachable graph or the whole vault")
+def task_relation_validate(
+    task: Annotated[str | None, typer.Argument()] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    _run(lambda: validate_task_relations(vault_root(), task, json_output))
+
+
 @task_app.command("create", help="create a new project task note")
 def task_create(
     project: Annotated[
@@ -597,6 +711,13 @@ def task_create(
     ] = None,
     priority: Annotated[list[int] | None, typer.Option("--priority", min=1, max=3)] = None,
     effort: Annotated[list[TaskEffort] | None, typer.Option("--effort", help="S, M, or L")] = None,
+    preparedness: Annotated[
+        list[TaskPreparedness] | None,
+        typer.Option(
+            "--preparedness",
+            help="needs-triage, needs-design, or prepared; defaults to needs-triage",
+        ),
+    ] = None,
     note: Annotated[str | None, typer.Option("--note", help="initial problem statement")] = None,
     tag: Annotated[list[str] | None, typer.Option("--tag", help="extra tag; repeatable")] = None,
     execution: Annotated[
@@ -612,6 +733,7 @@ def task_create(
     selected_status = status[-1] if status else TaskStatus.BACKLOG
     selected_priority = priority[-1] if priority else None
     selected_effort = effort[-1] if effort else None
+    selected_preparedness = preparedness[-1] if preparedness else TaskPreparedness.NEEDS_TRIAGE
     _run(
         lambda: create_task(
             vault_root(),
@@ -623,6 +745,7 @@ def task_create(
             selected_status.value,
             selected_priority,
             selected_effort.value if selected_effort is not None else None,
+            selected_preparedness.value,
             note,
             tag,
             execution.value if execution is not None else None,

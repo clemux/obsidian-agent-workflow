@@ -5,6 +5,7 @@ from oaw.frontmatter import (
     append_frontmatter_list_value,
     parse_frontmatter,
     parse_yaml_string_list_item,
+    remove_frontmatter_list_value,
     set_frontmatter_scalar,
 )
 
@@ -97,3 +98,46 @@ def test_append_frontmatter_list_value_rejects_inline_list():
             "session-ids",
             "new",
         )
+
+
+def test_remove_frontmatter_list_value_removes_exact_items_and_preserves_comments():
+    original = (
+        "---\n"
+        "blocked-by:\n"
+        "  # retained explanation\n"
+        '  - "[[Tasks/One|ONE]]"\n'
+        '  - "[[Tasks/Two|TWO]]" # retained item comment\n'
+        "status: todo\n"
+        "---\n"
+    )
+
+    updated = remove_frontmatter_list_value(original, "blocked-by", "[[Tasks/One|ONE]]")
+
+    assert updated == (
+        "---\n"
+        "blocked-by:\n"
+        "  # retained explanation\n"
+        '  - "[[Tasks/Two|TWO]]" # retained item comment\n'
+        "status: todo\n"
+        "---\n"
+    )
+
+
+def test_remove_frontmatter_list_value_rejects_missing_relationship():
+    with pytest.raises(OawError, match="relationship is not present"):
+        remove_frontmatter_list_value("---\nid: example\n---\n", "blocked-by", "missing")
+
+
+def test_remove_frontmatter_list_value_removes_empty_property_and_its_comments():
+    original = (
+        "---\n"
+        "blocked-by:\n"
+        "  # relationship-specific explanation\n"
+        '  - "[[Tasks/One|ONE]]"\n'
+        "status: todo\n"
+        "---\n"
+    )
+
+    updated = remove_frontmatter_list_value(original, "blocked-by", "[[Tasks/One|ONE]]")
+
+    assert updated == "---\nstatus: todo\n---\n"

@@ -202,3 +202,52 @@ def append_frontmatter_list_value(text: str, key: str, value: str) -> str:
         return text
     lines.insert(block_end, f"  - {json.dumps(value, ensure_ascii=False)}\n")
     return "".join(lines)
+
+
+def remove_frontmatter_list_value(text: str, key: str, value: str) -> str:
+    """Remove one exact string from a flat YAML block list without reformatting it."""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        raise OawError("note has no YAML frontmatter")
+    end = next((idx for idx in range(1, len(lines)) if lines[idx].strip() == "---"), None)
+    if end is None:
+        raise OawError("note frontmatter is not closed")
+
+    pattern = re.compile(rf"^{re.escape(key)}\s*:")
+    key_indices = [idx for idx in range(1, end) if pattern.match(lines[idx])]
+    if len(key_indices) > 1:
+        raise OawError(f"note frontmatter contains duplicate field: {key}")
+    if not key_indices:
+        raise OawError(f"{key} relationship is not present")
+    key_idx = key_indices[0]
+    _, inline_value = lines[key_idx].split(":", 1)
+    if inline_value.strip():
+        raise OawError(f"{key} must use a YAML block list before OAW can remove safely")
+
+    block_end = key_idx + 1
+    while block_end < end and (
+        lines[block_end].startswith((" ", "\t"))
+        or not lines[block_end].strip()
+        or lines[block_end].lstrip().startswith("#")
+    ):
+        block_end += 1
+    item_indices: list[int] = []
+    matches: list[int] = []
+    for idx in range(key_idx + 1, block_end):
+        line = lines[idx]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        item = re.match(r"^\s+-\s+(.+?)\r?\n?$", line)
+        if not item:
+            raise OawError(f"{key} must be a flat YAML block list before OAW can remove safely")
+        item_indices.append(idx)
+        if parse_yaml_string_list_item(item.group(1), key) == value:
+            matches.append(idx)
+    if not matches:
+        raise OawError(f"{key} relationship is not present")
+    if len(matches) == len(item_indices):
+        del lines[key_idx:block_end]
+        return "".join(lines)
+    for idx in reversed(matches):
+        del lines[idx]
+    return "".join(lines)

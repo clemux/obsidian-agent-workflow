@@ -207,11 +207,13 @@ oaw task review OAW-TSK-cli --note "Ready for review." --checks "pytest"
 oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "pytest"
 oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "pytest"
 oaw task priority OAW-TSK-cli --priority 1 --note "Raised after cross-project triage."
+oaw task preparedness OAW-TSK-cli --state prepared \
+  --note "Execution is designed and known blockers are recorded."
 ```
 
 Lifecycle commands update task frontmatter and append an `## Agent sessions` trace. Task-note status is the single lifecycle source of truth, surfaced through project and cross-project Bases. The lifecycle order is `Backlog` -> `Todo` -> `Active` -> `Review` -> `Done`. Agent-run records live independently under `Agents/Runs/`: repeating `start` in the same provider/session refreshes one record, while another session gets a distinct record. `pause` changes only the caller's run to `paused`; task status remains active. `review` and `complete` refuse while another session is still running, including a run whose derived age is stale. Task and run changes are committed together.
 
-Tasks may declare `execution: human`, `agent`, or `hybrid`. An absent value becomes `agent` only when `start` begins a run. Human tasks remain UI-managed and reject agent lifecycle transitions. `start`, `pause`, `review`, and `complete` require a real harness session ID and do not offer `--allow-missing-session-id`; `backlog`, `promote`, `task note`, and `task priority` retain the explicit missing-ID trace path. With a real ID, session-writing commands append it as a quoted string to a deduplicated `session-ids` block list while preserving existing entries, comments, and any legacy scalar `session-id`.
+Tasks may declare `execution: human`, `agent`, or `hybrid`. An absent value becomes `agent` only when `start` begins a run. Human tasks remain UI-managed and reject agent lifecycle transitions. `start`, `pause`, `review`, and `complete` require a real harness session ID and do not offer `--allow-missing-session-id`; `backlog`, `promote`, `task note`, `task priority`, `task preparedness`, and task-relation mutations retain the explicit missing-ID trace path. With a real ID, session-writing commands append it as a quoted string to a deduplicated `session-ids` block list while preserving existing entries, comments, and any legacy scalar `session-id`.
 
 ### Session phase titles
 
@@ -247,6 +249,14 @@ frontmatter formatting, and any inline priority comment while appending an agent
 session trace. Unsupported task locations and malformed or duplicate priority
 fields are rejected before writing.
 
+Preparedness is independent from lifecycle status and dependency state. The canonical
+values are `needs-triage` (the intended outcome, value, or scope is uncertain),
+`needs-design` (the task is accepted but not sufficiently designed), and `prepared`
+(execution is sufficiently designed and all known blockers are identified). A prepared
+task may remain blocked or unscheduled. `oaw task preparedness` changes only this
+property, appends provenance, and leaves status and run records unchanged. Existing
+tasks without the property are unassessed; `unassessed` is not assignable.
+
 Inspect and administer the registry without changing task lifecycle state:
 
 ```bash
@@ -263,14 +273,15 @@ New task notes are created with `oaw task create` instead of hand-writing frontm
 ```bash
 oaw task create --project obs:OAW --title "Example task" \
   --note "Initial problem statement." --priority 2 --effort M
-oaw task create --project "Obsidian Agent Workflow" --title "Chosen task" --status todo
+oaw task create --project "Obsidian Agent Workflow" --title "Chosen task" \
+  --status todo --preparedness prepared
 oaw task create --project obs:OAW --title "Agent task" --execution agent --start
 oaw task create --from-capture obs:OAW-CAP-routing-regression \
   --title "Investigate routing regression" --status todo
 oaw task create --from-capture obs:OAW-CAP-urgent --title "Handle urgent request" --start
 ```
 
-`--project` accepts a project alias (`obs:OAW`) or a folder name under `Projects/`. The note is created under the project's `Tasks/` folder with standard frontmatter and optional `priority`, `effort`, and `execution`. The task ID defaults to `<ALIAS>-TSK-<slug>`; status defaults to `backlog`, with `--status todo` for selected work. `--start` works with or without a capture and atomically creates the active task and running record; it defaults execution to `agent`, requires a real session, and rejects `--execution human`. Duplicate IDs and existing paths fail without writing anything.
+`--project` accepts a project alias (`obs:OAW`) or a folder name under `Projects/`. The note is created under the project's `Tasks/` folder with standard frontmatter and optional `priority`, `effort`, and `execution`. The task ID defaults to `<ALIAS>-TSK-<slug>`; status defaults to `backlog`, with `--status todo` for selected work. Preparedness defaults to `needs-triage`; `--preparedness` may select any canonical value explicitly. `--start` works with or without a capture and atomically creates the active task and running record; it defaults execution to `agent`, requires a real session, and rejects `--execution human`. Duplicate IDs and existing paths fail without writing anything.
 
 The generated `created` value is a timezone-aware UTC datetime. Repeatable `--tag`
 values must be lowercase safe identifiers, are deduplicated in first-seen order, and
@@ -279,6 +290,44 @@ trace and permits `--allow-missing-session-id` only when an untraceable trace is
 explicitly accepted.
 
 When an actionable capture becomes material work, pass its stable ID with `--from-capture`. The project and title default to the capture's project folder and heading, while explicit `--project` and `--title` still override them. The command preserves the capture note and body, records its ID as `source-capture` on the task, adds durable links in both directions, appends the task wikilink to the capture's `destinations` frontmatter, and only then changes the capture to `status: triaged`. Those writes commit together and roll back together on failure. The capture's `Outcome` remains an expected-next-shape statement; promotion does not replace it with completion prose. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent.
+
+### Semantic task relationships
+
+Task relationships use forward-only frontmatter lists of durable task links:
+
+```yaml
+blocked-by:
+  - "[[Projects/Example/Tasks/Dependency|EXP-TSK-dependency]]"
+follows:
+  - "[[Projects/Example/Tasks/Earlier work|EXP-TSK-earlier-work]]"
+follow-up-to:
+  - "[[Projects/Example/Tasks/Original work|EXP-TSK-original-work]]"
+```
+
+Manage and inspect them through OAW rather than hand-maintaining inverse fields:
+
+```bash
+oaw task relation add EXP-TSK-source blocked-by EXP-TSK-dependency \
+  --note "Dependency must finish first."
+oaw task relation remove EXP-TSK-source blocked-by EXP-TSK-dependency \
+  --note "Dependency was replaced explicitly."
+oaw task relation list EXP-TSK-source
+oaw task relation list EXP-TSK-dependency --incoming --json
+oaw task relation validate EXP-TSK-source
+oaw task relation validate --json
+```
+
+`blocked-by` is a hard dependency, `follows` is non-enforcing sequence guidance,
+and `follow-up-to` records provenance. Only a target in `done` satisfies a hard
+dependency; `superseded` remains blocking until the link is explicitly removed or
+redirected. Broken targets, non-task targets, duplicates, self-links, and per-type
+cycles are invalid. A blocked task may start for design or partial work and reports
+its blockers prominently, but `review` and `complete` refuse unresolved or invalid
+hard blockers. Incoming relationships and blocker state are derived; no inverse or
+cached `blocked` property is written. Generic `## Related` links remain unchanged.
+`task relation validate` is authoritative for graph-wide invariants such as cycles
+and canonical link shape. The Base directly detects unresolved, non-task, self, and
+duplicate blockers and derives satisfaction for CLI-maintained relationships.
 
 ## Research packet lifecycle
 
@@ -324,6 +373,12 @@ Priority is a vault-wide 1/2/3 scale: `1` is urgent, blocking, or unusually
 high-leverage; `2` is normal next-session work with clear value; `3` is useful
 backlog work. Cross-project usefulness can raise priority, and the Base sorts by
 priority, then effort (`S`, `M`, `L`), then title.
+
+The comprehensive view keeps lifecycle, preparedness, and relationship columns visible.
+Focused views distinguish selected and executable work (`todo + prepared + unblocked`),
+prepared backlog, tasks needing triage or design (including unassessed legacy notes),
+and blocked tasks. Dependency state is derived from `blocked-by` target statuses rather
+than cached in task frontmatter; a Base refresh may be needed after a linked task changes.
 
 ## Sessions
 

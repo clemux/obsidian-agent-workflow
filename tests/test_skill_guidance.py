@@ -5,6 +5,7 @@ SKILL = ROOT / "skills" / "oaw" / "SKILL.md"
 EVAL = ROOT / "skills" / "oaw" / "references" / "session-phase-title-evaluation.md"
 METADATA = ROOT / "skills" / "oaw" / "agents" / "openai.yaml"
 README = ROOT / "README.md"
+TASK_REVIEW_SKILL = ROOT / "skills" / "oaw-task-review" / "SKILL.md"
 
 
 def read(path: Path) -> str:
@@ -72,3 +73,15 @@ def test_skill_metadata_uses_current_interface_schema():
     assert metadata.startswith("interface:\n")
     assert 'short_description: "Resolve Obsidian IDs and manage task/session workflow."' in metadata
     assert "Use $oaw" in metadata
+
+
+def test_task_guidance_keeps_lifecycle_preparedness_and_blockers_separate():
+    skill = read(SKILL)
+    review_skill = read(TASK_REVIEW_SKILL)
+
+    assert "`needs-triage`, `needs-design`, or `prepared`" in skill
+    assert "only a target in `done` satisfies" in skill
+    assert "Never persist\n  inverse" in skill
+    assert "`todo`: deliberately selected for near-term attention" in review_skill
+    assert "Missing metadata is `unassessed`, never implicitly prepared" in review_skill
+    assert "Never infer or mutate preparedness from a lifecycle decision" in review_skill

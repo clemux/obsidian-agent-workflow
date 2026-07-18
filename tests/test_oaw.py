@@ -2038,6 +2038,57 @@ aliases:
         self.assertIn("requires non-empty --note", proc.stderr)
         self.assertEqual(before, task_path.read_bytes())
 
+    @pytest.mark.parametrize("state", ["needs-triage", "needs-design", "prepared"])
+    def test_task_preparedness_updates_metadata_trace_without_changing_run(self, state):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Started implementation.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        run_path = self.run_record_for("test-thread")
+        before_run = run_path.read_bytes()
+
+        proc = self.run_oaw(
+            "task",
+            "preparedness",
+            "OAW-TSK-cli",
+            "--state",
+            state,
+            "--note",
+            "Assessed design sufficiency.",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"Preparedness: {state}", proc.stdout)
+        self.assertIn("Status: active", proc.stdout)
+        task = task_path.read_text(encoding="utf-8")
+        self.assertIn(f"preparedness: {state}", task)
+        self.assertIn("status: active", task)
+        self.assertIn("Assessed design sufficiency.", task)
+        self.assertEqual(before_run, run_path.read_bytes())
+
+    def test_task_preparedness_rejects_malformed_existing_value_without_writing(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace(
+                "status: todo\n", "status: todo\npreparedness:\n  - prepared\n"
+            ),
+            encoding="utf-8",
+        )
+        before = task_path.read_bytes()
+
+        proc = self.run_oaw(
+            "task",
+            "preparedness",
+            "OAW-TSK-cli",
+            "--state",
+            "prepared",
+            "--note",
+            "Must fail.",
+        )
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("must be a scalar", proc.stderr)
+        self.assertEqual(before, task_path.read_bytes())
+
     def test_task_note_appends_session_without_status_or_legacy_board_change(self):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
         board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
@@ -3787,6 +3838,7 @@ aliases:
         self.assertIn("type: task", note)
         self.assertIn("project: obsidian-agent-workflow", note)
         self.assertIn("status: backlog", note)
+        self.assertIn("preparedness: needs-triage", note)
         self.assertIn("priority: 2", note)
         self.assertIn("effort: M", note)
         self.assertIn('  - "resolver-errors"', note)
@@ -3801,6 +3853,24 @@ aliases:
         self.assertEqual(resolved.returncode, 0, resolved.stderr)
         listing = self.run_oaw("list", "--project", "Obsidian Agent Workflow")
         self.assertIn("OAW-TSK-improve-resolver-errors", listing.stdout)
+
+    def test_task_create_accepts_explicit_preparedness(self):
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Prepared task",
+            "--preparedness",
+            "prepared",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        note = (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Prepared task.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("status: backlog\npreparedness: prepared\n", note)
 
     def test_boardless_project_task_lifecycle_never_creates_a_board(self):
         created_project = self.run_oaw(

@@ -43,7 +43,7 @@ Present this compact shape:
 Current: <status> · Priority: <value or —> · Effort: <value or —>
 Summary: <concise problem and material progress>
 Dependencies/blockers: <concise evidence or “none found”>
-Ready: <yes/no/unclear> — <reason>
+Preparedness: <needs-triage/needs-design/prepared/unassessed> — <reason>
 Recommendation: <status> — <evidence-based reason>
 
 Choose: active / review / todo / backlog / done / not sure / pause
@@ -53,11 +53,11 @@ Use these meanings consistently:
 
 - `active`: work is genuinely underway and has a clear next action.
 - `review`: implementation or deliverable work is finished and verified, but awaits review or a decision.
-- `todo`: implementation-ready and deliberately selected for near-term work, but not underway.
-- `backlog`: valid work that is unscheduled, deprioritized, or blocked before implementation.
+- `todo`: deliberately selected for near-term attention, but not underway.
+- `backlog`: valid work that is unscheduled or deprioritized.
 - `done`: the objective is fully satisfied and verified; no required work remains.
 
-Recommend the best evidence-supported status even when it differs from the current status. Call readiness `yes` only when the outcome is clear, material decisions and dependencies are resolved, and the next implementation action is identifiable. Distinguish “no blocker recorded” from proof that no blocker exists.
+Recommend the best evidence-supported status even when it differs from the current status. Treat lifecycle and preparedness as independent. `needs-triage` means the outcome, value, or scope is uncertain; `needs-design` means accepted work is not sufficiently designed; `prepared` means execution is sufficiently designed and all known blockers are identified. Missing metadata is `unassessed`, never implicitly prepared. A prepared task may remain blocked. Use `oaw task relation list <ID>` when semantic fields exist, and distinguish “no blocker recorded” from proof that no blocker exists.
 
 End the turn after asking for the current task's decision. Do not inspect or preview the next task while awaiting the answer.
 
@@ -74,6 +74,10 @@ todo    -> oaw task promote <ID> --note "<concise review rationale>"
 backlog -> oaw task backlog <ID> --note "<concise review rationale>"
 done    -> oaw task complete <ID> --note "<concise completion evidence>" --checks "<verification actually run>"
 ```
+
+Never infer or mutate preparedness from a lifecycle decision. When the user separately
+confirms a preparedness assessment, record it with `oaw task preparedness <ID> --state
+<needs-triage|needs-design|prepared> --note "<assessment rationale>"`.
 
 For `review` or `done`, run an appropriate verification first. Reuse an already-run check from the current review only when its result is still applicable. Never invent a check string or treat note inspection alone as implementation verification. If verification cannot be performed safely or fails, report the evidence and ask the user to choose another status; do not issue the lifecycle command.
 
