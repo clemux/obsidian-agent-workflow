@@ -8,6 +8,7 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 - `tests/test_oaw.py` contains the `unittest` coverage for resolver behavior, duplicate handling, and lifecycle writes.
 - `skills/oaw/` documents the agent-facing workflow for using the CLI.
 - `skills/oaw-task-review/` provides the interactive project-task status review workflow.
+- `skills/oaw-research/` provides provider handoff and report-intake workflow plus tests.
 - Each skill's `agents/openai.yaml` contains OpenAI display metadata.
 - `README.md` is the user-facing overview and install guide.
 
@@ -40,7 +41,7 @@ project environment: use `uv run python bin/oaw ...`, not bare `python bin/oaw .
 When changing the CLI, use the updated version from the active checkout or worktree for subsequent OAW operations: run `uv run python bin/oaw ...` instead of the separately installed `oaw` until the change is integrated. This prevents an older installed version from hiding integration problems and continuously exercises argument parsing, output, resolution, and lifecycle behavior.
 
 When repository work interacts with the user's real Obsidian vault or runs any
-`obsidian` CLI command, load and follow the `obsidian-clemux` skill first. It
+`obsidian` CLI command, load and follow the `obsidian-personal` skill first. It
 contains required machine-specific targeting, verified command behavior, and
 known CLI limitations; the OAW skill is not a substitute for it.
 

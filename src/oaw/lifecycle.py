@@ -1205,7 +1205,7 @@ def start_research_run(
         f"# Results - {source}\n\n"
         f"Topic: {title}\n\n"
         "The provider run is in progress. Ingest the completed report with the "
-        "obsidian-research helper.\n"
+        "oaw-research helper.\n"
     )
     synthesis = packet_dir / "Synthesis.md"
     base = root / RESEARCH_PACKET_BASE

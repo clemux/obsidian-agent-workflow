@@ -1,0 +1,4 @@
+interface:
+  display_name: "OAW Research"
+  short_description: "Preflight and ingest OAW research reports."
+  default_prompt: "Use $oaw-research to preflight a provider handoff or ingest a finished report for an OAW research packet."

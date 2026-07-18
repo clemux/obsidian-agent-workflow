@@ -38,17 +38,22 @@ carries its own dependencies and needs no prefix.
 
 ### Agent skills
 
-The repository also contains two Codex skills:
+The repository also contains three agent skills:
 
 - `skills/oaw` documents ID resolution and lifecycle operations.
 - `skills/oaw-task-review` runs a resumable, one-task-at-a-time project status review.
+- `skills/oaw-research` handles provider-visible research handoff and finished-report intake.
 
-Link them into the personal skills directory so edits in the checkout remain live:
+Link them into the Codex and Claude skill directories so edits in the checkout
+remain live:
 
 ```bash
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-ln -s "$(pwd)/skills/oaw" "${CODEX_HOME:-$HOME/.codex}/skills/oaw"
-ln -s "$(pwd)/skills/oaw-task-review" "${CODEX_HOME:-$HOME/.codex}/skills/oaw-task-review"
+for skill_root in "${CODEX_HOME:-$HOME/.codex}/skills" "$HOME/.claude/skills"; do
+  mkdir -p "$skill_root"
+  for skill in oaw oaw-task-review oaw-research; do
+    ln -s "$(pwd)/skills/$skill" "$skill_root/$skill"
+  done
+done
 ```
 
 Skip a link that already exists. Validate either package with the skill creator's
@@ -357,7 +362,9 @@ OAW_VAULT=~/vaults/example oaw research start \
 
 `start` requires a safe, unique human source label and an absolute HTTP(S) URL. It creates only `Results - <Source>.md` with `status: running`, records source/URL/date provenance, appends the run under `## Running research sessions`, and creates a missing synthesis or shared Base without replacing existing content. Validation and all writes complete transactionally.
 
-Use the `obsidian-research` helper to preflight and print the exact fenced-block contents, then to ingest the finished report while preserving its raw artifact. Native report intake is intentionally outside `oaw`.
+Use the `oaw-research` skill and helper to preflight and print the exact fenced-block
+contents, then to ingest the finished report while preserving its raw artifact.
+Native report intake remains intentionally outside the core `oaw` CLI.
 
 ## Task views
 

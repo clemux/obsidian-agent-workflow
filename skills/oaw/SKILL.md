@@ -236,7 +236,9 @@ OAW_VAULT=~/vaults/example oaw research start \
 
 `start` creates one `Results - <Source>.md` with running status and provenance, appends it to the prompt's initially empty `## Running research sessions`, refuses unsafe or duplicate source labels and non-HTTP(S) URLs, and rolls back partial writes. It creates a missing synthesis/Base but never overwrites synthesis content.
 
-Use the `obsidian-research` skill for provider-visible handoff preflight, exact copy output, finished-report intake, raw-artifact preservation, and provider-specific normalization. Do not pre-create pending provider placeholders or use its legacy `set-url` command for OAW-owned project packets.
+Use the `oaw-research` skill for provider-visible handoff preflight, exact copy
+output, finished-report intake, raw-artifact preservation, and provider-specific
+normalization. Do not pre-create pending provider placeholders.
 
 ## Note intake
 
