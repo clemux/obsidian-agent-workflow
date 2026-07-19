@@ -774,23 +774,23 @@ def create_task(
     session_id = session_ref.split("=", 1)[1] if "=" in session_ref else ""
     if session_id and session_id != "unavailable":
         lines += ["session-ids:", f"  - {yaml_quote(session_id)}"]
-    lines += ["---", "", f"# {clean_title}", "", "## Problem", ""]
-    lines.append(note.strip() if note else "_To be defined._")
-    lines += ["", "## Related", ""]
+    lines += ["---", "", f"# {clean_title}", "", "## Problem"]
+    problem = note if note is not None else "_To be defined._"
+    problem_suffix = "" if problem.endswith("\n") else "\n"
+    task_prefix = "\n".join(lines) + "\n\n"
+    task_body = f"{task_prefix}{problem}{problem_suffix}\n## Related\n\n"
     index = project_root / "Index.md"
+    related_lines: list[str] = []
     if alias and index.exists():
         index_rel = index.relative_to(root).with_suffix("").as_posix()
-        lines.append(f"- [[{index_rel}|{alias}-index]]")
-        lines.append("")
+        related_lines.append(f"- [[{index_rel}|{alias}-index]]")
     if capture:
-        lines.append(f"- {_durable_wikilink(capture, capture.note_id)}")
-        lines.append("")
-    lines += [
-        "## Agent sessions",
-        "",
-        f"- {today} - {provider} - `{session_ref}` - Created task note.",
-    ]
-    task_text = "\n".join(lines) + "\n"
+        related_lines.append(f"- {_durable_wikilink(capture, capture.note_id)}")
+    related_block = f"{'\n'.join(related_lines)}\n\n" if related_lines else ""
+    task_text = (
+        f"{task_body}{related_block}## Agent sessions\n\n"
+        f"- {today} - {provider} - `{session_ref}` - Created task note.\n"
+    )
     transaction = VaultTransaction()
     transaction.stage(path, task_text)
     if capture:

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TextIO
 
 from .errors import OawError
-from .notes import write_new_note_atomic
+from .notes import read_markdown_source, write_new_note_atomic
 from .resolver import matches_from_references, scan_note_references
 from .sessions import detect_session
 from .tags import creation_tag_block
@@ -77,21 +77,16 @@ def scalar(value: str) -> str:
 
 def read_feedback_body(body: str | None, body_file: str | None, stdin: TextIO) -> str:
     """Read exactly one non-empty feedback body from an option, file, or stdin."""
-    if body is not None and body_file is not None:
-        raise OawError("feedback create accepts exactly one of --body or --body-file")
-    if body is None and body_file is None:
-        raise OawError("feedback create requires exactly one of --body or --body-file")
-    if body_file is not None:
-        try:
-            raw = stdin.read() if body_file == "-" else Path(body_file).read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
-            raise OawError(f"could not read feedback body file: {body_file}") from exc
-    else:
-        assert body is not None
-        raw = body
-    if not raw.strip():
-        raise OawError("feedback body must not be empty")
-    return raw
+    return read_markdown_source(
+        body,
+        body_file,
+        stdin,
+        inline_option="--body",
+        file_option="--body-file",
+        label="feedback create",
+        empty_error="feedback body must not be empty",
+        file_label="feedback body",
+    )
 
 
 def create_feedback(

@@ -18,7 +18,17 @@ Append a dated observation block under `## Observations` or another explicit hea
 oaw note observe EXP-RES-evidence-example \
   --title "Wrap-up format gap" \
   --body "The evidence note needs a mechanical append path."
+oaw note observe EXP-RES-evidence-example \
+  --title "Shell-safe evidence" \
+  --body-file /path/to/observation.md
+oaw task note EXP-TSK-example --note-file - < /path/to/session-note.md
 ```
+
+`note session` follows the same exactly-one `--note` / `--note-file` rule as task
+session entries. `note observe` requires exactly one of `--body` or `--body-file`;
+use `--body-file -` for standard input. Sources are UTF-8 and preserve their raw
+Markdown before the command's existing note-formatting rules; empty or unreadable
+sources fail without changing the target note.
 
 Create a draft retrospective note under `Agents/Retrospectives/`:
 

@@ -246,6 +246,169 @@ def test_typer_feedback_help_and_type_validation_use_native_contract() -> None:
     assert "argument --type: invalid choice: 'unknown'" in invalid_type.stderr
 
 
+NOTE_SOURCE_COMMAND_PATHS = [
+    ["task", "backlog"],
+    ["task", "promote"],
+    ["task", "start"],
+    ["task", "pause"],
+    ["task", "review"],
+    ["task", "complete"],
+    ["task", "note"],
+    ["note", "session"],
+]
+
+NOTE_SOURCE_INVOCATIONS = [
+    ["task", "backlog", "TSK-EXAMPLE"],
+    ["task", "promote", "TSK-EXAMPLE"],
+    ["task", "start", "TSK-EXAMPLE"],
+    ["task", "pause", "TSK-EXAMPLE"],
+    ["task", "review", "TSK-EXAMPLE", "--checks", "pytest"],
+    ["task", "complete", "TSK-EXAMPLE", "--checks", "pytest"],
+    ["task", "note", "TSK-EXAMPLE"],
+    ["note", "session", "TSK-EXAMPLE"],
+]
+
+
+@pytest.mark.parametrize("command", NOTE_SOURCE_COMMAND_PATHS)
+def test_typer_note_commands_declare_note_file_help(command: list[str]) -> None:
+    result = CliRunner().invoke(cli.app, [*command, "--help"], env={"COLUMNS": "200"})
+
+    assert result.exit_code == 0, result.stderr
+    normalized_help = " ".join(result.stdout.split())
+    assert "--note-file" in normalized_help
+    assert "inline Markdown; exactly one" in normalized_help
+    assert "UTF-8 Markdown file; '-' reads stdin; exactly one" in normalized_help
+    assert "exactly one of --note or --note-file is required" in normalized_help
+
+
+def test_typer_task_create_declares_optional_note_file_help() -> None:
+    result = CliRunner().invoke(cli.app, ["task", "create", "--help"], env={"COLUMNS": "200"})
+
+    assert result.exit_code == 0, result.stderr
+    normalized_help = " ".join(result.stdout.split())
+    assert "--note-file" in normalized_help
+    assert "optional inline initial problem; when supplied, use exactly one" in normalized_help
+    assert (
+        "optional UTF-8 initial-problem file; '-' reads stdin; when supplied, use exactly one"
+        in normalized_help
+    )
+    assert "when supplied, use exactly one of --note or --note-file" in normalized_help
+
+
+def test_typer_note_observe_declares_body_file_help() -> None:
+    result = CliRunner().invoke(cli.app, ["note", "observe", "--help"], env={"COLUMNS": "200"})
+
+    assert result.exit_code == 0, result.stderr
+    normalized_help = " ".join(result.stdout.split())
+    assert "--body-file" in normalized_help
+    assert "inline Markdown; exactly one" in normalized_help
+    assert "UTF-8 Markdown file; '-' reads stdin; exactly one" in normalized_help
+    assert "exactly one of --body or --body-file is required" in normalized_help
+
+
+@pytest.mark.parametrize("base_arguments", NOTE_SOURCE_INVOCATIONS)
+def test_typer_note_source_conflict_is_a_usage_error(base_arguments: list[str]) -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        [*base_arguments, "--note", "inline", "--note-file", "-"],
+        input="stdin must not be read",
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "argument --note-file: not allowed with argument --note" in result.stderr
+
+
+@pytest.mark.parametrize("base_arguments", NOTE_SOURCE_INVOCATIONS)
+def test_typer_note_source_missing_is_a_usage_error(base_arguments: list[str]) -> None:
+    result = CliRunner().invoke(cli.app, base_arguments)
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "the following arguments are required: one of --note, --note-file" in result.stderr
+
+
+def test_typer_task_create_note_source_conflict_is_a_usage_error() -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        ["task", "create", "--title", "Source check", "--note", "inline", "--note-file", "-"],
+        input="stdin must not be read",
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "argument --note-file: not allowed with argument --note" in result.stderr
+
+
+def test_typer_note_observe_body_source_conflict_is_a_usage_error() -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "note",
+            "observe",
+            "TSK-EXAMPLE",
+            "--title",
+            "Source check",
+            "--body",
+            "inline",
+            "--body-file",
+            "-",
+        ],
+        input="stdin must not be read",
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "argument --body-file: not allowed with argument --body" in result.stderr
+
+
+def test_typer_note_observe_body_source_missing_is_a_usage_error() -> None:
+    result = CliRunner().invoke(
+        cli.app, ["note", "observe", "TSK-EXAMPLE", "--title", "Source check"]
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "the following arguments are required: one of --body, --body-file" in result.stderr
+
+
+def test_typer_note_source_usage_errors_do_not_access_the_vault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    accessed = False
+
+    def unexpected_vault_root() -> Path:
+        nonlocal accessed
+        accessed = True
+        raise AssertionError("invalid source selection must not access the vault")
+
+    monkeypatch.setattr(cli, "vault_root", unexpected_vault_root)
+
+    missing = CliRunner().invoke(
+        cli.app, ["task", "start", "TSK-EXAMPLE"], input="stdin must stay unread"
+    )
+    assert missing.exit_code == 2
+    assert not accessed
+
+    conflict = CliRunner().invoke(
+        cli.app,
+        [
+            "note",
+            "observe",
+            "TSK-EXAMPLE",
+            "--title",
+            "Source check",
+            "--body",
+            "inline",
+            "--body-file",
+            "-",
+        ],
+        input="stdin must stay unread",
+    )
+    assert conflict.exit_code == 2
+    assert not accessed
+
+
 def test_temporary_typer_frontend_resolves_with_shared_service(tmp_path: Path) -> None:
     write(
         tmp_path / "Projects/Example/Tasks/Resolver CLI.md",

@@ -8,7 +8,7 @@ import tempfile
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import IO
+from typing import IO, TextIO
 
 from .errors import OawError
 
@@ -30,6 +30,44 @@ def read_note(path: Path) -> tuple[str, str, str]:
     text = path.read_text(encoding="utf-8")
     _, fm, body = split_note(text)
     return text, fm, body
+
+
+def read_markdown_source(
+    inline: str | None,
+    body_file: str | None,
+    stdin: TextIO,
+    *,
+    inline_option: str,
+    file_option: str,
+    label: str,
+    empty_error: str,
+    file_label: str | None = None,
+) -> str:
+    """Read one non-empty Markdown value without changing its contents.
+
+    ``body_file == "-"`` deliberately reads standard input.  Callers that expose
+    this helper through the CLI perform source-conflict checks first so invalid
+    invocations neither consume stdin nor touch the vault.
+    """
+    if inline is not None and body_file is not None:
+        raise OawError(f"{label} accepts exactly one of {inline_option} or {file_option}")
+    if inline is None and body_file is None:
+        raise OawError(f"{label} requires exactly one of {inline_option} or {file_option}")
+    if body_file is not None:
+        try:
+            if body_file == "-":
+                raw = stdin.read()
+            else:
+                with Path(body_file).open(encoding="utf-8", newline="") as handle:
+                    raw = handle.read()
+        except (OSError, UnicodeError) as exc:
+            raise OawError(f"could not read {file_label or label} file: {body_file}") from exc
+    else:
+        assert inline is not None
+        raw = inline
+    if not raw.strip():
+        raise OawError(empty_error)
+    return raw
 
 
 class VaultTransaction:

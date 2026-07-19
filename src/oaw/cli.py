@@ -39,6 +39,7 @@ from .lifecycle import (
     update_task_relation,
 )
 from .links import link_check, link_ensure, link_ensure_bidirectional, link_lint, link_list
+from .notes import read_markdown_source
 from .relations import RELATION_TYPES, list_task_relations, validate_task_relations
 from .resolver import list_project, notes_containing_literal, output_resolve, resolve_id, vault_root
 from .retro import create_retrospective, update_note_observation
@@ -70,17 +71,19 @@ USAGE_BY_COMMAND = {
     "oaw research start": "usage: oaw research start [-h] --project PROJECT --track TRACK --source SOURCE\n"
     "                          --url URL\n",
     "oaw task": "usage: oaw task [-h] {backlog,promote,start,pause,review,complete,note,priority,preparedness,relation,create} ...\n",
-    "oaw task backlog": "usage: oaw task backlog [-h] --note NOTE [--checks CHECKS]\n"
-    "                        [--allow-missing-session-id]\n"
+    "oaw task backlog": "usage: oaw task backlog [-h] [--note NOTE | --note-file NOTE_FILE]\n"
+    "                        [--checks CHECKS] [--allow-missing-session-id]\n"
     "                        id\n",
-    "oaw task promote": "usage: oaw task promote [-h] --note NOTE [--checks CHECKS]\n"
-    "                        [--allow-missing-session-id]\n"
+    "oaw task promote": "usage: oaw task promote [-h] [--note NOTE | --note-file NOTE_FILE]\n"
+    "                        [--checks CHECKS] [--allow-missing-session-id]\n"
     "                        id\n",
-    "oaw task start": "usage: oaw task start [-h] --note NOTE [--checks CHECKS] id\n",
-    "oaw task pause": "usage: oaw task pause [-h] --note NOTE id\n",
-    "oaw task complete": "usage: oaw task complete [-h] --note NOTE --checks CHECKS id\n",
-    "oaw task note": "usage: oaw task note [-h] --note NOTE [--checks CHECKS]\n"
-    "                     [--allow-missing-session-id]\n"
+    "oaw task start": "usage: oaw task start [-h] [--note NOTE | --note-file NOTE_FILE]\n"
+    "                      [--checks CHECKS] id\n",
+    "oaw task pause": "usage: oaw task pause [-h] [--note NOTE | --note-file NOTE_FILE] id\n",
+    "oaw task complete": "usage: oaw task complete [-h] [--note NOTE | --note-file NOTE_FILE]\n"
+    "                         --checks CHECKS id\n",
+    "oaw task note": "usage: oaw task note [-h] [--note NOTE | --note-file NOTE_FILE]\n"
+    "                     [--checks CHECKS] [--allow-missing-session-id]\n"
     "                     id\n",
     "oaw task priority": "usage: oaw task priority [-h] --priority {1,2,3} --note NOTE\n"
     "                         [--allow-missing-session-id]\n"
@@ -102,7 +105,7 @@ USAGE_BY_COMMAND = {
     "                       [--status {backlog,todo}] [--priority {1,2,3}]\n"
     "                       [--effort {S,M,L}]\n"
     "                       [--preparedness {needs-triage,needs-design,prepared}]\n"
-    "                       [--note NOTE] [--tag TAG]\n"
+    "                       [--note NOTE | --note-file NOTE_FILE] [--tag TAG]\n"
     "                       [--execution {human,agent,hybrid}]\n"
     "                       [--allow-missing-session-id]\n",
     "oaw run": "usage: oaw run [-h] {list,close,audit} ...\n",
@@ -111,11 +114,13 @@ USAGE_BY_COMMAND = {
     "oaw run close": "usage: oaw run close [-h] --reason REASON id\n",
     "oaw run audit": "usage: oaw run audit [-h]\n",
     "oaw note": "usage: oaw note [-h] {session,observe} ...\n",
-    "oaw note session": "usage: oaw note session [-h] --note NOTE [--checks CHECKS]\n"
-    "                        [--allow-missing-session-id]\n"
+    "oaw note session": "usage: oaw note session [-h] [--note NOTE | --note-file NOTE_FILE]\n"
+    "                        [--checks CHECKS] [--allow-missing-session-id]\n"
     "                        id\n",
-    "oaw task review": "usage: oaw task review [-h] --note NOTE --checks CHECKS id\n",
-    "oaw note observe": "usage: oaw note observe [-h] [--section SECTION] --title TITLE --body BODY id\n",
+    "oaw task review": "usage: oaw task review [-h] [--note NOTE | --note-file NOTE_FILE]\n"
+    "                      --checks CHECKS id\n",
+    "oaw note observe": "usage: oaw note observe [-h] [--section SECTION] --title TITLE\n"
+    "                        [--body BODY | --body-file BODY_FILE] id\n",
     "oaw ingest": "usage: oaw ingest [-h] {safe-export} ...\n",
     "oaw ingest safe-export": "usage: oaw ingest safe-export [-h] [--ingestion-root INGESTION_ROOT]\n"
     "                              [--destination DESTINATION] [--dry-run |\n"
@@ -193,6 +198,22 @@ ARGPARSE_CHOICES = {
 }
 
 NEGATIVE_NUMBER = re.compile(r"-(?:\d+(?:\.\d*)?|\.\d+)$")
+
+NOTE_INLINE_HELP = "inline Markdown; exactly one of --note or --note-file is required"
+NOTE_FILE_HELP = (
+    "UTF-8 Markdown file; '-' reads stdin; exactly one of --note or --note-file is required"
+)
+OPTIONAL_NOTE_INLINE_HELP = (
+    "optional inline initial problem; when supplied, use exactly one of --note or --note-file"
+)
+OPTIONAL_NOTE_FILE_HELP = (
+    "optional UTF-8 initial-problem file; '-' reads stdin; when supplied, use exactly one of "
+    "--note or --note-file"
+)
+BODY_INLINE_HELP = "inline Markdown; exactly one of --body or --body-file is required"
+BODY_FILE_HELP = (
+    "UTF-8 Markdown file; '-' reads stdin; exactly one of --body or --body-file is required"
+)
 
 
 class StableTyperGroup(TyperGroup):
@@ -408,10 +429,10 @@ app.add_typer(retro_app, name="retro")
 app.add_typer(feedback_app, name="feedback")
 
 
-def _run(action: Callable[[], None]) -> None:
+def _run(action: Callable[[], Any]) -> Any:
     """Keep domain errors on the stable stderr and exit-code contract."""
     try:
-        action()
+        return action()
     except OawError as exc:
         typer.echo(f"oaw: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -420,6 +441,56 @@ def _run(action: Callable[[], None]) -> None:
 def _usage_error(message: str) -> None:
     """Raise a Click usage error attached to the active Typer command."""
     raise click_exceptions.UsageError(message, click_globals.get_current_context())
+
+
+def _read_required_markdown(
+    inline: str | None,
+    body_file: str | None,
+    *,
+    inline_option: str,
+    file_option: str,
+    label: str,
+    empty_error: str,
+    file_label: str | None = None,
+) -> str:
+    """Validate body-source syntax before consuming a file or standard input."""
+    if inline is not None and body_file is not None:
+        _usage_error(f"argument {file_option}: not allowed with argument {inline_option}")
+    if inline is None and body_file is None:
+        _usage_error(f"the following arguments are required: one of {inline_option}, {file_option}")
+    return _run(
+        lambda: read_markdown_source(
+            inline,
+            body_file,
+            sys.stdin,
+            inline_option=inline_option,
+            file_option=file_option,
+            label=label,
+            empty_error=empty_error,
+            file_label=file_label,
+        )
+    )
+
+
+def _read_optional_markdown(
+    inline: str | None,
+    body_file: str | None,
+    *,
+    inline_option: str,
+    file_option: str,
+    label: str,
+    empty_error: str,
+) -> str | None:
+    if inline is None and body_file is None:
+        return None
+    return _read_required_markdown(
+        inline,
+        body_file,
+        inline_option=inline_option,
+        file_option=file_option,
+        label=label,
+        empty_error=empty_error,
+    )
 
 
 @app.callback()
@@ -544,15 +615,35 @@ def research_start(
 
 
 def _task_transition(
-    note_id: str, note: str, checks: str | None, allow_missing_session_id: bool, status: str
+    note_id: str,
+    note: str | None,
+    note_file: str | None,
+    checks: str | None,
+    allow_missing_session_id: bool,
+    status: str,
 ) -> None:
+    action = {
+        "backlog": "backlog",
+        "todo": "promote",
+        "active": "start",
+        "review": "review",
+        "done": "complete",
+    }[status]
+    content = _read_required_markdown(
+        note,
+        note_file,
+        inline_option="--note",
+        file_option="--note-file",
+        label="note",
+        empty_error=f"task {action} requires non-empty --note",
+    )
     root_path = vault_root()
     _run(
         lambda: update_task(
             resolve_id(note_id, root_path),
             root_path,
             status,
-            note,
+            content,
             checks,
             allow_missing_session_id,
         )
@@ -562,70 +653,93 @@ def _task_transition(
 @task_app.command("backlog")
 def task_backlog(
     note_id: Annotated[str, typer.Argument()],
-    note: Annotated[str, typer.Option("--note")],
+    note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
+    note_file: Annotated[str | None, typer.Option("--note-file", help=NOTE_FILE_HELP)] = None,
     checks: Annotated[str | None, typer.Option("--checks")] = None,
     allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
 ) -> None:
-    _task_transition(note_id, note, checks, allow_missing_session_id, "backlog")
+    _task_transition(note_id, note, note_file, checks, allow_missing_session_id, "backlog")
 
 
 @task_app.command("promote")
 def task_promote(
     note_id: Annotated[str, typer.Argument()],
-    note: Annotated[str, typer.Option("--note")],
+    note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
+    note_file: Annotated[str | None, typer.Option("--note-file", help=NOTE_FILE_HELP)] = None,
     checks: Annotated[str | None, typer.Option("--checks")] = None,
     allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
 ) -> None:
-    _task_transition(note_id, note, checks, allow_missing_session_id, "todo")
+    _task_transition(note_id, note, note_file, checks, allow_missing_session_id, "todo")
 
 
 @task_app.command("start")
 def task_start(
     note_id: Annotated[str, typer.Argument()],
-    note: Annotated[str, typer.Option("--note")],
+    note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
+    note_file: Annotated[str | None, typer.Option("--note-file", help=NOTE_FILE_HELP)] = None,
     checks: Annotated[str | None, typer.Option("--checks")] = None,
 ) -> None:
-    _task_transition(note_id, note, checks, False, "active")
+    _task_transition(note_id, note, note_file, checks, False, "active")
 
 
 @task_app.command("pause")
 def task_pause(
     note_id: Annotated[str, typer.Argument()],
-    note: Annotated[str, typer.Option("--note")],
+    note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
+    note_file: Annotated[str | None, typer.Option("--note-file", help=NOTE_FILE_HELP)] = None,
 ) -> None:
+    content = _read_required_markdown(
+        note,
+        note_file,
+        inline_option="--note",
+        file_option="--note-file",
+        label="note",
+        empty_error="task pause requires non-empty --note",
+    )
     root_path = vault_root()
-    _run(lambda: pause_task(resolve_id(note_id, root_path), root_path, note))
+    _run(lambda: pause_task(resolve_id(note_id, root_path), root_path, content))
 
 
 @task_app.command("review")
 def task_review(
     note_id: Annotated[str, typer.Argument()],
-    note: Annotated[str, typer.Option("--note")],
     checks: Annotated[str, typer.Option("--checks")],
+    note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
+    note_file: Annotated[str | None, typer.Option("--note-file", help=NOTE_FILE_HELP)] = None,
 ) -> None:
-    _task_transition(note_id, note, checks, False, "review")
+    _task_transition(note_id, note, note_file, checks, False, "review")
 
 
 @task_app.command("complete")
 def task_complete(
     note_id: Annotated[str, typer.Argument()],
-    note: Annotated[str, typer.Option("--note")],
     checks: Annotated[str, typer.Option("--checks")],
+    note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
+    note_file: Annotated[str | None, typer.Option("--note-file", help=NOTE_FILE_HELP)] = None,
 ) -> None:
-    _task_transition(note_id, note, checks, False, "done")
+    _task_transition(note_id, note, note_file, checks, False, "done")
 
 
 @task_app.command("note", help="append an agent session note without changing status")
 def task_note(
     note_id: Annotated[str, typer.Argument()],
-    note: Annotated[str, typer.Option("--note")],
+    note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
+    note_file: Annotated[str | None, typer.Option("--note-file", help=NOTE_FILE_HELP)] = None,
     checks: Annotated[str | None, typer.Option("--checks")] = None,
     allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
 ) -> None:
+    content = _read_required_markdown(
+        note,
+        note_file,
+        inline_option="--note",
+        file_option="--note-file",
+        label="note",
+        empty_error="task note requires non-empty --note",
+    )
     root_path = vault_root()
     _run(
         lambda: append_task_note(
-            resolve_id(note_id, root_path), root_path, note, checks, allow_missing_session_id
+            resolve_id(note_id, root_path), root_path, content, checks, allow_missing_session_id
         )
     )
 
@@ -755,7 +869,10 @@ def task_create(
             help="needs-triage, needs-design, or prepared; defaults to needs-triage",
         ),
     ] = None,
-    note: Annotated[str | None, typer.Option("--note", help="initial problem statement")] = None,
+    note: Annotated[str | None, typer.Option("--note", help=OPTIONAL_NOTE_INLINE_HELP)] = None,
+    note_file: Annotated[
+        str | None, typer.Option("--note-file", help=OPTIONAL_NOTE_FILE_HELP)
+    ] = None,
     tag: Annotated[list[str] | None, typer.Option("--tag", help="extra tag; repeatable")] = None,
     execution: Annotated[
         TaskExecution | None,
@@ -771,6 +888,14 @@ def task_create(
     selected_priority = priority[-1] if priority else None
     selected_effort = effort[-1] if effort else None
     selected_preparedness = preparedness[-1] if preparedness else TaskPreparedness.NEEDS_TRIAGE
+    content = _read_optional_markdown(
+        note,
+        note_file,
+        inline_option="--note",
+        file_option="--note-file",
+        label="initial task note",
+        empty_error="task create requires non-empty --note when provided",
+    )
     _run(
         lambda: create_task(
             vault_root(),
@@ -783,7 +908,7 @@ def task_create(
             selected_priority,
             selected_effort.value if selected_effort is not None else None,
             selected_preparedness.value,
-            note,
+            content,
             tag,
             execution.value if execution is not None else None,
             allow_missing_session_id,
@@ -829,14 +954,23 @@ def run_audit() -> None:
 @note_app.command("session", help="append an Agent sessions entry")
 def note_session(
     note_id: Annotated[str, typer.Argument()],
-    note: Annotated[str, typer.Option("--note")],
+    note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
+    note_file: Annotated[str | None, typer.Option("--note-file", help=NOTE_FILE_HELP)] = None,
     checks: Annotated[str | None, typer.Option("--checks")] = None,
     allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
 ) -> None:
+    content = _read_required_markdown(
+        note,
+        note_file,
+        inline_option="--note",
+        file_option="--note-file",
+        label="note",
+        empty_error="note session requires non-empty --note",
+    )
     root_path = vault_root()
     _run(
         lambda: append_note_session(
-            resolve_id(note_id, root_path), note, checks, allow_missing_session_id
+            resolve_id(note_id, root_path), content, checks, allow_missing_session_id
         )
     )
 
@@ -845,10 +979,19 @@ def note_session(
 def note_observe(
     note_id: Annotated[str, typer.Argument()],
     title: Annotated[str, typer.Option("--title")],
-    body: Annotated[str, typer.Option("--body")],
+    body: Annotated[str | None, typer.Option("--body", help=BODY_INLINE_HELP)] = None,
+    body_file: Annotated[str | None, typer.Option("--body-file", help=BODY_FILE_HELP)] = None,
     section: Annotated[str, typer.Option("--section", help="target heading")] = "Observations",
 ) -> None:
-    _run(lambda: update_note_observation(vault_root(), note_id, section, title, body))
+    content = _read_required_markdown(
+        body,
+        body_file,
+        inline_option="--body",
+        file_option="--body-file",
+        label="observation body",
+        empty_error="observation body must not be empty",
+    )
+    _run(lambda: update_note_observation(vault_root(), note_id, section, title, content))
 
 
 @ingest_app.command("safe-export", help="ingest frontmatter-approved Markdown files")
