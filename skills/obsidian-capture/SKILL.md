@@ -11,139 +11,66 @@ review.
 
 ## Destination and CLI ownership
 
-Read `obsidian-personal` before the first vault operation. It owns the vault target,
-connection preflight/retry policy, and shell-safe command guidance. Create one
-vault-relative note per capture:
+Create one capture note per idea with the `oaw` CLI. It owns the schema: it generates
+the `CAP-YYYYMMDD-<slug>` ID and aliases, stamps a full timezone-aware `created`
+timestamp, sets `status: inbox`, records real session provenance automatically, and
+writes the note atomically under `Captures/Entries/`. Do not hand-write capture
+frontmatter or use the raw `obsidian create` command for captures.
 
 ```bash
-obsidian vault="Vault Name" create \
-  path='Captures/Entries/CAP-YYYYMMDD-short-slug.md' content='...'
+oaw capture create --title "Human readable title" \
+  --context "one-line trigger for why this came up" \
+  --project obs:PROJECT --tag ai --url https://example.com/source
 ```
 
-Use the registered standalone Obsidian CLI. Do not pass Electron-era flags such as
-`--no-sandbox`. If the connection still fails after the bounded retry documented in
-`obsidian-personal`, report the failure instead of bypassing Obsidian with a direct
-vault filesystem write.
+Set `OAW_VAULT` to the vault root first. If session provenance is unavailable and the
+user accepts an untraceable capture, pass `--allow-missing-session-id`; never fabricate
+a session ID. If `oaw` itself fails, report the failure instead of bypassing it with a
+direct vault filesystem write.
 
 If the capture is specifically about an agent/Obsidian CLI problem that belongs on the
-agent-feedback board, use `Agents/Feedback/` instead. Otherwise default to
-`Captures/Entries/`; project-specific inboxes are filtered views, not folders.
+agent-feedback board, use `oaw feedback create` instead. Otherwise default to a capture;
+project-specific inboxes are filtered views, not folders.
 
 If the payload is an external-LLM research prompt/result exchange, do not create a
-general capture. Route it to `Projects/<Project>/Research/<track>/`: OAW owns packet
-scaffolding and launched-run registration; `oaw-research` owns provider-visible
-handoff and finished-report intake.
+general capture. Route it through OAW research packet scaffolding and `oaw-research`
+provider handoff instead.
 
 ## Capture Schema
 
-Use this frontmatter:
+`oaw capture create` produces the Captures V1 schema; supply its fields through options
+rather than typing YAML:
 
-```yaml
----
-id: CAP-YYYYMMDD-short-slug
-aliases:
-  - CAP-YYYYMMDD-short-slug
-type: capture
-created: YYYY-MM-DD
-status: inbox
-project:
-area:
-context:
-outcome:
-review_after:
-destinations:
-session-ids:
-  - "<stable-harness-session-id>"
-tags:
-  - capture
----
-```
+- `--title` (required): the human-readable title; also the source of the generated
+  `CAP-YYYYMMDD-<slug>` ID and the `# Title` body heading.
+- `--body` / `--body-file` (optional): put the context you actually have into the body —
+  what came up, why it matters, and what would be useful later. `--body-file -` reads
+  stdin, which is safer for multi-line or shell-sensitive content. Do not invent filler;
+  a short faithful capture is better than a padded one, and omitting the body is fine.
+- `--project obs:<ALIAS>`: link the capture to a project when it clearly belongs to one;
+  this records the project and cross-links the project Index. Leave it off otherwise.
+- `--area`, `--context`, `--outcome`: optional single-line metadata (broad area; the
+  trigger; the expected next shape such as "create task later" or "reference only").
+- `--url` (repeatable): cite each `http://`/`https://` source as an ordinary property.
+  URLs are recorded as citations only — do not fetch, extract, or snapshot their content.
+- `--tag` (repeatable): `capture` is always applied; add explicit user-supplied topical
+  tags such as `ai`, `agent-documentation`, `blog`, or `documentation` so tag-filtered
+  Base views surface the capture later.
 
-Guidance:
-
-- `id`: stable `CAP-YYYYMMDD-short-slug`; keep it if the capture is later routed.
-- `status`: start with `inbox` unless the user explicitly says it is `parked`,
-  `incubating`, `reference`, `triaged`, or `discarded`.
-- `project`: short lowercase project key when obvious, such as `website`,
-  `mobile-app`, or `agent-tools`; otherwise leave empty.
-- `area`: broad area such as `organization`, `projects`, `tools`, or `home`; leave
-  empty if unclear.
-- `context`: one-line trigger for why this came up.
-- `outcome`: expected next shape if known, such as "Create task later", "Evaluate
-  tool", "Improve workflow", or "Reference only"; leave empty if unclear.
-- `destinations`: wikilinks only after routing; leave empty for normal inbox captures.
-- `session-ids`: include the current stable harness session ID as a list item when one
-  exists; omit the whole property when none is exposed, and never fabricate an ID.
-- `tags`: always include `capture`; also preserve explicit user-supplied topical tags
-  such as `ai`, `agent-documentation`, `agentic-workflow`, `blog`, or
-  `documentation` so tag-filtered Base views can surface the capture later.
-
-
-### URL source captures
-
-When the captured text includes one or more `http://` or `https://` URLs, attempt to
-preserve a raw article/content snapshot in the vault. Default to Defuddle for
-article extraction. Save extracted Markdown under a vault-local attachment path such
-as:
-
-```text
-Captures/Attachments/<capture-id>/<slug>.defuddle.md
-```
-
-Track each extraction attempt in frontmatter with a flexible list of tool runs:
-
-```yaml
-source_captures:
-  - url: https://example.com/article
-    tool: defuddle
-    status: success # success | failed | skipped
-    attachment: Captures/Attachments/CAP-YYYYMMDD-short-slug/article.defuddle.md
-    captured_at: YYYY-MM-DD
-    error:
-```
-
-If Defuddle fails, still create the capture note. Set `status: failed` and record a
-short `error:` string in `source_captures` so failures can be reviewed later. If
-Defuddle is unavailable or intentionally skipped, use `status: skipped` and explain
-why in `error:`. Future fallback tools should add their own entries with their tool
-name rather than replacing the Defuddle attempt.
-
-Raw article attachments inherit the capture note privacy level. Do not put them
-under `Public/` unless the user explicitly asks for a publishable artifact.
-
-
-## Body Shape
-
-Keep the note short enough that capture stays cheap:
-
-```markdown
-# Human readable title
-
-One or two paragraphs or bullets capturing the idea, why it came up, and what would be
-useful later.
-
-## Next review hint
-
-- Optional: concrete question, possible destination note, or first follow-up.
-```
-
-For a side conversation during active work, include the current task context and the
-improvement idea. Do not expand into a full plan unless the user explicitly asks to
-switch from capture to planning.
+`created` is a full UTC datetime with seconds, not a bare date, so captures sort by real
+creation time. New captures always start at `status: inbox`; use `oaw capture triage` to
+move them to `incubating`, `parked`, `reference`, `triaged`, or `discarded` later.
 
 ## Workflow
 
-1. Identify the smallest faithful capture: title, slug, context, and the idea.
-2. If the capture contains URLs, attempt raw source capture with Defuddle and record
-   success, failure, or skip state in `source_captures`.
-3. Create the note in `Captures/Entries/` with `status: inbox`, explicit vault
-   targeting, and real session provenance when available.
-4. Read it back only when the content is shell-sensitive or substantial.
-5. Tell the user it was captured and point them back to the active next step.
+1. Identify the smallest faithful capture: title, the idea, and the trigger context.
+2. Run `oaw capture create` with `--title`, the context you have in `--body`/`--body-file`,
+   and any obvious `--project`/`--area`/`--tag`/`--url` values. Cite URLs; never fetch them.
+3. Read it back only when the content is shell-sensitive or substantial.
+4. Tell the user it was captured and point them back to the active next step.
 
-Use today's local date from the environment or `date +%F` when uncertain. Avoid asking
-metadata questions unless the destination is genuinely ambiguous; empty metadata is
-better than breaking flow.
+Avoid asking metadata questions unless the destination is genuinely ambiguous; empty
+metadata is better than breaking flow.
 
 ## Review Surface
 
