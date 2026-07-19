@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Callable, Sequence
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -351,43 +351,43 @@ retro_app = _app("Retrospective note utilities")
 feedback_app = _app("Agent feedback note utilities")
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     BACKLOG = "backlog"
     TODO = "todo"
 
 
-class TaskEffort(str, Enum):
+class TaskEffort(StrEnum):
     SMALL = "S"
     MEDIUM = "M"
     LARGE = "L"
 
 
-class TaskExecution(str, Enum):
+class TaskExecution(StrEnum):
     HUMAN = "human"
     AGENT = "agent"
     HYBRID = "hybrid"
 
 
-class TaskPreparedness(str, Enum):
+class TaskPreparedness(StrEnum):
     NEEDS_TRIAGE = "needs-triage"
     NEEDS_DESIGN = "needs-design"
     PREPARED = "prepared"
 
 
-class RelationType(str, Enum):
+class RelationType(StrEnum):
     BLOCKED_BY = "blocked-by"
     FOLLOWS = "follows"
     FOLLOW_UP_TO = "follow-up-to"
 
 
-class RunState(str, Enum):
+class RunState(StrEnum):
     RUNNING = "running"
     PAUSED = "paused"
     COMPLETED = "completed"
     CLOSED = "closed"
 
 
-class ListSort(str, Enum):
+class ListSort(StrEnum):
     PRIORITY = "priority"
     EFFORT = "effort"
     TITLE = "title"

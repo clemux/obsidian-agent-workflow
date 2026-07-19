@@ -1,2 +1,5 @@
 [worktrees]
     dir = .worktrees
+
+[hooks]
+    postCreate = mise trust --yes mise.toml

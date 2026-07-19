@@ -68,13 +68,11 @@ class Run:
 
 
 def utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    return dt.datetime.now(dt.UTC).replace(microsecond=0)
 
 
 def format_utc(value: dt.datetime) -> str:
-    return (
-        value.astimezone(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    )
+    return value.astimezone(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def parse_utc(value: object) -> dt.datetime | None:
@@ -86,7 +84,7 @@ def parse_utc(value: object) -> dt.datetime | None:
         return None
     if parsed.tzinfo is None:
         return None
-    return parsed.astimezone(dt.timezone.utc)
+    return parsed.astimezone(dt.UTC)
 
 
 def is_stale(run: Run, now: dt.datetime) -> bool:
