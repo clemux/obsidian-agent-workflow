@@ -38,7 +38,14 @@ from .lifecycle import (
     update_task_priority,
     update_task_relation,
 )
-from .links import link_check, link_ensure, link_ensure_bidirectional, link_lint, link_list
+from .links import (
+    link_check,
+    link_ensure,
+    link_ensure_bidirectional,
+    link_lint,
+    link_list,
+    link_materialize,
+)
 from .notes import read_markdown_source
 from .relations import RELATION_TYPES, list_task_relations, validate_task_relations
 from .resolver import list_project, notes_containing_literal, output_resolve, resolve_id, vault_root
@@ -125,7 +132,7 @@ USAGE_BY_COMMAND = {
     "oaw ingest safe-export": "usage: oaw ingest safe-export [-h] [--ingestion-root INGESTION_ROOT]\n"
     "                              [--destination DESTINATION] [--dry-run |\n"
     "                              --write]\n",
-    "oaw link": "usage: oaw link [-h] {check,list,ensure,ensure-bidirectional,lint} ...\n",
+    "oaw link": "usage: oaw link [-h] {check,list,ensure,ensure-bidirectional,lint,materialize} ...\n",
     "oaw link check": "usage: oaw link check [-h] left right\n",
     "oaw link list": "usage: oaw link list [-h] note\n",
     "oaw link ensure": "usage: oaw link ensure [-h] [--section SECTION] [--label LABEL] [--dry-run |\n"
@@ -135,6 +142,7 @@ USAGE_BY_COMMAND = {
     "                                     --write]\n"
     "                                     left right\n",
     "oaw link lint": "usage: oaw link lint [-h]\n",
+    "oaw link materialize": "usage: oaw link materialize [-h] [--dry-run | --write] note\n",
     "oaw export": "usage: oaw export [-h] {note,validate} ...\n",
     "oaw export note": "usage: oaw export note [-h] [--target TARGET] [--output-root OUTPUT_ROOT]\n"
     "                       [--force]\n"
@@ -970,7 +978,7 @@ def note_session(
     root_path = vault_root()
     _run(
         lambda: append_note_session(
-            resolve_id(note_id, root_path), content, checks, allow_missing_session_id
+            resolve_id(note_id, root_path), root_path, content, checks, allow_missing_session_id
         )
     )
 
@@ -1063,6 +1071,17 @@ def link_ensure_bidirectional_command(
 @link_app.command("lint", help="suggest durable replacements for opaque ID links")
 def link_lint_command() -> None:
     _run(lambda: link_lint(vault_root()))
+
+
+@link_app.command("materialize", help="replace explicit obs:ID prose with durable wikilinks")
+def link_materialize_command(
+    note: Annotated[str, typer.Argument()],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="preview only")] = False,
+    write: Annotated[bool, typer.Option("--write", help="write the edit")] = False,
+) -> None:
+    if dry_run and write:
+        _usage_error("argument --write: not allowed with argument --dry-run")
+    _run(lambda: link_materialize(vault_root(), note, write))
 
 
 @export_app.command("note", help="export a marked-safe note bundle")

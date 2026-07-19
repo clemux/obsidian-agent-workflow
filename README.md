@@ -660,11 +660,27 @@ oaw link ensure OAW-TSK-cli OAW-TSK-session-lookup --label "Session lookup" \
   --write
 oaw link ensure-bidirectional OAW-TSK-cli OAW-TSK-session-lookup --section Related
 oaw link lint
+oaw link materialize OAW-TSK-cli
+oaw link materialize OAW-TSK-cli --write
 ```
 
 `ensure` and `ensure-bidirectional` default to a dry-run preview and append a `[[vault/path|ID]]` link only when the target path is missing. Pass `--write` to apply the append-only section edit.
 For one-way `ensure`, `--label` overrides the target ID used as the wikilink
 display text.
+
+Use explicit `obs:<ID>` in authored Markdown when a reference should become a
+durable link, for example `See obs:OAW-TSK-session-lookup.`. `oaw link
+materialize` previews the resulting `[[vault/path|ID]]` replacements and writes
+only with `--write`. The same write-time transformation is applied to task
+creation/lifecycle notes, project goals, note-session notes, observation bodies,
+feedback bodies, and retrospective summaries. Resolution is strict and includes
+exact IDs, aliases, and short project aliases: one missing, ambiguous, or
+malformed eligible reference aborts the entire operation before a write,
+without guessing a filename or creating a stub. Frontmatter, existing
+wiki/Markdown links and embeds, autolinks, inline/fenced code, backslash-escaped
+examples, and embedded word/path forms stay byte-for-byte unchanged. See
+`skills/oaw/references/links-and-relations.md` for the full command reference
+and parser semantics.
 
 ## Installed vs checkout CLI
 

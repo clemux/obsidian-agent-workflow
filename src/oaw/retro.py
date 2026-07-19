@@ -8,6 +8,7 @@ import unicodedata
 from pathlib import Path
 
 from .errors import OawError
+from .links import materialize_obs_references
 from .notes import append_markdown_block_to_section, normalize_heading
 from .resolver import iter_markdown, note_match, resolve_id
 from .sessions import detect_session
@@ -30,6 +31,7 @@ def append_observation_entry(text: str, section: str, title: str, body: str) -> 
 
 def update_note_observation(root: Path, raw_id: str, section: str, title: str, body: str) -> None:
     match = resolve_id(raw_id, root)
+    body, _ = materialize_obs_references(body, root)
     text = match.path.read_text(encoding="utf-8")
     text = append_observation_entry(text, section, title, body)
     match.path.write_text(text, encoding="utf-8")
@@ -82,8 +84,8 @@ def create_retrospective(
         raise OawError(f"id '{note_id}' is already in use:\n{paths}")
     if path.exists() and not force:
         raise OawError(f"retrospective already exists: {relpath.as_posix()}")
-    path.parent.mkdir(parents=True, exist_ok=True)
     summary = summary.strip() if summary else ""
+    summary, _ = materialize_obs_references(summary, root)
     summary_block = summary or "_Draft summary._"
     provider_value = provider.lower().replace(" ", "-")
     text = f"""---
@@ -120,6 +122,7 @@ tags:
 
 - {date} - {provider} - `{session_ref}` - Created retrospective draft.
 """
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     print(f"Created: {relpath.as_posix()}")
     print(f"ID: {note_id}")

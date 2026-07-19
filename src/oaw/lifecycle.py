@@ -16,6 +16,7 @@ from .frontmatter import (
     set_frontmatter_scalar,
     split_inline_comment,
 )
+from .links import materialize_obs_references
 from .notes import VaultTransaction, append_markdown_block_to_section, locate_section, split_note
 from .relations import blocker_problems, prepare_relation_add, prepare_relation_remove
 from .resolver import (
@@ -148,9 +149,10 @@ def append_session_entry(
 
 
 def append_note_session(
-    match: NoteMatch, note: str, checks: str | None, allow_missing: bool
+    match: NoteMatch, root: Path, note: str, checks: str | None, allow_missing: bool
 ) -> None:
     provider, session_ref = detect_session(allow_missing)
+    note, _ = materialize_obs_references(note, root)
     text = match.path.read_text(encoding="utf-8")
     text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
@@ -184,6 +186,7 @@ def update_task(
         raise OawError(f"task {action} requires non-empty --checks")
     if checks is not None and not checks.strip():
         raise OawError(f"task {action} requires non-empty --checks when provided")
+    note, _ = materialize_obs_references(note, root)
     task_id = str(match.note_id or "")
     if not task_id:
         raise OawError("lifecycle task requires a stable frontmatter id")
@@ -336,6 +339,7 @@ def append_task_note(
     if not is_lifecycle_task(match.path, root):
         raise lifecycle_task_error()
     provider, session_ref = detect_session(allow_missing)
+    note, _ = materialize_obs_references(note, root)
     text = match.path.read_text(encoding="utf-8")
     text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, checks)
@@ -741,6 +745,7 @@ def create_task(
         raise OawError(f"id '{note_id}' is already in use:\n{paths}")
     if path.exists():
         raise OawError(f"task note already exists: {relpath.as_posix()}")
+    rendered_note = materialize_obs_references(note, root, references)[0] if note else None
     today = dt.date.today().isoformat()
     created = dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
     project_slug = _slugify(project_root.name)
@@ -775,7 +780,7 @@ def create_task(
     if session_id and session_id != "unavailable":
         lines += ["session-ids:", f"  - {yaml_quote(session_id)}"]
     lines += ["---", "", f"# {clean_title}", "", "## Problem"]
-    problem = note if note is not None else "_To be defined._"
+    problem = rendered_note if rendered_note is not None else "_To be defined._"
     problem_suffix = "" if problem.endswith("\n") else "\n"
     task_prefix = "\n".join(lines) + "\n\n"
     task_body = f"{task_prefix}{problem}{problem_suffix}\n## Related\n\n"
@@ -1007,6 +1012,7 @@ def create_project(
         raise OawError(f"id '{note_id}' is already in use:\n{paths}")
     provider, session_ref = detect_session(allow_missing_session_id)
     del provider  # The project index records stable session provenance in frontmatter.
+    clean_goal, _ = materialize_obs_references(clean_goal, root)
     template_text = template_path.read_text(encoding="utf-8")
     rendered = render_project_index(
         template_text, name, clean_alias, clean_goal, repo, tags, session_ref

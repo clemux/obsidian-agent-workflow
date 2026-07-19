@@ -38,6 +38,10 @@ The session ID is read automatically from the first supported harness environmen
 
 With a real harness ID, lifecycle and `task note` writes append it as a quoted string to a deduplicated `session-ids` frontmatter block list, preserving existing entries, comments, and any legacy scalar `session-id`. Unsupported inline, mapping, or ambiguous non-string `session-ids` shapes fail before the note is written. The explicit missing-ID path writes only the body trace; it does not add a synthetic list value.
 
+### Durable obs references
+
+Explicit `obs:<ID>` prose mentions (e.g. `obs:OAW-TSK-cli`) are automatically rewritten into durable `[[vault/path|ID]]` wikilinks whenever OAW writes a note body it owns — task creation and lifecycle notes, project goals, `note session` entries, observation bodies, feedback bodies, and retrospective summaries. Resolution is strict: one missing, ambiguous, or malformed eligible reference aborts the entire write before anything is touched, with frontmatter and existing links/code left untouched. To materialize references already sitting in authored prose, run `oaw link materialize <note> [--dry-run|--write]`. Full command and parser semantics are in `references/links-and-relations.md`.
+
 ## Resolving IDs
 
 Treat `obs:<ID>` as a lookup trigger — `oaw` strips the `obs:` prefix automatically; it is not part of the stored ID. Matching is exact and case-sensitive.

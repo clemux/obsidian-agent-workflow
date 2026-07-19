@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TextIO
 
 from .errors import OawError
+from .links import materialize_obs_references
 from .notes import read_markdown_source, write_new_note_atomic
 from .resolver import matches_from_references, scan_note_references
 from .sessions import detect_session
@@ -126,6 +127,7 @@ def create_feedback(
         raise OawError(f"id '{note_id}' is already in use:\n{paths}")
     if path.exists():
         raise OawError(f"feedback note already exists: {relpath.as_posix()}")
+    body, _ = materialize_obs_references(body, root, references)
     provider, session_ref = detect_session(allow_missing_session_id)
     session_id = session_ref.split("=", 1)[1] if "=" in session_ref else ""
     lines = [

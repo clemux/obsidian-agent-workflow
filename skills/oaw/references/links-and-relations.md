@@ -24,6 +24,36 @@ oaw link lint
 - Edits use durable `[[vault/path|ID]]` links and skip duplicates when a path-form link is already present with any alias.
 - `lint` reports opaque ID links such as `[[OAW-TSK-cli]]` and suggests durable replacements when the ID resolves.
 
+## Materializing obs references
+
+`oaw link materialize <note> [--dry-run|--write]` rewrites explicit `obs:<ID>` prose
+mentions (for example `See obs:OAW-TSK-session-lookup.`) into durable
+`[[vault/path|ID]]` wikilinks:
+
+```bash
+oaw link materialize OAW-TSK-cli
+oaw link materialize OAW-TSK-cli --write
+```
+
+- `--dry-run` is the default and only previews the replacements that would be made;
+  pass `--write` to apply them. Passing both is a usage error.
+- Resolution reuses the normal exact-ID, alias, and short-project-alias policy. If
+  any eligible reference in the note is missing, ambiguous, or malformed, the whole
+  operation aborts before a single byte is written — no partial materialization, no
+  guessed filename, no stub creation.
+- Eligible references are plain prose occurrences of `obs:<ID>` outside frontmatter.
+  The parser leaves untouched: existing wiki (`[[...]]`) and Markdown (`[text](url)`
+  or reference-style `[text][label]`) links and embeds, autolinks (`<obs:...>`),
+  inline code spans and fenced code blocks, backslash-escaped occurrences
+  (`\obs:OAW-TSK-cli`), reference-style link-definition lines and labels, and
+  references embedded inside a larger word or path form (`file/obs:OAW-TSK-cli.md`,
+  `obs:OAW-TSK-cli.md`, `obs:OAW-TSK-cli#Heading`, `obs:OAW-TSK-cli^block`).
+- The same engine runs at write time for `oaw task create`, task lifecycle notes
+  (`task backlog|start|review|complete`, `task note`), `oaw project create`
+  (`--goal`), `oaw note session`, `oaw note observe`, `oaw feedback create`, and
+  `oaw retro create` (summary). Each of those commands aborts the whole write under
+  the same strict-resolution rule before touching the vault.
+
 ## Semantic task relationships
 
 Use first-class task relations for dependency, sequence, and provenance semantics:
