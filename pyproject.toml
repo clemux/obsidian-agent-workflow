@@ -16,6 +16,7 @@ dev = [
     "pyrefly",
     "pytest",
     "pytest-cov",
+    "pyyaml>=6.0.3",
     "ruff",
 ]
 
