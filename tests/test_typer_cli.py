@@ -60,6 +60,11 @@ EXPECTED_COMMAND_PATHS = {
     ("retro", "create"),
     ("feedback",),
     ("feedback", "create"),
+    ("capture",),
+    ("capture", "create"),
+    ("capture", "list"),
+    ("capture", "show"),
+    ("capture", "triage"),
 }
 
 

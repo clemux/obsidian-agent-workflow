@@ -5,8 +5,10 @@ from typing import IO
 
 import pytest
 
+from oaw.errors import OawError
 from oaw.links import parse_wikilinks
 from oaw.notes import (
+    VaultTransaction,
     append_markdown_block_to_section,
     locate_section,
     read_note,
@@ -135,3 +137,25 @@ def test_locate_section_tolerates_trailing_heading_whitespace():
     located = locate_section(text, "## Agent sessions")
     assert located is not None
     assert located[1] == 0
+
+
+def test_vault_transaction_conflict_on_expected_mismatch(tmp_path: Path):
+    stable = tmp_path / "stable.md"
+    drifted = tmp_path / "drifted.md"
+    stable.write_text("stable original\n", encoding="utf-8")
+    drifted.write_text("drifted on disk\n", encoding="utf-8")
+
+    conflicting = VaultTransaction()
+    conflicting.stage(stable, "stable next\n", expected="stable original\n")
+    conflicting.stage(drifted, "drifted next\n", expected="expected different\n")
+    with pytest.raises(OawError, match="changed on disk"):
+        conflicting.commit()
+    assert stable.read_text(encoding="utf-8") == "stable original\n"
+    assert drifted.read_text(encoding="utf-8") == "drifted on disk\n"
+
+    matching = VaultTransaction()
+    matching.stage(stable, "stable next\n", expected="stable original\n")
+    matching.stage(drifted, "drifted next\n", expected="drifted on disk\n")
+    matching.commit()
+    assert stable.read_text(encoding="utf-8") == "stable next\n"
+    assert drifted.read_text(encoding="utf-8") == "drifted next\n"

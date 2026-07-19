@@ -16,6 +16,7 @@ from typer._click import types as click_types
 from typer.core import TyperGroup
 from typer.main import get_command
 
+from .captures import create_capture, list_captures, show_capture, triage_capture
 from .errors import OawError
 from .exports import validate_export_bundle, write_export_bundle
 from .feedback import FEEDBACK_TYPES, FeedbackType, create_feedback, read_feedback_body
@@ -170,6 +171,20 @@ USAGE_BY_COMMAND = {
     "                           --scope SCOPE [--body BODY | --body-file BODY_FILE]\n"
     "                           [--command COMMAND] [--tag TAG] [--id ID] [--date DATE]\n"
     "                           [--allow-missing-session-id]\n",
+    "oaw capture": "usage: oaw capture [-h] {create,list,show,triage} ...\n",
+    "oaw capture create": "usage: oaw capture create [-h] --title TITLE [--body BODY | --body-file BODY_FILE]\n"
+    "                          [--project PROJECT] [--area AREA] [--context CONTEXT]\n"
+    "                          [--outcome OUTCOME] [--url URL] [--tag TAG] [--json]\n"
+    "                          [--allow-missing-session-id]\n",
+    "oaw capture list": "usage: oaw capture list [-h] [--status STATUS] [--project PROJECT]\n"
+    "                        [--sort {newer,older}] [--json]\n",
+    "oaw capture show": "usage: oaw capture show [-h] [--json] id\n",
+    "oaw capture triage": "usage: oaw capture triage [-h]\n"
+    "                          --status {inbox,incubating,parked,reference,triaged,discarded}\n"
+    "                          (--reason REASON | --no-reason) [--review-after REVIEW_AFTER]\n"
+    "                          [--destination DESTINATION] [--json]\n"
+    "                          [--allow-missing-session-id]\n"
+    "                          id\n",
 }
 
 SUBCOMMAND_DESTINATIONS = {
@@ -186,6 +201,7 @@ SUBCOMMAND_DESTINATIONS = {
     "oaw session": "session_command",
     "oaw retro": "retro_command",
     "oaw feedback": "feedback_command",
+    "oaw capture": "capture_command",
 }
 
 ARGUMENT_NAMES = {
@@ -203,6 +219,8 @@ ARGPARSE_CHOICES = {
     "sort": ("priority", "effort", "title"),
     "state": ("running", "paused", "completed", "closed"),
     "feedback_type": FEEDBACK_TYPES,
+    "triage_status": ("inbox", "incubating", "parked", "reference", "triaged", "discarded"),
+    "sort_order": ("newer", "older"),
 }
 
 NEGATIVE_NUMBER = re.compile(r"-(?:\d+(?:\.\d*)?|\.\d+)$")
@@ -379,6 +397,7 @@ export_app = _app("Safe outbound note export utilities")
 session_app = _app("Session artifact utilities")
 retro_app = _app("Retrospective note utilities")
 feedback_app = _app("Agent feedback note utilities")
+capture_app = _app("Capture note lifecycle")
 
 
 class TaskStatus(StrEnum):
@@ -423,6 +442,20 @@ class ListSort(StrEnum):
     TITLE = "title"
 
 
+class CaptureTriageStatus(StrEnum):
+    INBOX = "inbox"
+    INCUBATING = "incubating"
+    PARKED = "parked"
+    REFERENCE = "reference"
+    TRIAGED = "triaged"
+    DISCARDED = "discarded"
+
+
+class CaptureSort(StrEnum):
+    NEWER = "newer"
+    OLDER = "older"
+
+
 app.add_typer(project_app, name="project")
 app.add_typer(research_app, name="research")
 app.add_typer(task_app, name="task")
@@ -435,6 +468,7 @@ app.add_typer(export_app, name="export")
 app.add_typer(session_app, name="session")
 app.add_typer(retro_app, name="retro")
 app.add_typer(feedback_app, name="feedback")
+app.add_typer(capture_app, name="capture")
 
 
 def _run(action: Callable[[], Any]) -> Any:
@@ -1217,6 +1251,149 @@ def feedback_create(
             tag,
             requested_id,
             date,
+            allow_missing_session_id,
+        )
+    )
+
+
+CAPTURE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_CAPTURE_EMPTY_BODY = "\x00capture-empty-body\x00"
+
+
+def _read_optional_capture_body(inline: str | None, body_file: str | None) -> str | None:
+    """Read an optional capture body, treating supplied-but-empty content as a usage error."""
+    if inline is not None and body_file is not None:
+        _usage_error("argument --body-file: not allowed with argument --body")
+    if inline is None and body_file is None:
+        return None
+    try:
+        return read_markdown_source(
+            inline,
+            body_file,
+            sys.stdin,
+            inline_option="--body",
+            file_option="--body-file",
+            label="capture body",
+            empty_error=_CAPTURE_EMPTY_BODY,
+            file_label="capture body",
+        )
+    except OawError as exc:
+        if str(exc) == _CAPTURE_EMPTY_BODY:
+            _usage_error("capture create body must not be empty when provided")
+        raise
+
+
+@capture_app.command("create", help="create a capture note under Captures/Entries/")
+def capture_create(
+    title: Annotated[str, typer.Option("--title", help="human-readable capture title")],
+    body: Annotated[str | None, typer.Option("--body", help="inline capture body")] = None,
+    body_file: Annotated[
+        str | None, typer.Option("--body-file", help="UTF-8 body file; '-' reads stdin")
+    ] = None,
+    project: Annotated[
+        str | None, typer.Option("--project", help="project alias or folder name")
+    ] = None,
+    area: Annotated[str | None, typer.Option("--area", help="broad area")] = None,
+    context: Annotated[str | None, typer.Option("--context", help="one-line trigger")] = None,
+    outcome: Annotated[str | None, typer.Option("--outcome", help="expected next shape")] = None,
+    url: Annotated[
+        list[str] | None, typer.Option("--url", help="cited http(s) source; repeatable")
+    ] = None,
+    tag: Annotated[list[str] | None, typer.Option("--tag", help="extra tag; repeatable")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="emit a JSON receipt")] = False,
+    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
+) -> None:
+    if not title.strip():
+        _usage_error("capture create requires a non-empty --title")
+    urls: list[str] = []
+    for value in url or []:
+        if not (value.startswith("http://") or value.startswith("https://")):
+            _usage_error(f"argument --url: '{value}' must be an http:// or https:// URL")
+        if value not in urls:
+            urls.append(value)
+    content = _run(lambda: _read_optional_capture_body(body, body_file))
+    _run(
+        lambda: create_capture(
+            vault_root(),
+            title,
+            content,
+            project,
+            area,
+            context,
+            outcome,
+            urls,
+            tag,
+            json_output,
+            allow_missing_session_id,
+        )
+    )
+
+
+@capture_app.command("list", help="list captures vault-wide by frontmatter type")
+def capture_list(
+    status: Annotated[
+        str | None, typer.Option("--status", help="exact status filter (all statuses by default)")
+    ] = None,
+    project: Annotated[
+        str | None, typer.Option("--project", help="project alias or folder name")
+    ] = None,
+    sort_order: Annotated[
+        CaptureSort, typer.Option("--sort", help="newer (default) or older by creation time")
+    ] = CaptureSort.NEWER,
+    json_output: Annotated[bool, typer.Option("--json", help="emit records as JSON")] = False,
+) -> None:
+    _run(lambda: list_captures(vault_root(), status, project, sort_order.value, json_output))
+
+
+@capture_app.command("show", help="show one capture note from any vault location")
+def capture_show(
+    note_id: Annotated[str, typer.Argument()],
+    json_output: Annotated[bool, typer.Option("--json", help="emit the capture as JSON")] = False,
+) -> None:
+    _run(lambda: show_capture(vault_root(), note_id, json_output))
+
+
+@capture_app.command("triage", help="transition a canonical capture's status")
+def capture_triage(
+    note_id: Annotated[str, typer.Argument()],
+    triage_status: Annotated[CaptureTriageStatus, typer.Option("--status", help="target status")],
+    reason: Annotated[str | None, typer.Option("--reason", help="triage rationale")] = None,
+    no_reason: Annotated[
+        bool, typer.Option("--no-reason", help="record that no reason was given")
+    ] = False,
+    review_after: Annotated[
+        str | None, typer.Option("--review-after", help="YYYY-MM-DD; required for incubating")
+    ] = None,
+    destination: Annotated[
+        list[str] | None, typer.Option("--destination", help="routed note ID; repeatable")
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="emit a JSON receipt")] = False,
+    allow_missing_session_id: Annotated[bool, typer.Option("--allow-missing-session-id")] = False,
+) -> None:
+    if reason is not None and no_reason:
+        _usage_error("argument --no-reason: not allowed with argument --reason")
+    if reason is None and not no_reason:
+        _usage_error("the following arguments are required: one of --reason, --no-reason")
+    if reason is not None and not reason.strip():
+        _usage_error("capture triage requires a non-empty --reason")
+    clean_reason = reason.strip() if reason is not None else None
+    if review_after is not None:
+        if not CAPTURE_DATE_RE.fullmatch(review_after):
+            _usage_error("argument --review-after: must use YYYY-MM-DD")
+        if triage_status is not CaptureTriageStatus.INCUBATING:
+            _usage_error("argument --review-after: only valid with --status incubating")
+    elif triage_status is CaptureTriageStatus.INCUBATING:
+        _usage_error("--status incubating requires --review-after")
+    _run(
+        lambda: triage_capture(
+            vault_root(),
+            note_id,
+            triage_status.value,
+            clean_reason,
+            no_reason,
+            review_after,
+            destination or [],
+            json_output,
             allow_missing_session_id,
         )
     )
