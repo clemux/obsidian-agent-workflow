@@ -172,7 +172,9 @@ export OAW_VAULT=~/vaults/example
 - [Agent skills](#agent-skills)
 - [Resolving references](#resolving-references)
 - [Listing notes](#listing-notes)
+- [Project workspace creation](#project-workspace-creation)
 - [Task lifecycle](#task-lifecycle)
+- [Research packet lifecycle](#research-packet-lifecycle)
 - [Task views](#task-views)
 - [Sessions](#sessions)
   - [Session lookup](#session-lookup)
@@ -193,7 +195,10 @@ export OAW_VAULT=~/vaults/example
 | --- | --- |
 | [`oaw resolve`](#resolving-references) | Resolve a reference ID or `obs:` alias to a vault note |
 | [`oaw list`](#listing-notes) | List a project's tasks or captures by frontmatter type |
-| [`oaw task`](#task-lifecycle) | Update task lifecycle status with an agent-session trace |
+| [`oaw project`](#project-workspace-creation) | Create a first-class project index from the vault template |
+| [`oaw task`](#task-lifecycle) | Create tasks, update lifecycle status, and manage relations with an agent-session trace |
+| [`oaw run`](#task-lifecycle) | Inspect, filter, close, and audit the agent-run registry |
+| [`oaw research`](#research-packet-lifecycle) | Scaffold a research packet and register launched provider runs |
 | [`oaw session`](#sessions) | Look up a session ID across notes and artifacts; snapshot session artifacts |
 | [`oaw note` / `oaw retro`](#notes-and-retrospectives) | Append session traces or observations; create retrospective drafts |
 | [`oaw feedback`](#agent-feedback) | Create dated, durable agent-feedback notes |
