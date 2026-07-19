@@ -3291,6 +3291,56 @@ lookup-duplicate-session
             verbose_proc.stdout,
         )
 
+    def test_session_lookup_verbose_reports_vault_and_codex_matches(self):
+        session_id = "019f43c9-e93a-7052-bac7-1789a6de1df7"
+        task = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task.write_text(
+            task.read_text(encoding="utf-8").replace(
+                "---\n\n# Resolver CLI",
+                f"session-ids:\n  - {session_id}\n---\n\n# Resolver CLI",
+            ),
+            encoding="utf-8",
+        )
+        codex_root = self.vault / "harness/codex/sessions"
+        rollout = codex_root / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
+        rollout.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(FIXTURES / "session_lookup/codex-complete.jsonl", rollout)
+
+        default_proc = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--codex-root",
+            str(codex_root),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+        )
+        verbose_proc = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--verbose",
+            "--codex-root",
+            str(codex_root),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+        )
+
+        self.assertEqual(default_proc.returncode, 0, default_proc.stderr)
+        self.assertIn("Vault matches:", default_proc.stdout)
+        self.assertNotIn("Harness artifacts:", default_proc.stdout)
+        self.assertNotIn("Started:", default_proc.stdout)
+        self.assertEqual(verbose_proc.returncode, 0, verbose_proc.stderr)
+        self.assertIn("Vault matches:", verbose_proc.stdout)
+        self.assertIn(
+            "- Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md | id: OAW-TSK-cli",
+            verbose_proc.stdout,
+        )
+        self.assertIn("Harness artifacts:", verbose_proc.stdout)
+        self.assertIn(f"- codex-rollout: {rollout}", verbose_proc.stdout)
+        self.assertIn("Started: 2026-07-09T12:00:00Z", verbose_proc.stdout)
+        self.assertIn("Tokens: input=250, output=80, cached=75, total=330", verbose_proc.stdout)
+
     def test_session_lookup_verbose_marks_missing_and_unsupported_metrics_unavailable(self):
         session_id = "019f43c9-e93a-7052-bac7-1789a6de1df7"
         codex_root = self.vault / "harness/codex/sessions"

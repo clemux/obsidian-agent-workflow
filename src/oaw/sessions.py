@@ -163,7 +163,12 @@ def session_lookup(
     session_id = session_id.strip()
     if not session_id:
         raise OawError("empty session ID")
-    if note_hits:
+
+    # Preserve the fast, output-compatible path for the common non-verbose
+    # lookup.  Verbose lookups intentionally continue into harness discovery
+    # so a session recorded in vault frontmatter can still show its artifact
+    # metrics.
+    if note_hits and not verbose:
         print(f"Session: {session_id}")
         print("Vault matches:")
         for relpath, hit_id in note_hits:
@@ -176,13 +181,20 @@ def session_lookup(
         codex_root.expanduser(),
         claude_root.expanduser(),
     )
+    print(f"Session: {session_id}")
+    if note_hits:
+        print("Vault matches:")
+        for relpath, hit_id in note_hits:
+            note_id = hit_id or "(no id)"
+            print(f"- {relpath} | id: {note_id}")
+
     if not artifacts:
-        print(f"Session: {session_id}")
+        if note_hits:
+            return
         print("Status: not logged")
         print("No vault note or harness artifact found.")
         return
 
-    print(f"Session: {session_id}")
     print("Harness artifacts:")
     for artifact in artifacts:
         cwd, first_user, vault_paths = summarize_artifact(artifact.path)

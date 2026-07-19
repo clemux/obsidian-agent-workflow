@@ -68,6 +68,8 @@ If no agent-callable rename operation is already exposed, silently skip title sy
 Use `oaw session lookup <id>` when you need to trace a literal session/thread id quickly:
 
 - Searches the vault first and reports matching note paths plus frontmatter ids.
+- Without `--verbose`, a vault match uses the fast path and stops after reporting those notes.
+- With `--verbose`, continues into harness artifacts even when vault matches exist and reports both result classes.
 - If nothing matches, searches harness artifacts and prints a session synopsis.
 - If still missing, exits `0` with a clear not-logged message.
 
