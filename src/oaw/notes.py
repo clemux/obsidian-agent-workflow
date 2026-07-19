@@ -154,7 +154,22 @@ def heading_level(line: str) -> int | None:
 
 def fence_delimiter(line: str) -> str | None:
     match = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
-    return match.group(1)[0] if match else None
+    return match.group(1) if match else None
+
+
+def fence_closes(opening: str, candidate_line: str) -> bool:
+    """Return whether a whole line closes the fence opened by ``opening``.
+
+    A fence only closes on a line that (aside from up to three leading
+    spaces) consists solely of fence characters of the same kind and at
+    least as long as the opening fence — matching-but-shorter fences, or
+    fence-looking lines with trailing text, do not close it.
+    """
+    match = re.match(r"^ {0,3}(`{3,}|~{3,})[ \t]*$", candidate_line.rstrip("\r\n"))
+    if match is None:
+        return False
+    candidate = match.group(1)
+    return opening[0] == candidate[0] and len(candidate) >= len(opening)
 
 
 def normalize_heading(section: str) -> str:
@@ -168,51 +183,72 @@ def normalize_heading(section: str) -> str:
     return f"## {value}"
 
 
-def append_markdown_block_to_section(text: str, section: str, block: str) -> str:
+def locate_section(text: str, section: str) -> tuple[list[str], int, int] | None:
+    """Find a fence-aware, heading-exact section boundary.
+
+    Returns ``(lines, heading_index, section_end_index)`` where ``lines`` is
+    ``text.splitlines()``, ``heading_index`` is the index of the matching
+    heading line, and ``section_end_index`` is the index of the next
+    heading at or above the same level (or ``len(lines)`` if none follows).
+    Returns ``None`` when the heading is not found outside a fenced code
+    block. Heading lines inside fenced code blocks, and lines that merely
+    look like the heading after stripping leading whitespace (e.g. indented
+    code), never match; trailing whitespace on an otherwise exact heading
+    line is tolerated.
+    """
     heading = normalize_heading(section)
-    block = block.strip()
-    if not block:
-        raise OawError("block content must not be empty")
-    lines = text.splitlines()
-    target_idx: int | None = None
     target_level = heading_level(heading)
     if target_level is None:
         raise OawError("section heading must look like a Markdown heading")
+    lines = text.splitlines()
+    target_idx: int | None = None
     active_fence: str | None = None
     for idx, line in enumerate(lines):
         delimiter = fence_delimiter(line)
         if delimiter:
             if active_fence is None:
                 active_fence = delimiter
-            elif active_fence == delimiter:
+            elif fence_closes(active_fence, line):
                 active_fence = None
             continue
-        if active_fence is None and line.strip() == heading:
+        if active_fence is None and line.rstrip() == heading:
             target_idx = idx
             break
     if target_idx is None:
-        prefix = "" if text.endswith("\n") else "\n"
-        return f"{text}{prefix}\n{heading}\n\n{block}\n"
+        return None
 
-    insert_at = len(lines)
+    section_end = len(lines)
     active_fence = None
     for idx in range(target_idx + 1, len(lines)):
         delimiter = fence_delimiter(lines[idx])
         if delimiter:
             if active_fence is None:
                 active_fence = delimiter
-            elif active_fence == delimiter:
+            elif fence_closes(active_fence, lines[idx]):
                 active_fence = None
             continue
         if active_fence is not None:
             continue
         level = heading_level(lines[idx])
         if level is not None and level <= target_level:
-            insert_at = idx
+            section_end = idx
             break
+    return lines, target_idx, section_end
 
-    before = lines[:insert_at]
-    after = lines[insert_at:]
+
+def append_markdown_block_to_section(text: str, section: str, block: str) -> str:
+    heading = normalize_heading(section)
+    block = block.strip()
+    if not block:
+        raise OawError("block content must not be empty")
+    located = locate_section(text, section)
+    if located is None:
+        prefix = "" if text.endswith("\n") else "\n"
+        return f"{text}{prefix}\n{heading}\n\n{block}\n"
+    lines, _target_idx, section_end = located
+
+    before = lines[:section_end]
+    after = lines[section_end:]
     while before and before[-1] == "":
         before.pop()
     new_lines = [*before, "", block, ""]

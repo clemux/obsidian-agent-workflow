@@ -5,7 +5,14 @@ from typing import IO
 
 import pytest
 
-from oaw.notes import read_note, split_note, write_new_note_atomic
+from oaw.links import parse_wikilinks
+from oaw.notes import (
+    append_markdown_block_to_section,
+    locate_section,
+    read_note,
+    split_note,
+    write_new_note_atomic,
+)
 
 
 def test_split_note_returns_frontmatter_block_content_and_body():
@@ -109,3 +116,22 @@ def test_write_new_note_atomic_keeps_a_peer_created_ancestor_after_failure(tmp_p
         )
     assert peer_directory.is_dir()
     assert not (peer_directory / "Feedback").exists()
+
+
+def test_append_markdown_block_ignores_info_string_close_inside_fence():
+    text = "## Notes\n\n```\ncode\n```ruby\nmore\n```\n\n## Next\n\nKeep.\n"
+    result = append_markdown_block_to_section(text, "## Notes", "Added.")
+    assert result.index("Added.") < result.index("## Next")
+    assert "Keep.\n" in result
+
+
+def test_parse_wikilinks_ignores_links_inside_info_string_closed_fence():
+    text = "```text\nx\n```python\n[[Inside]]\nstill\n```\n"
+    assert parse_wikilinks(text) == []
+
+
+def test_locate_section_tolerates_trailing_heading_whitespace():
+    text = "## Agent sessions   \n\n- entry\n"
+    located = locate_section(text, "## Agent sessions")
+    assert located is not None
+    assert located[1] == 0
