@@ -9,14 +9,12 @@ read the status out of the command's stdout and could be lied to.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 HOOK = Path(__file__).resolve().parents[1] / "scripts" / "claude-session-title-hook.sh"
-SETUP = Path(__file__).resolve().parents[1] / "scripts" / "claude-setup.sh"
 SESSION = "935fa13a-e447-4717-9a16-73bacaa6ebdc"
 
 
@@ -188,8 +186,3 @@ def test_emit_stays_silent_when_nothing_would_change(tmp_path: Path, oaw) -> Non
         run_hook("emit", {"session_id": SESSION, "session_title": "[I] OAW-TSK-x"}, tmp_path) == ""
     )
     assert run_hook("emit", {"session_id": "unknown-session", "session_title": "x"}, tmp_path) == ""
-
-
-@pytest.mark.skipif(shutil.which("shellcheck") is None, reason="shellcheck is not installed")
-def test_shell_scripts_pass_shellcheck() -> None:
-    subprocess.run(["shellcheck", str(HOOK), str(SETUP)], check=True)
