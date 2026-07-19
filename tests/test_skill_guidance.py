@@ -6,6 +6,8 @@ EVAL = ROOT / "skills" / "oaw" / "references" / "session-phase-title-evaluation.
 METADATA = ROOT / "skills" / "oaw" / "agents" / "openai.yaml"
 README = ROOT / "README.md"
 TASK_REVIEW_SKILL = ROOT / "skills" / "oaw-task-review" / "SKILL.md"
+TASK_EXECUTION_SKILL = ROOT / "skills" / "oaw-task-execution" / "SKILL.md"
+TASK_EXECUTION_METADATA = ROOT / "skills" / "oaw-task-execution" / "agents" / "openai.yaml"
 
 
 def read(path: Path) -> str:
@@ -85,3 +87,71 @@ def test_task_guidance_keeps_lifecycle_preparedness_and_blockers_separate():
     assert "`todo`: deliberately selected for near-term attention" in review_skill
     assert "Missing metadata is `unassessed`, never implicitly prepared" in review_skill
     assert "Never infer or mutate preparedness from a lifecycle decision" in review_skill
+
+
+def test_oaw_routes_repository_execution_to_the_companion():
+    skill = read(SKILL)
+
+    assert "load the\n`oaw-task-execution` companion before repository edits" in skill
+    assert (
+        "Keep task resolution, provenance, relationships, and lifecycle writes in\nthis skill"
+        in skill
+    )
+    assert "Do not load the companion for status-only or vault-only work" in skill
+
+
+def test_task_execution_preflight_gates_worktree_creation():
+    skill = read(TASK_EXECUTION_SKILL)
+
+    for command in (
+        "git status --short --branch",
+        "git gtr list",
+        "git gtr config list",
+    ):
+        assert command in skill
+    assert (
+        "run every repository-configured baseline\ncheck from the main checkout before worktree creation"
+        in skill
+    )
+    assert (
+        "wait for explicit user direction before creating a worktree or editing\nrepository files"
+        in skill
+    )
+    assert "Do not weaken configuration or silently skip a check" in skill
+    assert "Do not silently\nfall back to plain `git worktree` or direct edits" in skill
+
+
+def test_task_execution_keeps_parent_accountable_and_delegation_optional():
+    skill = read(TASK_EXECUTION_SKILL)
+
+    assert "The parent agent remains accountable" in skill
+    assert "Single-agent execution is always valid" in skill
+    assert "Do not delegate merely because\nsubagents are available" in skill
+    assert "Independent two-stage review is not mandatory" in skill
+    assert "A\nnever-fix-manually rule does not apply" in skill
+
+
+def test_task_execution_preserves_work_before_a_scope_pivot():
+    skill = read(TASK_EXECUTION_SKILL)
+
+    assert "pause its OAW\nrun before switching scope" in skill
+    assert "Inventory both the main checkout and the actual feature\nworktree" in skill
+    assert (
+        "tracked changes,\nuntracked files, diff summary, commit state, and checks already run"
+        in skill
+    )
+    assert "never infer worktree cleanliness from the main checkout" in skill
+    assert "Preserve in-progress work by default" in skill
+    assert "Leave an exact resume instruction that names the\nworktree" in skill
+    assert (
+        "whether the next session should resume implementation, review existing\nchanges, or consider cleanup"
+        in skill
+    )
+
+
+def test_task_execution_metadata_uses_current_interface_schema():
+    metadata = read(TASK_EXECUTION_METADATA)
+
+    assert metadata.startswith("interface:\n")
+    assert 'short_description: "Execute OAW tasks with safe isolation"' in metadata
+    assert "Use $oaw-task-execution" in metadata

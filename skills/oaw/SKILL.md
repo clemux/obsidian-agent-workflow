@@ -220,6 +220,12 @@ changes task lifecycle state.
 
 Keep `Todo` for near-term chosen work and put unscheduled known work in `Backlog`. When implementation is ready for verification, run `oaw task review ... --checks ...` so the task note records the handoff.
 
+When an OAW task moves into repository implementation or review, load the
+`oaw-task-execution` companion before repository edits. It owns main-checkout
+preflight, GTR feature isolation, and proportional implementation and review
+delegation. Keep task resolution, provenance, relationships, and lifecycle writes in
+this skill. Do not load the companion for status-only or vault-only work.
+
 At wrap-up, check whether substantive work occurred. If it did and no task owns it, create or promote the source capture into a task before retrospective closeout. A retrospective may close only after that task is `done` via `oaw task complete ... --checks "<verification actually run>"`; link the retrospective primarily to the completed task and retain the source-capture link as provenance. Do not treat a capture `Outcome` as a completion report.
 
 For any project tracked through OAW, keep pre-implementation architecture,

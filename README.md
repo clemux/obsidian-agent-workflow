@@ -38,9 +38,10 @@ carries its own dependencies and needs no prefix.
 
 ### Agent skills
 
-The repository also contains three agent skills:
+The repository also contains four agent skills:
 
 - `skills/oaw` documents ID resolution and lifecycle operations.
+- `skills/oaw-task-execution` runs repository implementation and review with preflight checks, GTR isolation, and proportional delegation.
 - `skills/oaw-task-review` runs a resumable, one-task-at-a-time project status review.
 - `skills/oaw-research` handles provider-visible research handoff and finished-report intake.
 
@@ -50,13 +51,13 @@ remain live:
 ```bash
 for skill_root in "${CODEX_HOME:-$HOME/.codex}/skills" "$HOME/.claude/skills"; do
   mkdir -p "$skill_root"
-  for skill in oaw oaw-task-review oaw-research; do
+  for skill in oaw oaw-task-execution oaw-task-review oaw-research; do
     ln -s "$(pwd)/skills/$skill" "$skill_root/$skill"
   done
 done
 ```
 
-Skip a link that already exists. Validate either package with the skill creator's
+Skip a link that already exists. Validate each package with the skill creator's
 `quick_validate.py` before sharing changes.
 
 ### Shell completion
