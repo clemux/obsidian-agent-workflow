@@ -213,3 +213,4 @@ Read the matching reference before using these command groups; each file carries
 - `references/links-and-relations.md` — before `oaw link` commands or `oaw task relation` mutations and validation.
 - `references/session-artifacts.md` — before `oaw session snapshot`, or for `session lookup --verbose` metric semantics.
 - `references/session-phase-title-evaluation.md` — only when maintaining, evaluating, or explicitly discussing session-title sync.
+- `docs/oaw-cli-feature-catalog.md` — the generated, implementation-oriented command inventory (owner module and mutation scope per command); regenerate with `uv run python scripts/generate_cli_catalog.py` and verify with its `--check` mode after changing the Typer command tree.

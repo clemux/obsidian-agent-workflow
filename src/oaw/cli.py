@@ -658,7 +658,7 @@ def _task_transition(
     )
 
 
-@task_app.command("backlog")
+@task_app.command("backlog", help="move a project task to Backlog")
 def task_backlog(
     note_id: Annotated[str, typer.Argument()],
     note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
@@ -669,7 +669,7 @@ def task_backlog(
     _task_transition(note_id, note, note_file, checks, allow_missing_session_id, "backlog")
 
 
-@task_app.command("promote")
+@task_app.command("promote", help="move a project task to Todo")
 def task_promote(
     note_id: Annotated[str, typer.Argument()],
     note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
@@ -680,7 +680,7 @@ def task_promote(
     _task_transition(note_id, note, note_file, checks, allow_missing_session_id, "todo")
 
 
-@task_app.command("start")
+@task_app.command("start", help="move a project task to Active")
 def task_start(
     note_id: Annotated[str, typer.Argument()],
     note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
@@ -690,7 +690,7 @@ def task_start(
     _task_transition(note_id, note, note_file, checks, False, "active")
 
 
-@task_app.command("pause")
+@task_app.command("pause", help="pause an active project task's running run record")
 def task_pause(
     note_id: Annotated[str, typer.Argument()],
     note: Annotated[str | None, typer.Option("--note", help=NOTE_INLINE_HELP)] = None,
@@ -708,7 +708,7 @@ def task_pause(
     _run(lambda: pause_task(resolve_id(note_id, root_path), root_path, content))
 
 
-@task_app.command("review")
+@task_app.command("review", help="move a verified project task to Review")
 def task_review(
     note_id: Annotated[str, typer.Argument()],
     checks: Annotated[str, typer.Option("--checks")],
@@ -718,7 +718,7 @@ def task_review(
     _task_transition(note_id, note, note_file, checks, False, "review")
 
 
-@task_app.command("complete")
+@task_app.command("complete", help="move a verified project task to Done")
 def task_complete(
     note_id: Annotated[str, typer.Argument()],
     checks: Annotated[str, typer.Option("--checks")],
