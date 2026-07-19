@@ -1,6 +1,6 @@
 ---
 name: oaw-wrap-up
-description: Operational end-of-session closure for OAW-managed work. Use when the user must stop urgently ("I need to sleep", "gotta go", "stopping now"), signals a session end ("let's stop here", "wrap up", "are we done?"), or explicitly invokes wrap-up. Inventories this session's agent runs and task worktrees, classifies each as complete, ready for review, or unfinished, writes lifecycle state and resume instructions, and ends with a closure receipt plus an optional retro offer. Operational closure only — reflection belongs to the retro skill, offered afterwards.
+description: Operational end-of-session closure for OAW-managed work. Use whenever the user signals stopping, urgently ("I need to sleep", "gotta go", "stopping now", "calling it a night") or normally ("let's stop here", "wrap up", "are we done?", "done for today"), asks what state the session would leave behind, or explicitly invokes wrap-up — even mid-task, and even when they never mention OAW or wrap-up by name. Inventories this session's agent runs and task worktrees, classifies each as complete, ready for review, or unfinished, writes lifecycle state and resume instructions, and ends with a closure receipt plus an optional retro offer. Not for closing out a single finished task mid-session (use the oaw lifecycle commands directly); reflection belongs to the retro skill, offered afterwards.
 ---
 
 # OAW wrap-up — session closure
@@ -71,10 +71,12 @@ untracked summary, checks already run, unpushed count, and one exact next-sessio
 
 ```
 cd <repo> && claude "Resume obs:<task-id>. Read the task note resume block."
+cd <repo> && codex "Resume obs:<task-id>. Read the task note resume block."
 ```
 
-This reuses the pause discipline of `oaw-task-execution` step 5 by reference; do not
-restate or vary it.
+Pick the command matching the provider expected to resume; include one, not both. This
+reuses the pause discipline of `oaw-task-execution` step 5 by reference; do not restate or
+vary it.
 
 ### 4. WIP-commit offer
 
@@ -99,8 +101,19 @@ receipt has no unowned lines.
 
 ### 7. Closure receipt
 
-Final chat message: statuses written, worktrees with dirty state, unpushed work,
-unreconciled runs, and exact resume commands.
+Final chat message — never a separate note; durability already lives in the task notes and
+run records. Follow this shape so receipts stay scannable across sessions, omitting empty
+lines rather than writing "none":
+
+```
+Closure receipt
+- obs:<task-id> → review (checks: <checks actually run>)
+- obs:<task-id> → paused (resume block on the task note)
+- Worktrees: <name> dirty — WIP commit declined; <name> clean
+- Unpushed: <branch> ahead <n> of <upstream> (local only)
+- Reconcile next session: <RUN-ID> — running, other session, stale
+- Resume: cd <repo> && claude "Resume obs:<task-id>. Read the task note resume block."
+```
 
 ### 8. Offer retro
 
