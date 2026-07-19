@@ -2511,6 +2511,32 @@ Work that has no priority or effort assigned yet.
         self.assertIn("usage: oaw list", proc.stderr)
         self.assertIn("invalid choice: 'nope'", proc.stderr)
 
+    def test_list_accepts_project_aliases(self):
+        expected = self.run_oaw("list", "--project", "Obsidian Agent Workflow")
+        self.assertEqual(expected.returncode, 0, expected.stderr)
+        for alias in ["OAW", "obs:OAW"]:
+            with self.subTest(alias=alias):
+                proc = self.run_oaw("list", "--project", alias)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(proc.stdout, expected.stdout)
+
+    def test_list_accepts_project_folder_without_index_note(self):
+        task = self.vault / "Projects/No Index/Tasks/Loose task.md"
+        write(
+            task,
+            "---\nid: NOIDX-TSK-loose\nstatus: todo\ntype: task\n---\n\n# Loose task\n",
+        )
+
+        proc = self.run_oaw("list", "--project", "No Index")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("NOIDX-TSK-loose", proc.stdout)
+
+    def test_list_rejects_unknown_project_alias(self):
+        proc = self.run_oaw("list", "--project", "obs:BOGUS")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("project not found: obs:BOGUS", proc.stderr)
+
     def test_lifecycle_supports_agents_task_without_board_output(self):
         proc = self.run_oaw(
             "task",
