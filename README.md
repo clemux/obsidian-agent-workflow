@@ -93,19 +93,20 @@ Shared error, note-boundary, and hand-rolled frontmatter helpers live in
 `src/oaw/errors.py`, `src/oaw/notes.py`, and `src/oaw/frontmatter.py`; their
 direct unit tests run without a CLI subprocess or vault fixture.
 
-Bootstrap the exact repository-managed `uv` and `shellcheck` executables, then
+Bootstrap the exact repository-managed `uv`, `shellcheck`, and `prek` executables, then
 run the complete local gate with:
 
 ```bash
 mise install
 mise which uv
 mise which shellcheck
+mise which prek
 mise run check
 ```
 
 Mise does not pin Python. uv remains responsible for the virtual environment,
 Python discovery or installation, and all Python dependencies recorded in
-`uv.lock`; the package continues to support Python 3.10 and newer.
+`uv.lock`; the package requires Python 3.13 or newer.
 
 Run individual gates for focused diagnosis:
 
@@ -136,8 +137,17 @@ cp .publication-boundary-local.sample.json .publication-boundary-local.json
 ```
 
 Edit the copied values for this machine; never force-add the local file. Install
-the pre-push gate once per checkout with `uv run pre-commit install`. Run the
-same check directly at any time with:
+the Prek-managed pre-commit and pre-push shims once per checkout, then run every
+configured hook against all files with:
+
+```bash
+mise run hooks-install
+mise run hooks-check
+```
+
+The pre-commit stage runs Ruff lint, Ruff format checking, and Pyrefly typing.
+The pre-push stage enforces the publication boundary. Run that check directly
+at any time with:
 
 ```bash
 uv run python scripts/check_publication_boundary.py
