@@ -123,6 +123,33 @@ oaw list --project Fable --type capture
 
 Capture listing hides `status: archived` notes by default. Use `--include-archived` only for historical/provenance work, or `--status archived` when the archived set is the explicit target. For archived captures, prefer `oaw resolve --meta` or default `oaw resolve` first; use `--full` only after confirming the archived body is needed.
 
+## Captures
+
+Use `oaw capture` for capture notes instead of hand-writing frontmatter or the raw
+`obsidian create` command. `create` generates the `CAP-YYYYMMDD-<slug>` ID, stamps a
+full timezone-aware `created` timestamp, and starts at `status: inbox`:
+
+```bash
+oaw capture create --title "Investigate flaky resolver"
+oaw capture create --title "Route this idea" --project obs:OAW --url https://example.com/src
+```
+
+- `list` is the vault-wide capture catalog: it finds every `type: capture` note in any
+  folder and shows all statuses. Filter with `--status`/`--project`, order with
+  `--sort newer|older`, emit `--json`. This differs from `oaw list --type capture`,
+  which keeps its project-scoped, archived-hiding contract. `show <ID>` prints one
+  capture's metadata and full body from any location.
+- `triage <ID> --status <state> (--reason "..." | --no-reason)` moves a capture between
+  `inbox`, `incubating`, `parked`, `reference`, `triaged`, and `discarded`, appending a
+  dated `## Triage` audit entry. Exactly one of `--reason`/`--no-reason` is required.
+  `--status incubating` requires `--review-after YYYY-MM-DD` (and leaving `incubating`
+  clears it); `--status triaged` requires at least one `--destination` (stored or
+  supplied), which also writes reciprocal `## Related` links. Triage only writes captures
+  under `Captures/Entries/`; captures elsewhere are refused.
+- Promotion via `oaw task create --from-capture <ID>` is metadata-first: it uses the
+  capture's `project` frontmatter, then an explicit `--project`, then legacy `Projects/`
+  path inference; a mismatch between an explicit `--project` and capture metadata errors.
+
 ## Project task lifecycle
 
 Lifecycle writes apply to task notes under `Projects/*/Tasks`, `Agents/Tasks`, and

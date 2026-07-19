@@ -172,6 +172,7 @@ export OAW_VAULT=~/vaults/example
 - [Agent skills](#agent-skills)
 - [Resolving references](#resolving-references)
 - [Listing notes](#listing-notes)
+- [Captures](#captures)
 - [Project workspace creation](#project-workspace-creation)
 - [Task lifecycle](#task-lifecycle)
 - [Research packet lifecycle](#research-packet-lifecycle)
@@ -196,6 +197,7 @@ export OAW_VAULT=~/vaults/example
 | --- | --- |
 | [`oaw resolve`](#resolving-references) | Resolve a reference ID or `obs:` alias to a vault note |
 | [`oaw list`](#listing-notes) | List a project's tasks or captures by frontmatter type |
+| [`oaw capture`](#captures) | Create, list, show, and triage capture notes in the canonical store |
 | [`oaw project`](#project-workspace-creation) | Create a first-class project index from the vault template |
 | [`oaw task`](#task-lifecycle) | Create tasks, update lifecycle status, and manage relations with an agent-session trace |
 | [`oaw run`](#task-lifecycle) | Inspect, filter, close, and audit the agent-run registry |
@@ -255,6 +257,47 @@ oaw list --project "Obsidian Agent Workflow" --sort priority \
 - `--goal` adds a snippet column sourced from each note's `## Problem` section
   first content line, without opening the whole body in the caller.
 - `--json` emits the same projected, sorted records as an array of objects.
+
+## Captures
+
+`oaw capture` creates and manages capture notes in the canonical store at
+`Captures/Entries/`. Create captures with the CLI instead of hand-writing
+frontmatter: it generates the `CAP-YYYYMMDD-<slug>` ID, stamps a full
+timezone-aware `created` timestamp (UTC ISO 8601 with seconds), and starts every
+capture at `status: inbox`.
+
+```bash
+oaw capture create --title "Investigate flaky resolver"
+oaw capture create --title "Route this idea" --project obs:OAW \
+  --context "came up during triage" --url https://example.com/source
+echo "notes from the session" | oaw capture create --title "Session note" --body-file -
+```
+
+- `--body` / `--body-file` supply an optional body (`--body-file -` reads stdin);
+  `--project` links the capture to a project Index and records the project.
+- `oaw capture list` is the vault-wide capture catalog: it discovers every
+  `type: capture` note in any folder and shows all statuses (no archived hiding).
+  Filter with `--status`, `--project`, sort with `--sort newer|older`, and emit
+  `--json`. This is deliberately different from `oaw list --type capture`, which
+  keeps its project-scoped, archived-hiding contract.
+- `oaw capture show <ID>` prints one capture's metadata and full body (text or
+  `--json`) from any location.
+- `oaw capture triage <ID> --status <state> (--reason "..." | --no-reason)` moves a
+  capture between `inbox`, `incubating`, `parked`, `reference`, `triaged`, and
+  `discarded`, appending a dated `## Triage` audit entry. `--status incubating`
+  requires `--review-after YYYY-MM-DD`; `--status triaged` requires at least one
+  `--destination`. Triage only writes captures under `Captures/Entries/`.
+
+```bash
+oaw capture list --status inbox --sort newer
+oaw capture show CAP-20260720-route-this-idea --json
+oaw capture triage CAP-20260720-route-this-idea --status incubating \
+  --review-after 2026-08-01 --reason "revisit next sprint"
+```
+
+Promote a capture into a task with `oaw task create --from-capture <ID>`; project
+selection is metadata-first (the capture's `project`, then an explicit
+`--project`, then legacy `Projects/` path inference).
 
 ## Project workspace creation
 
