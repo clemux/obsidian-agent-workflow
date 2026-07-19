@@ -491,6 +491,8 @@ oaw session lookup 019f3b71-14db-7480-b0c5-8836714deacc --verbose
 `oaw session lookup <id>` follows a two-step resolution strategy:
 
 - First it scans the vault and prints matching note paths and frontmatter IDs for the literal ID.
+- Without `--verbose`, a vault match is the fast path and lookup stops after printing those matches.
+- With `--verbose`, it continues into artifact roots even when vault matches exist, printing both the vault matches and any discovered artifact synopsis.
 - If no vault match is found, it scans artifact roots and prints a synopsis of discovered session artifacts.
 - If no match is found anywhere, it exits `0` and prints a clear *not logged* message.
 
