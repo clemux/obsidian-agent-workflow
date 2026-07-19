@@ -128,6 +128,22 @@ SEMANTICS: dict[tuple[str, ...], CommandSemantics] = {
     ("feedback", "create"): CommandSemantics(
         "oaw.feedback", "Creates one durable feedback note in the vault."
     ),
+    ("capture", "create"): CommandSemantics(
+        "oaw.captures",
+        "Creates one capture note under Captures/Entries/; with --project also sets project "
+        "frontmatter and links the capture and project Index.",
+    ),
+    ("capture", "list"): CommandSemantics(
+        "oaw.captures", "Read-only vault-wide capture listing across all statuses."
+    ),
+    ("capture", "show"): CommandSemantics(
+        "oaw.captures", "Read-only display of one capture note from any location."
+    ),
+    ("capture", "triage"): CommandSemantics(
+        "oaw.captures",
+        "Updates a canonical capture's status, review-after, destinations, reciprocal links, "
+        "session provenance, and triage audit in one transaction.",
+    ),
 }
 
 

@@ -30,6 +30,7 @@ semantic annotations checked for complete coverage of every leaf command.
 | `oaw session` | Session artifact utilities |
 | `oaw retro` | Retrospective note utilities |
 | `oaw feedback` | Agent feedback note utilities |
+| `oaw capture` | Capture note lifecycle |
 
 <a id="oaw-cli-group-top-level"></a>
 ## Top-level commands
@@ -139,3 +140,13 @@ semantic annotations checked for complete coverage of every leaf command.
 | ID | Command | Purpose | Arguments and options | Owner | Mutation scope | State |
 | --- | --- | --- | --- | --- | --- | --- |
 | <a id="oaw-cli-feedback-create"></a>`oaw-cli-feedback-create` | `oaw feedback create` | create a durable agent-feedback note | `--title TITLE` (required)<br>`--type {pain\|verified\|idea\|bug}` (required)<br>`--scope SCOPE` (required)<br>`--body BODY`<br>`--body-file BODY_FILE`<br>`--command COMMAND`<br>`--tag TAG` (repeatable)<br>`--id REQUESTED_ID`<br>`--date DATE`<br>`--allow-missing-session-id` | `oaw.feedback` | Creates one durable feedback note in the vault. | Active (not deprecated) |
+
+<a id="oaw-cli-group-capture"></a>
+## `oaw capture`
+
+| ID | Command | Purpose | Arguments and options | Owner | Mutation scope | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| <a id="oaw-cli-capture-create"></a>`oaw-cli-capture-create` | `oaw capture create` | create a capture note under Captures/Entries/ | `--title TITLE` (required)<br>`--body BODY`<br>`--body-file BODY_FILE`<br>`--project PROJECT`<br>`--area AREA`<br>`--context CONTEXT`<br>`--outcome OUTCOME`<br>`--url URL` (repeatable)<br>`--tag TAG` (repeatable)<br>`--json`<br>`--allow-missing-session-id` | `oaw.captures` | Creates one capture note under Captures/Entries/; with --project also sets project frontmatter and links the capture and project Index. | Active (not deprecated) |
+| <a id="oaw-cli-capture-list"></a>`oaw-cli-capture-list` | `oaw capture list` | list captures vault-wide by frontmatter type | `--status STATUS`<br>`--project PROJECT`<br>`--sort {newer\|older}` (default: newer)<br>`--json` | `oaw.captures` | Read-only vault-wide capture listing across all statuses. | Active (not deprecated) |
+| <a id="oaw-cli-capture-show"></a>`oaw-cli-capture-show` | `oaw capture show` | show one capture note from any vault location | `<note-id>` (required)<br>`--json` | `oaw.captures` | Read-only display of one capture note from any location. | Active (not deprecated) |
+| <a id="oaw-cli-capture-triage"></a>`oaw-cli-capture-triage` | `oaw capture triage` | transition a canonical capture's status | `<note-id>` (required)<br>`--status {inbox\|incubating\|parked\|reference\|triaged\|discarded}` (required)<br>`--reason REASON`<br>`--no-reason`<br>`--review-after REVIEW_AFTER`<br>`--destination DESTINATION` (repeatable)<br>`--json`<br>`--allow-missing-session-id` | `oaw.captures` | Updates a canonical capture's status, review-after, destinations, reciprocal links, session provenance, and triage audit in one transaction. | Active (not deprecated) |
