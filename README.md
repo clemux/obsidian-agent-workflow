@@ -38,13 +38,14 @@ carries its own dependencies and needs no prefix.
 
 ### Agent skills
 
-The repository also contains five agent skills:
+The repository also contains six agent skills:
 
 - `skills/obsidian-capture` preserves side observations in the vault capture workflow.
 - `skills/oaw` documents ID resolution and lifecycle operations.
 - `skills/oaw-task-execution` runs repository implementation and review with preflight checks, GTR isolation, and proportional delegation.
 - `skills/oaw-task-review` runs a resumable, one-task-at-a-time project status review.
 - `skills/oaw-research` handles provider-visible research handoff and finished-report intake.
+- `skills/oaw-retro-backend` persists the shared `retro` skill's tasks, captures, and draft notes in the vault.
 
 Link them into the Codex, Claude, and neutral skill directories so edits in the
 checkout remain live:
@@ -52,7 +53,7 @@ checkout remain live:
 ```bash
 for skill_root in "${CODEX_HOME:-$HOME/.codex}/skills" "$HOME/.claude/skills" "$HOME/.agents/skills"; do
   mkdir -p "$skill_root"
-  for skill in obsidian-capture oaw oaw-task-execution oaw-task-review oaw-research; do
+  for skill in obsidian-capture oaw oaw-task-execution oaw-task-review oaw-research oaw-retro-backend; do
     ln -s "$(pwd)/skills/$skill" "$skill_root/$skill"
   done
 done

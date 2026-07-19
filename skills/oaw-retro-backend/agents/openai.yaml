@@ -1,0 +1,4 @@
+interface:
+  display_name: "OAW Retro Backend"
+  short_description: "OAW backend adapter for the shared retro skill."
+  default_prompt: "Use $oaw-retro-backend to persist a retrospective's tasks, captures, and draft note in the OAW vault."
