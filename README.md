@@ -185,6 +185,7 @@ export OAW_VAULT=~/vaults/example
   - [Safe export ingestion](#safe-export-ingestion)
   - [Outbound export bundles](#outbound-export-bundles)
 - [Link hygiene](#link-hygiene)
+- [CLI feature catalog](#cli-feature-catalog)
 - [Installed vs checkout CLI](#installed-vs-checkout-cli)
 - [Examples from agent sessions](#examples-from-agent-sessions)
 - [Development worktrees](#development-worktrees)
@@ -681,6 +682,28 @@ wiki/Markdown links and embeds, autolinks, inline/fenced code, backslash-escaped
 examples, and embedded word/path forms stay byte-for-byte unchanged. See
 `skills/oaw/references/links-and-relations.md` for the full command reference
 and parser semantics.
+
+## CLI feature catalog
+
+[The generated CLI feature catalog](docs/oaw-cli-feature-catalog.md) is the
+implementation-oriented command matrix. It walks the live Typer tree for command
+hierarchy, help, parameters, choices, and deprecation state, then joins the
+completeness-checked ownership and mutation annotations in `oaw.catalog`.
+
+Refresh and verify it with:
+
+```bash
+uv run python scripts/generate_cli_catalog.py
+uv run python scripts/generate_cli_catalog.py --check
+```
+
+`mise run catalog-check` runs the `--check` mode and is part of the aggregate
+`mise run check` gate, so a stale committed catalog fails CI. The generated note
+is Obsidian-compatible but remains a repository artifact; these commands do not
+write it into a vault. Update the semantic annotations in `oaw.catalog` whenever
+a command's implementation owner or mutation boundary changes. The catalog test
+suite fails when a live leaf command lacks metadata or the committed output is
+stale.
 
 ## Installed vs checkout CLI
 

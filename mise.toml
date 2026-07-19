@@ -30,6 +30,10 @@ run = "uv run python scripts/check_publication_boundary.py"
 description = "Run ShellCheck on maintained shell scripts"
 run = "shellcheck scripts/*.sh"
 
+[tasks.catalog-check]
+description = "Check the generated CLI feature catalog is current"
+run = "uv run python scripts/generate_cli_catalog.py --check"
+
 [tasks.hooks-install]
 description = "Install Prek-managed Git hooks"
 run = "prek install -f"
@@ -46,5 +50,6 @@ run = [
     { task = "typecheck" },
     { task = "publication-check" },
     { task = "shellcheck" },
+    { task = "catalog-check" },
     { task = "test" },
 ]
