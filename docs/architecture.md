@@ -137,7 +137,7 @@ All dev-only, via `[dependency-groups] dev` (uv-managed):
 - **ruff**: lint + format (`[tool.ruff]`, line-length 100, rules `E,F,W,I,UP,B,SIM`;
   format replaces manual style policing in review).
 - **pyrefly**: type checking (`[tool.pyrefly]`, `project-includes = ["src", "tests"]`,
-  `python-version = "3.10"` to match `requires-python`). The codebase already
+  `python-version = "3.13"` to match `requires-python`). The codebase already
   carries useful hints; the checker makes them load-bearing.
 - **pyinstrument** (already added): performance regression profiling.
 - CI (GitHub Actions): `ruff check` + `ruff format --check` + `pyrefly check`
