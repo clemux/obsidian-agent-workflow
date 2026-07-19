@@ -34,7 +34,7 @@ def _timestamp(value: object) -> dt.datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        parsed = parsed.replace(tzinfo=dt.UTC)
     return parsed
 
 
@@ -117,7 +117,7 @@ def codex_rollout_metrics(path: Path) -> SessionMetrics:
 def format_timestamp(value: dt.datetime | None) -> str:
     if value is None:
         return "unavailable"
-    return value.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    return value.astimezone(dt.UTC).isoformat().replace("+00:00", "Z")
 
 
 def format_duration(value: dt.timedelta | None) -> str:

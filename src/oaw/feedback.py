@@ -6,7 +6,7 @@ import datetime as dt
 import json
 import re
 import unicodedata
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import TextIO
 
@@ -17,7 +17,7 @@ from .sessions import detect_session
 from .tags import creation_tag_block
 
 
-class FeedbackType(str, Enum):
+class FeedbackType(StrEnum):
     PAIN = "pain"
     VERIFIED = "verified"
     IDEA = "idea"

@@ -258,7 +258,7 @@ def sha256_file(path: Path) -> str:
 
 
 def copy_snapshot_files(dest_root: Path, copies: list[SnapshotCopy]) -> list[dict[str, object]]:
-    copied_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+    copied_at = dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
     entries: list[dict[str, object]] = []
     for item in copies:
         destination = dest_root / item.destination
@@ -317,7 +317,7 @@ def write_snapshot_manifest(
     manifest = {
         "schema": "oaw-session-snapshot-v1",
         "session_id": session_id,
-        "generated_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+        "generated_at": dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat(),
         "snapshot": {
             "date": date,
             "slug": slug,

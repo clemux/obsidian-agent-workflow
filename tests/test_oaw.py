@@ -4107,7 +4107,7 @@ aliases:
         self.assertFalse(board_path.exists())
 
     def test_task_create_writes_timezone_aware_iso8601_created_timestamp(self):
-        before = dt.datetime.now(dt.timezone.utc)
+        before = dt.datetime.now(dt.UTC)
         proc = self.run_oaw(
             "task",
             "create",
@@ -4116,7 +4116,7 @@ aliases:
             "--title",
             "Timestamped task",
         )
-        after = dt.datetime.now(dt.timezone.utc)
+        after = dt.datetime.now(dt.UTC)
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
         note = (

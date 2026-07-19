@@ -698,7 +698,7 @@ def create_task(
     if path.exists():
         raise OawError(f"task note already exists: {relpath.as_posix()}")
     today = dt.date.today().isoformat()
-    created = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+    created = dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
     project_slug = _slugify(project_root.name)
     task_status = "active" if start else status
     task_execution = execution or ("agent" if start else None)

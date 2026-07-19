@@ -143,7 +143,7 @@ def write_export_bundle(
         manifest = {
             "schema": "oaw-safe-export-v1",
             "target": target,
-            "exported_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+            "exported_at": dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat(),
             "source": {
                 "id": match.note_id,
                 "path": match.relpath,

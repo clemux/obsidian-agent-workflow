@@ -18,7 +18,7 @@ def test_run_id_is_deterministic_and_session_scoped():
 
 
 def test_stale_boundary_is_strictly_more_than_24_hours(tmp_path: Path):
-    now = dt.datetime(2026, 7, 12, 12, tzinfo=dt.timezone.utc)
+    now = dt.datetime(2026, 7, 12, 12, tzinfo=dt.UTC)
     run = Run(tmp_path / "run.md", {"last_event_at": "2026-07-11T12:00:00Z"}, "")
     assert not is_stale(run, now)
     assert is_stale(run, now + dt.timedelta(seconds=1))
