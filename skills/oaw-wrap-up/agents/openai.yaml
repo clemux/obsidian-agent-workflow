@@ -1,0 +1,4 @@
+interface:
+  display_name: "OAW Wrap-up"
+  short_description: "Urgent and standard OAW session closure"
+  default_prompt: "Use $oaw-wrap-up to close this session: inventory runs and worktrees, record lifecycle state and resume instructions, and leave a closure receipt."
