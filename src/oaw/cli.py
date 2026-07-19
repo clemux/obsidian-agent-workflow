@@ -446,7 +446,9 @@ def resolve(
 
 @app.command("list", help="list project notes")
 def list_notes(
-    project: Annotated[str, typer.Option("--project", help="project name under Projects/.")],
+    project: Annotated[
+        str, typer.Option("--project", help="project alias or folder name under Projects/")
+    ],
     note_type: Annotated[
         str, typer.Option("--type", help="frontmatter type to list, default: task")
     ] = "task",

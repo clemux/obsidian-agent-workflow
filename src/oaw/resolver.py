@@ -588,9 +588,7 @@ def list_project(
     """List project notes for the stable list subcommand."""
     columns = resolve_list_fields(fields, goal)
     want_goal = "goal" in columns
-    project_root = root / "Projects" / project
-    if not project_root.exists():
-        raise OawError(f"project not found: {project_root}")
+    project_root, _ = resolve_project_root(project, root)
     if note_type == "task":
         tasks = project_root / "Tasks"
         if not tasks.exists():

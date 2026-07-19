@@ -220,7 +220,7 @@ Short uppercase project aliases such as `obs:CDX` resolve to a matching `Project
 
 ## Listing notes
 
-`oaw list` lists project notes by frontmatter type. Task listing is the default; capture listing hides `status: archived` notes unless explicitly requested:
+`oaw list` lists project notes by frontmatter type. `--project` accepts a project alias (`obs:OAW` or `OAW`) or the `Projects/` folder name. Task listing is the default; capture listing hides `status: archived` notes unless explicitly requested:
 
 ```bash
 oaw list --project Fable

@@ -90,7 +90,7 @@ oaw list --project "Obsidian Agent Workflow"   # tab-separated: id, status, titl
 oaw list --project "Obsidian Agent Workflow" --status active
 ```
 
-The project name is the folder name under `Projects/` in the vault. `task` is the default note type.
+`--project` accepts a project alias (with or without the `obs:` prefix) or the folder name under `Projects/` in the vault. `task` is the default note type.
 
 To build a priority-ranked, goal-annotated view of a project's tasks, use the
 list command's own sort and projection instead of a shell loop over each note's
