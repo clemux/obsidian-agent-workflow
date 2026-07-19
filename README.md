@@ -308,6 +308,8 @@ Lifecycle commands update task frontmatter and append an `## Agent sessions` tra
 
 Tasks may declare `execution: human`, `agent`, or `hybrid`. An absent value becomes `agent` only when `start` begins a run. Human tasks remain UI-managed and reject agent lifecycle transitions. `start`, `pause`, `review`, and `complete` require a real harness session ID and do not offer `--allow-missing-session-id`; `backlog`, `promote`, `task note`, `task priority`, `task preparedness`, and task-relation mutations retain the explicit missing-ID trace path. With a real ID, session-writing commands append it as a quoted string to a deduplicated `session-ids` block list while preserving existing entries, comments, and any legacy scalar `session-id`.
 
+For `backlog`, `promote`, `start`, `pause`, `review`, `complete`, and `task note`, provide exactly one Markdown source: `--note` or `--note-file`. `--note-file -` reads standard input. This avoids shell interpolation when the note contains backticks, dollar signs, quotes, or multiple lines. `task create` keeps its problem statement optional, but when supplied accepts exactly one of those same sources.
+
 ### Session phase titles
 
 The OAW skill also keeps the owning agent session recognizable as
@@ -552,7 +554,13 @@ oaw note observe CDX-RES-routing-evidence \
   --section "Observations" \
   --title "Wrap-up format gap" \
   --body "The evidence note needs a mechanical append path."
+oaw note observe CDX-RES-routing-evidence \
+  --title "Shell-safe evidence" \
+  --body-file /path/to/observation.md
+oaw task start OAW-TSK-cli --note-file - < /path/to/session-note.md
 ```
+
+`note observe` accepts exactly one of `--body` or `--body-file`; `--body-file -` reads standard input. File and standard-input content is read as UTF-8 and is passed through unchanged before the command's existing note-formatting rules apply. Empty or unreadable sources fail without changing the target note.
 
 Create retrospective drafts from a stable template:
 
