@@ -44,7 +44,3 @@ search-path = ["."]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-m 'not perf'"
-markers = [
-    "perf: opt-in resolver performance regression checks",
-]

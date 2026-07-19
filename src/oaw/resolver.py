@@ -72,49 +72,6 @@ def iter_markdown(root: Path):
                 yield directory / filename
 
 
-def match_frontmatter(
-    path: Path, root: Path, frontmatter: str, body: str, target: str
-) -> NoteMatch | None:
-    data = parse_frontmatter(frontmatter)
-    note_id = data.get("id")
-    aliases = data.get("aliases", [])
-    if isinstance(note_id, str) and note_id == target:
-        matched_by = "id"
-    elif isinstance(aliases, list) and target in aliases:
-        matched_by = "aliases"
-    else:
-        return None
-    return NoteMatch(
-        path=path,
-        relpath=path.relative_to(root).as_posix(),
-        note_id=note_id if isinstance(note_id, str) else None,
-        matched_by=matched_by,
-        title=title_from_body(path, body),
-        frontmatter_text=frontmatter.rstrip(),
-        frontmatter=data,
-    )
-
-
-def note_match_unoptimized(path: Path, root: Path, target: str) -> NoteMatch | None:
-    """Original extraction baseline: parse every complete note before matching."""
-    try:
-        _, frontmatter, body = split_note(path.read_text(encoding="utf-8"))
-    except UnicodeDecodeError:
-        return None
-    return match_frontmatter(path, root, frontmatter, body, target)
-
-
-def note_match_raw_prefilter(path: Path, root: Path, target: str) -> NoteMatch | None:
-    """Avoid parsing unrelated notes, while retaining the original full-file reads."""
-    try:
-        _, frontmatter, body = split_note(path.read_text(encoding="utf-8"))
-    except UnicodeDecodeError:
-        return None
-    if not frontmatter_may_match(frontmatter, target):
-        return None
-    return match_frontmatter(path, root, frontmatter, body, target)
-
-
 def note_match(path: Path, root: Path, target: str) -> NoteMatch | None:
     """Use frontmatter-only reads before parsing and read a body only for a match."""
     try:
@@ -258,14 +215,6 @@ def resolve_with_matcher(raw_id: str, root: Path, matcher) -> NoteMatch:
 
 def resolve_id(raw_id: str, root: Path) -> NoteMatch:
     return resolve_with_matcher(raw_id, root, note_match)
-
-
-def resolve_id_unoptimized(raw_id: str, root: Path) -> NoteMatch:
-    return resolve_with_matcher(raw_id, root, note_match_unoptimized)
-
-
-def resolve_id_raw_prefilter(raw_id: str, root: Path) -> NoteMatch:
-    return resolve_with_matcher(raw_id, root, note_match_raw_prefilter)
 
 
 def project_alias_matches(target: str, root: Path, matcher=note_match) -> list[NoteMatch]:
