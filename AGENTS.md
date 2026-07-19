@@ -11,6 +11,7 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 - `skills/oaw-task-execution/` provides safe repository execution for OAW-owned tasks.
 - `skills/oaw-task-review/` provides the interactive project-task status review workflow.
 - `skills/oaw-research/` provides provider handoff and report-intake workflow plus tests.
+- `skills/oaw-retro-backend/` adapts the shared `retro` skill's follow-up and note persistence to the vault.
 - Each skill's `agents/openai.yaml` contains OpenAI display metadata.
 - `README.md` is the user-facing overview and install guide.
 
