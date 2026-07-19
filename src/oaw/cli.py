@@ -44,11 +44,11 @@ from .resolver import list_project, notes_containing_literal, output_resolve, re
 from .retro import create_retrospective, update_note_observation
 from .sessions import (
     default_claude_projects_root,
-    default_codex_sessions_root,
+    default_codex_session_roots,
     default_plugin_data_root,
     session_lookup,
     session_lookup_claude_root,
-    session_lookup_codex_root,
+    session_lookup_codex_roots,
 )
 from .snapshot import session_snapshot
 
@@ -957,7 +957,7 @@ def session_lookup_command(
             ],
             clean_session_id,
             verbose,
-            codex_root if codex_root is not None else session_lookup_codex_root(),
+            (codex_root,) if codex_root is not None else session_lookup_codex_roots(),
             claude_root if claude_root is not None else session_lookup_claude_root(),
         )
 
@@ -998,7 +998,7 @@ def session_snapshot_command(
             grep,
             output_root,
             claude_root if claude_root is not None else default_claude_projects_root(),
-            codex_root if codex_root is not None else default_codex_sessions_root(),
+            (codex_root,) if codex_root is not None else default_codex_session_roots(),
             plugin_data_root if plugin_data_root is not None else default_plugin_data_root(),
         )
 

@@ -3407,6 +3407,77 @@ lookup-duplicate-session
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn(f"- codex-rollout: {rollout}", proc.stdout)
 
+    def test_session_lookup_default_finds_archived_codex_rollout(self):
+        session_id = "019f5001-0000-7111-8222-b15aa4c27782"
+        codex_home = self.vault / "harness/codex"
+        archived = (
+            codex_home / "archived_sessions" / f"rollout-2026-07-11T10-00-00-{session_id}.jsonl"
+        )
+        archived.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(FIXTURES / "session_lookup/codex-complete.jsonl", archived)
+
+        proc = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+            env={"CODEX_HOME": str(codex_home)},
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"- codex-rollout: {archived}", proc.stdout)
+
+        explicit_override = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--codex-root",
+            str(codex_home / "sessions"),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+            env={"CODEX_HOME": str(codex_home)},
+        )
+        env_override = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+            env={
+                "CODEX_HOME": str(codex_home),
+                "OAW_CODEX_SESSIONS_ROOT": str(codex_home / "sessions"),
+            },
+        )
+        for overridden in (explicit_override, env_override):
+            self.assertEqual(overridden.returncode, 0, overridden.stderr)
+            self.assertIn("Status: not logged", overridden.stdout)
+            self.assertNotIn(str(archived), overridden.stdout)
+
+    def test_session_lookup_prefers_active_duplicate_rollout(self):
+        session_id = "019f5004-3333-7444-8555-e48cc7f6bb15"
+        codex_home = self.vault / "harness/codex"
+        filename = f"rollout-2026-07-11T11-00-00-{session_id}.jsonl"
+        active = codex_home / "sessions/2026/07/11" / filename
+        archived = codex_home / "archived_sessions" / filename
+        write(active, '{"type":"session_meta","cwd":"/active"}\n')
+        write(archived, '{"type":"session_meta","cwd":"/archived"}\n')
+
+        proc = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+            env={"CODEX_HOME": str(codex_home)},
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"- codex-rollout: {active}", proc.stdout)
+        self.assertIn("cwd: /active", proc.stdout)
+        self.assertNotIn(str(archived), proc.stdout)
+        self.assertEqual(proc.stdout.count("- codex-rollout:"), 1)
+
     def test_link_check_and_list_handle_escaped_pipe_in_table(self):
         write(
             self.vault / "Projects/Obsidian Agent Workflow/Tasks/Linked task.md",
@@ -3882,6 +3953,104 @@ aliases:
         ]
         self.assertTrue(all(entry["completeness"] == "partial" for entry in codex_entries))
         self.assertIn("Transcript: partial", proc.stdout)
+
+    def test_session_snapshot_default_discovers_archived_codex_lineage(self):
+        thread_id = "019f5001-0000-7111-8222-b15aa4c27782"
+        child_thread = "019f5002-1111-7222-8333-c26aa5d38893"
+        grandchild_thread = "019f5003-2222-7333-8444-d37bb6e49904"
+        codex_home = self.vault / "harness/codex"
+        output_root = self.vault / "attachments"
+        parent = codex_home / "archived_sessions" / f"rollout-2026-07-11T10-00-00-{thread_id}.jsonl"
+        child = (
+            codex_home / "sessions/2026/07/11" / f"rollout-2026-07-11T10-05-00-{child_thread}.jsonl"
+        )
+        grandchild = (
+            codex_home
+            / "archived_sessions"
+            / f"rollout-2026-07-11T10-10-00-{grandchild_thread}.jsonl"
+        )
+        for destination, fixture in (
+            (parent, "codex-archived-parent.jsonl"),
+            (child, "codex-active-child.jsonl"),
+            (grandchild, "codex-archived-grandchild.jsonl"),
+        ):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(FIXTURES / "session_snapshot" / fixture, destination)
+
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            thread_id,
+            "--codex-only",
+            "--slug",
+            "archived lineage",
+            "--output-root",
+            str(output_root),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+            "--plugin-data-root",
+            str(self.vault / "missing-plugin"),
+            env={"CODEX_HOME": str(codex_home)},
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        snapshot = output_root / "2026-07-11-archived-lineage"
+        for rollout in (parent, child, grandchild):
+            self.assertTrue((snapshot / "codex" / rollout.name).is_file())
+        manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
+        sources = {entry["source"] for entry in manifest["files"]}
+        self.assertTrue({str(parent), str(child), str(grandchild)} <= sources)
+
+        overridden = self.run_oaw(
+            "session",
+            "snapshot",
+            thread_id,
+            "--codex-only",
+            "--output-root",
+            str(self.vault / "override-attachments"),
+            env={
+                "CODEX_HOME": str(codex_home),
+                "OAW_CODEX_SESSIONS_ROOT": str(codex_home / "sessions"),
+            },
+        )
+        self.assertEqual(overridden.returncode, 1)
+        self.assertIn(f"Codex rollout not found for thread {thread_id}", overridden.stderr)
+
+    def test_session_snapshot_prefers_active_duplicate_rollout(self):
+        thread_id = "019f5004-3333-7444-8555-e48cc7f6bb15"
+        codex_home = self.vault / "harness/codex"
+        filename = f"rollout-2026-07-11T11-00-00-{thread_id}.jsonl"
+        active = codex_home / "sessions/2026/07/11" / filename
+        archived = codex_home / "archived_sessions" / filename
+        write(active, '{"timestamp":"2026-07-11T11:00:00.000Z","content":"active winner"}\n')
+        write(
+            archived,
+            '{"timestamp":"2026-07-11T11:00:00.000Z","content":"archived duplicate"}\n',
+        )
+        output_root = self.vault / "attachments"
+
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            thread_id,
+            "--codex-only",
+            "--slug",
+            "active precedence",
+            "--output-root",
+            str(output_root),
+            env={"CODEX_HOME": str(codex_home)},
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        snapshot = output_root / "2026-07-11-active-precedence"
+        copied = snapshot / "codex" / filename
+        self.assertIn("active winner", copied.read_text(encoding="utf-8"))
+        manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
+        sources = [
+            entry["source"] for entry in manifest["files"] if entry["category"] == "codex-rollout"
+        ]
+        self.assertEqual(sources, [str(active)])
+        self.assertNotIn(str(archived), sources)
 
     def test_session_snapshot_codex_only_requires_the_primary_rollout(self):
         thread_id = "019f48d7-39c2-7043-9c19-5a3565995898"

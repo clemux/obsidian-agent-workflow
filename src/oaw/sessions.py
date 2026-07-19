@@ -27,17 +27,31 @@ class SessionArtifact:
     path: Path
 
 
+def codex_rollout_paths(codex_roots: Sequence[Path], pattern: str) -> list[Path]:
+    """Return deterministic rollout matches, preferring earlier roots by filename."""
+    matches: list[Path] = []
+    seen_names: set[str] = set()
+    for root in codex_roots:
+        root = root.expanduser()
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob(pattern)):
+            if not path.is_file() or path.name in seen_names:
+                continue
+            seen_names.add(path.name)
+            matches.append(path)
+    return matches
+
+
 def find_session_artifacts(
     session_id: str,
-    codex_root: Path,
+    codex_roots: Sequence[Path],
     claude_root: Path,
 ) -> list[SessionArtifact]:
     artifacts: list[SessionArtifact] = []
     escaped_id = glob.escape(session_id)
-    if codex_root.exists():
-        for path in sorted(codex_root.rglob(f"rollout-*-{escaped_id}.jsonl")):
-            if path.is_file():
-                artifacts.append(SessionArtifact("codex-rollout", path))
+    for path in codex_rollout_paths(codex_roots, f"rollout-*-{escaped_id}.jsonl"):
+        artifacts.append(SessionArtifact("codex-rollout", path))
     if claude_root.exists():
         for path in sorted(claude_root.rglob(f"{escaped_id}.jsonl")):
             if path.is_file():
@@ -157,7 +171,7 @@ def session_lookup(
     note_hits: Sequence[tuple[str, str | None]],
     session_id: str,
     verbose: bool,
-    codex_root: Path,
+    codex_roots: Sequence[Path],
     claude_root: Path,
 ) -> None:
     session_id = session_id.strip()
@@ -178,7 +192,7 @@ def session_lookup(
 
     artifacts = find_session_artifacts(
         session_id,
-        codex_root.expanduser(),
+        codex_roots,
         claude_root.expanduser(),
     )
     print(f"Session: {session_id}")
@@ -241,11 +255,21 @@ def default_claude_projects_root() -> Path:
 
 
 def default_codex_sessions_root() -> Path:
-    return Path(os.environ.get("OAW_CODEX_SESSIONS_ROOT", "~/.codex/sessions")).expanduser()
+    """Return the active root retained for callers that require one path."""
+    return default_codex_session_roots()[0]
 
 
-def session_lookup_codex_root() -> Path:
-    return default_codex_sessions_root()
+def default_codex_session_roots() -> tuple[Path, ...]:
+    """Return the configured corpus, with active sessions before archived sessions."""
+    override = os.environ.get("OAW_CODEX_SESSIONS_ROOT")
+    if override is not None:
+        return (Path(override).expanduser(),)
+    codex_home = Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
+    return (codex_home / "sessions", codex_home / "archived_sessions")
+
+
+def session_lookup_codex_roots() -> tuple[Path, ...]:
+    return default_codex_session_roots()
 
 
 def session_lookup_claude_root() -> Path:

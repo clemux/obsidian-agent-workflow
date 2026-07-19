@@ -9,11 +9,12 @@ import os
 import re
 import shutil
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import OawError
-from .sessions import SESSION_ENV
+from .sessions import SESSION_ENV, codex_rollout_paths
 
 RETRO_ATTACHMENTS = Path("Agents/Retrospectives/attachments")
 
@@ -162,34 +163,37 @@ def find_extra_claude_parents(
 
 
 def find_codex_rollouts(
-    codex_root: Path,
+    codex_roots: Sequence[Path],
     transcript: str,
     explicit_threads: list[str],
     explicit_rollouts: list[str],
     grep_patterns: list[str],
 ) -> list[Path]:
-    if not codex_root.exists():
+    if not any(root.exists() for root in codex_roots):
         return []
-    matches: set[Path] = set()
+    matches: dict[str, Path] = {}
     for rollout in explicit_rollouts:
         value = rollout.strip()
         if not value:
             continue
         candidate = Path(value).expanduser()
-        rollout_matches = [candidate] if candidate.is_file() else sorted(codex_root.rglob(value))
+        rollout_matches = (
+            [candidate] if candidate.is_file() else codex_rollout_paths(codex_roots, value)
+        )
         if not rollout_matches:
             raise OawError(f"Codex rollout not found: {value}")
         if len(rollout_matches) > 1:
             paths = "\n".join(f"  {path}" for path in rollout_matches)
             raise OawError(f"Codex rollout '{value}' is not unique:\n{paths}")
-        matches.add(rollout_matches[0])
+        matches.setdefault(rollout_matches[0].name, rollout_matches[0])
     for thread_id in referenced_codex_threads(transcript, explicit_threads):
-        matches.update(codex_root.rglob(f"*{thread_id}*.jsonl"))
+        for path in codex_rollout_paths(codex_roots, f"*{thread_id}*.jsonl"):
+            matches.setdefault(path.name, path)
     for pattern in grep_patterns:
         if not pattern:
             continue
         pattern_matches: list[Path] = []
-        for path in iter_files(codex_root, (".jsonl",)):
+        for path in codex_rollout_paths(codex_roots, "*.jsonl"):
             try:
                 if pattern in read_text_lossy(path):
                     pattern_matches.append(path)
@@ -201,12 +205,13 @@ def find_codex_rollouts(
                 f"--grep {pattern!r} matched multiple Codex rollouts; "
                 f"rerun with --codex-thread or an exact rollout filename:\n{paths}"
             )
-        matches.update(pattern_matches)
-    return sorted(matches)
+        for path in pattern_matches:
+            matches.setdefault(path.name, path)
+    return sorted(matches.values())
 
 
 def discover_codex_rollouts(
-    codex_root: Path,
+    codex_roots: Sequence[Path],
     scan_paths: list[Path],
     seed_rollouts: list[Path],
     explicit_threads: list[str],
@@ -214,22 +219,20 @@ def discover_codex_rollouts(
     grep_patterns: list[str],
 ) -> tuple[list[Path], str]:
     """Expand referenced Codex rollouts until no new lineage is discovered."""
-    discovered = set(seed_rollouts)
+    discovered = {path.name: path for path in seed_rollouts}
     while True:
-        text = transcript_text([*scan_paths, *sorted(discovered)])
-        matches = set(
-            find_codex_rollouts(
-                codex_root,
-                text,
-                explicit_threads,
-                explicit_rollouts,
-                grep_patterns,
-            )
+        text = transcript_text([*scan_paths, *sorted(discovered.values())])
+        matches = find_codex_rollouts(
+            codex_roots,
+            text,
+            explicit_threads,
+            explicit_rollouts,
+            grep_patterns,
         )
-        new_matches = matches - discovered
+        new_matches = [path for path in matches if path.name not in discovered]
         if not new_matches:
-            return sorted(discovered), text
-        discovered.update(new_matches)
+            return sorted(discovered.values()), text
+        discovered.update((path.name, path) for path in new_matches)
 
 
 def referenced_plugin_jobs(text: str) -> set[str]:
@@ -347,12 +350,13 @@ def session_snapshot(
     grep_patterns: list[str] | None,
     output_root: Path | None,
     claude_root: Path,
-    codex_root: Path,
+    codex_roots: Sequence[Path],
     plugin_data_root: Path,
 ) -> None:
     session_id = session_id.strip()
     if not session_id:
         raise OawError("empty session ID")
+    codex_roots = tuple(root.expanduser() for root in codex_roots)
     parent = None if codex_only else find_claude_parent(session_id, claude_root.expanduser())
     explicit_threads = codex_threads or []
     primary_codex_rollouts: list[Path] = []
@@ -364,15 +368,13 @@ def session_snapshot(
         ):
             raise OawError("--codex-only requires a full Codex thread UUID")
         session_id = session_id.lower()
-        primary_codex_rollouts = find_codex_rollouts(
-            codex_root.expanduser(), "", [session_id], [], []
-        )
+        primary_codex_rollouts = find_codex_rollouts(codex_roots, "", [session_id], [], [])
         if not primary_codex_rollouts:
             raise OawError(f"Codex rollout not found for thread {session_id}")
         explicit_threads = [session_id, *explicit_threads]
     explicit_rollouts = codex_rollout_values or []
     codex_rollouts: list[Path] = find_codex_rollouts(
-        codex_root.expanduser(),
+        codex_roots,
         "",
         explicit_threads,
         explicit_rollouts,
@@ -421,7 +423,7 @@ def session_snapshot(
         *(copy.source for copy in workflow_scripts),
     ]
     codex_rollouts, text = discover_codex_rollouts(
-        codex_root.expanduser(),
+        codex_roots,
         scan_paths,
         codex_rollouts,
         explicit_threads,
@@ -438,7 +440,7 @@ def session_snapshot(
     if extra_claude_parents:
         scan_paths.extend(extra_claude_parents)
         codex_rollouts, text = discover_codex_rollouts(
-            codex_root.expanduser(),
+            codex_roots,
             scan_paths,
             codex_rollouts,
             explicit_threads,
