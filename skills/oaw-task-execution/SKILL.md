@@ -37,6 +37,13 @@ untrusted hooks, or any ambiguous state as a confirmation gate. Report the exact
 condition and wait for explicit user direction before creating a worktree or editing
 repository files. Do not stash, reset, fetch, repair, or silently choose another base.
 
+Classify the primary branch against its current local upstream-tracking ref without
+fetching. Being ahead only is allowed: record the unpushed commit count and remind the
+user at handoff that those changes remain local. Being behind or diverged is a preflight
+failure that requires user evaluation before work continues. Treat a missing or
+ambiguous upstream as the same confirmation gate. Never fetch or push autonomously, and
+state when the comparison has not been refreshed from the remote.
+
 After the checkout and base are confirmed, run every repository-configured baseline
 check from the main checkout before worktree creation. If a check fails, is unavailable,
 or has unclear coverage, report the evidence and wait for explicit user direction.

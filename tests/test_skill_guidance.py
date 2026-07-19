@@ -121,6 +121,18 @@ def test_task_execution_preflight_gates_worktree_creation():
     assert "Do not silently\nfall back to plain `git worktree` or direct edits" in skill
 
 
+def test_task_execution_classifies_upstream_tracking_state():
+    skill = read(TASK_EXECUTION_SKILL)
+
+    assert "against its current local upstream-tracking ref without\nfetching" in skill
+    assert "Being ahead only is allowed" in skill
+    assert "remind the\nuser at handoff that those changes remain local" in skill
+    assert "Being behind or diverged is a preflight\nfailure" in skill
+    assert "Treat a missing or\nambiguous upstream as the same confirmation gate" in skill
+    assert "Never fetch or push autonomously" in skill
+    assert "comparison has not been refreshed from the remote" in skill
+
+
 def test_task_execution_keeps_parent_accountable_and_delegation_optional():
     skill = read(TASK_EXECUTION_SKILL)
 
