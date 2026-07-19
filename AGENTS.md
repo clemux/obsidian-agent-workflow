@@ -4,8 +4,10 @@
 
 This repository provides the `oaw` local CLI and its agent skill metadata:
 
-- `bin/oaw` contains the executable Python CLI for resolving Obsidian IDs and updating task lifecycle state.
-- `tests/test_oaw.py` contains the `unittest` coverage for resolver behavior, duplicate handling, and lifecycle writes.
+- `src/oaw/` contains the CLI implementation as domain modules (`resolver.py`, `notes.py`, `lifecycle.py`, `frontmatter.py`, `cli.py`, ...) for resolving Obsidian IDs and updating task lifecycle state.
+- `bin/oaw` is a thin launcher that runs the checkout copy of `src/oaw/` without installing it.
+- `tests/` holds the pytest suite: per-module files such as `tests/test_resolver.py` and `tests/test_notes.py`, CLI-level coverage in `tests/test_oaw.py`, and command-contract coverage in `tests/test_typer_cli.py`.
+- `docs/architecture.md` records the package-layout rationale; `docs/claude-code.md` documents the Claude Code session-title hook shipped in `scripts/`.
 - `skills/oaw/` documents the agent-facing workflow for using the CLI.
 - `skills/obsidian-capture/` preserves side observations in the vault capture workflow.
 - `skills/oaw-task-execution/` provides safe repository execution for OAW-owned tasks.
@@ -15,7 +17,7 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 - Each skill's `agents/openai.yaml` contains OpenAI display metadata.
 - `README.md` is the user-facing overview and install guide.
 
-Keep small workflow changes close to `bin/oaw` and mirror behavior changes in tests and docs. Update the CLI, `tests/test_oaw.py`, `README.md`, and `skills/oaw/SKILL.md` together so agent-facing behavior does not drift from implementation.
+Keep small workflow changes close to the owning module in `src/oaw/` and mirror behavior changes in tests and docs. Update the CLI, its tests, `README.md`, and `skills/oaw/SKILL.md` together so agent-facing behavior does not drift from implementation.
 
 ## Skill Ownership Boundary
 
@@ -46,7 +48,7 @@ snapshot against the checkout's help surfaces and source bytes.
 - `mise run hooks-install` installs the Prek-managed pre-commit and pre-push shims;
   `mise run hooks-check` runs every configured hook against all files.
 - `uv run pytest` runs the full test suite.
-- `uv run pytest tests/test_oaw.py` runs only the current CLI tests.
+- `uv run pytest tests/test_oaw.py` runs only the CLI-level tests.
 - `uv run pytest tests/test_typer_cli.py tests/test_cli_parity.py` runs focused
   native Typer contracts and the installed-vs-checkout staleness check tests.
 - `uv run python bin/oaw --help` shows top-level CLI commands.
@@ -80,7 +82,7 @@ Prefer `pathlib.Path`, UTF-8 file reads/writes, and `json.dumps` for machine-rea
 
 ## Testing Guidelines
 
-Tests use `unittest` and temporary vault fixtures via `tempfile.TemporaryDirectory`. Name new tests `test_<behavior>` and verify return codes plus important stdout/stderr text. For lifecycle changes, assert task-note and agent-run contents, not only command success. Retired legacy board fixtures may be used only to prove lifecycle commands leave them untouched.
+Tests are pytest-style: newer per-module suites use `tmp_path`, `monkeypatch`, and `pytest.mark.parametrize`, while `tests/test_oaw.py` keeps class-based tests with `tempfile.TemporaryDirectory` vault fixtures and the unittest-style assertion helpers in `tests/assertions.py`. Name new tests `test_<behavior>` and verify return codes plus important stdout/stderr text. For lifecycle changes, assert task-note and agent-run contents, not only command success. Retired legacy board fixtures may be used only to prove lifecycle commands leave them untouched.
 
 The package requires Python 3.13 or newer. Run `mise run check` before submitting
 changes. Use the individual Mise tasks or their underlying `uv run` commands for
