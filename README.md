@@ -93,18 +93,37 @@ Shared error, note-boundary, and hand-rolled frontmatter helpers live in
 `src/oaw/errors.py`, `src/oaw/notes.py`, and `src/oaw/frontmatter.py`; their
 direct unit tests run without a CLI subprocess or vault fixture.
 
-Run the complete local gate with:
+Bootstrap the exact repository-managed `uv` and `shellcheck` executables, then
+run the complete local gate with:
 
 ```bash
-ruff check
-ruff format --check
-pyrefly check
-python scripts/check_publication_boundary.py
-pytest
+mise install
+mise which uv
+mise which shellcheck
+mise run check
 ```
 
-GitHub Actions runs the same checks on pushes and pull requests. Tests
-continue to exercise the CLI through subprocesses and isolated temporary vaults.
+Mise does not pin Python. uv remains responsible for the virtual environment,
+Python discovery or installation, and all Python dependencies recorded in
+`uv.lock`; the package continues to support Python 3.10 and newer.
+
+Run individual gates for focused diagnosis:
+
+```bash
+mise run lint
+mise run format-check
+mise run typecheck
+mise run publication-check
+mise run shellcheck
+mise run test
+```
+
+These tasks use `uv run ruff check`, `uv run ruff format --check`,
+`uv run pyrefly check`, `uv run python scripts/check_publication_boundary.py`,
+the Mise-managed ShellCheck executable, and `uv run pytest`, respectively.
+GitHub Actions performs the same explicit `mise install` bootstrap and
+`mise run check` on pushes and pull requests. Tests continue to exercise the
+CLI through subprocesses and isolated temporary vaults.
 
 ### Publication boundary
 
@@ -922,4 +941,7 @@ Status: done
 This repo keeps `git gtr` worktrees under `.worktrees/` via `.gtrconfig`.
 That path is ignored by Git and stays inside the repository checkout, so
 sandboxed agents can use isolated worktrees without creating a sibling checkout
-outside the repo writable root.
+outside the repo writable root. The configuration also runs
+`mise trust --yes mise.toml` after creating a worktree. Review executable GTR
+configuration and run `git gtr trust` after cloning the repository or whenever
+the committed hook changes.

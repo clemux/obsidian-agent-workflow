@@ -38,6 +38,10 @@ snapshot against the checkout's help surfaces and source bytes.
 
 ## Build, Test, and Development Commands
 
+- `mise install` installs the exact repository-managed `uv` and `shellcheck` executables.
+- `mise run check` runs the complete verification suite and is the canonical preflight and final check.
+- `mise run test`, `mise run lint`, `mise run format-check`, `mise run typecheck`,
+  `mise run publication-check`, and `mise run shellcheck` run individual diagnostic gates.
 - `uv run pytest` runs the full test suite.
 - `uv run pytest tests/test_oaw.py` runs only the current CLI tests.
 - `uv run pytest tests/test_typer_cli.py tests/test_cli_parity.py` runs focused
@@ -75,7 +79,10 @@ Prefer `pathlib.Path`, UTF-8 file reads/writes, and `json.dumps` for machine-rea
 
 Tests use `unittest` and temporary vault fixtures via `tempfile.TemporaryDirectory`. Name new tests `test_<behavior>` and verify return codes plus important stdout/stderr text. For lifecycle changes, assert task-note and agent-run contents, not only command success. Retired legacy board fixtures may be used only to prove lifecycle commands leave them untouched.
 
-Run `uv run pytest` before submitting changes. Update tests whenever resolver matching, frontmatter parsing, lifecycle behavior, session detection, or CLI arguments change.
+Run `mise run check` before submitting changes. Use the individual Mise tasks or
+their underlying `uv run` commands for focused diagnosis. Update tests whenever
+resolver matching, frontmatter parsing, lifecycle behavior, session detection, or
+CLI arguments change.
 
 ## Commit & Pull Request Guidelines
 
