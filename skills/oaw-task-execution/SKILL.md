@@ -117,3 +117,47 @@ When implementation is ready, use the main `oaw` skill for `task review` or
 `task complete`, naming only checks actually run. Report the feature branch/worktree,
 implementation and review ownership decisions, verification, accepted exceptions, and
 remaining issues to the user. Keep external writes in the parent context.
+
+## 6. Clean up after integration
+
+Run cleanup only after the task commits are integrated into the intended local main
+branch and post-integration verification succeeds. A workflow that stops at review or a
+pull request is not integrated: retain its worktree and leave the exact resume path.
+
+Inventory every worktree owned by the task, not merely the current worktree. Establish
+ownership from the task's execution record and this session's repository/worktree
+inventory; never infer ownership from a similar branch name. For a task that touched
+multiple repositories, group the owned worktrees by repository and repeat the cleanup
+checks independently from each repository's main checkout, using that repository's
+intended main branch and GTR configuration. Include multiple task-owned worktrees in one
+repository when the task used them.
+
+For each task-owned worktree, record its repository, path, branch, and intended main
+branch, then verify all of the following from current local refs without fetching:
+
+```bash
+git -C <worktree-path> status --short --branch
+git -C <worktree-path> branch --show-current
+git -C <main-checkout> merge-base --is-ancestor <feature-branch> <intended-main>
+```
+
+The status must contain no tracked or untracked changes, the worktree must be on the
+expected named feature branch, and the ancestry command must exit zero. Tree equality,
+matching patches, or a successful squash merge is not proof that the feature branch is
+merged. A missing path or branch, detached HEAD, unexpected repository identity, or
+ambiguous intended main branch is a blocker rather than permission to guess.
+
+Remove a worktree that passes every check through GTR from its owning repository, then
+rerun `git gtr list` to verify removal:
+
+```bash
+git gtr rm <worktree-name> --yes
+git gtr list
+```
+
+Never pass `--force`. Do not pass `--delete-branch` or otherwise delete the retained
+feature branch unless the user separately authorizes branch deletion. If any precheck or
+removal fails, retain the worktree and report the exact blocking evidence: repository,
+path, branch, intended main, status output, failed ancestry result, or GTR error as
+applicable. Record removed and retained worktrees in the final task note and user handoff;
+do not describe the task workspace as cleaned when a task-owned worktree remains.

@@ -184,6 +184,39 @@ def test_task_execution_preserves_work_before_a_scope_pivot():
     )
 
 
+def test_task_execution_cleans_only_verified_integrated_worktrees():
+    skill = read(TASK_EXECUTION_SKILL)
+    cleanup = skill.split("## 6. Clean up after integration\n", 1)[1]
+
+    for command in (
+        "git -C <worktree-path> status --short --branch",
+        "git -C <worktree-path> branch --show-current",
+        "merge-base --is-ancestor <feature-branch> <intended-main>",
+        "git gtr rm <worktree-name> --yes",
+        "git gtr list",
+    ):
+        assert command in cleanup
+    assert "only after the task commits are integrated" in cleanup
+    assert "Tree equality" in cleanup
+    assert "Never pass `--force`" in cleanup
+    assert "Do not pass `--delete-branch`" in cleanup
+    assert "unless the user separately authorizes branch deletion" in cleanup
+    assert "retain the worktree and report the exact blocking evidence" in cleanup
+
+
+def test_task_execution_cleanup_inventories_single_and_cross_repository_work():
+    skill = read(TASK_EXECUTION_SKILL)
+    cleanup = skill.split("## 6. Clean up after integration\n", 1)[1]
+
+    assert "Inventory every worktree owned by the task" in cleanup
+    assert "never infer ownership from a similar branch name" in cleanup
+    assert "For a task that touched\nmultiple repositories" in cleanup
+    assert "repeat the cleanup\nchecks independently" in cleanup
+    assert "using that repository's\nintended main branch and GTR configuration" in cleanup
+    assert "Include multiple task-owned worktrees in one\nrepository" in cleanup
+    assert "Record removed and retained worktrees in the final task note" in cleanup
+
+
 def test_task_execution_metadata_uses_current_interface_schema():
     metadata = read(TASK_EXECUTION_METADATA)
 
