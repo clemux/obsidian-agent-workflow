@@ -161,10 +161,10 @@ Target:
    stable output lines that agents and skills rely on (`Updated:`/`Status:`,
    error phrasing). These focused native tests gate every
    extraction step.
-4. **Perf smoke** (optional, marked, excluded by default): resolve on a
-   generated 5k-note fixture, gated relative to a measured baseline on that
-   same fixture (see step 2), so scan regressions surface before hitting a
-   real vault.
+4. **Perf smoke** (retired): an opt-in marked test resolved against a
+   generated 5k-note fixture while the resolver extraction was underway. It
+   was removed once the extraction ladder finished — its thresholds were
+   machine-dependent and it pinned otherwise-dead resolver variants.
 5. **Reserved contract suites** (land with the reserved run seams, specified
    now so the seams stay honest): run-registry, run-lifecycle, and
    transaction/journal contract tests, independent of the CLI frontend — canonical
@@ -184,14 +184,11 @@ Each step: suite green, committed, behavior identical unless stated.
    `append_frontmatter_list_value`; add unit tests. Hand-rolled parser kept.
 2. **`resolver`**: move the scan/match code; then the performance ladder from
    `OAW-TSK-cli-performance` — frontmatter-layer pre-filter before parse,
-   frontmatter-only reads, single-resolve writes. Gate: first benchmark the
-   extracted-but-unoptimized resolver on the generated 5k-note fixture to
-   establish a measured baseline, then gate each ladder step relative to that
-   baseline (each step must improve or hold it; the final gate is a
-   fixed-percentage regression bound on the best measured result). The
-   real-vault figures (387 ms resolve over 6,189 notes, ~270 ms in
-   frontmatter parsing) remain observational data, not a threshold on the
-   fixture, since the workloads differ. Lifecycle writes must scan once.
+   frontmatter-only reads, single-resolve writes. (Completed; the opt-in
+   ladder test and the unoptimized baseline variants it compared against
+   were removed after the extraction finished.) The real-vault figures
+   (387 ms resolve over 6,189 notes, ~270 ms in frontmatter parsing) remain
+   observational data. Lifecycle writes must scan once.
 3. **`lifecycle`**: task create/transitions/notes on top of 1–2.
 4. **`sessions` + `snapshot`**, then **`links`**, **`exports`/`ingest`**,
    **`retro`**: mostly mechanical moves once the shared layers exist.
