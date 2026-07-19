@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .errors import OawError
 from .frontmatter import parse_frontmatter
-from .notes import append_markdown_block_to_section, fence_delimiter, read_note
+from .notes import append_markdown_block_to_section, fence_closes, fence_delimiter, read_note
 from .resolver import NoteMatch, iter_markdown, resolve_id, strip_obs_prefix, title_from_body
 
 
@@ -87,7 +87,7 @@ def parse_wikilinks(text: str) -> list[WikiLink]:
         if delimiter:
             if active_fence is None:
                 active_fence = delimiter
-            elif active_fence == delimiter:
+            elif fence_closes(active_fence, line):
                 active_fence = None
             offset += len(line)
             continue
