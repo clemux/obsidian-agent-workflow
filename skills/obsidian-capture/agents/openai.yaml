@@ -1,0 +1,4 @@
+interface:
+  display_name: "Obsidian Capture"
+  short_description: "Capture side observations into the vault."
+  default_prompt: "Use $obsidian-capture to park a side observation, improvement idea, or tangent in Captures/Entries without derailing the current task."

@@ -7,6 +7,7 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 - `bin/oaw` contains the executable Python CLI for resolving Obsidian IDs and updating task lifecycle state.
 - `tests/test_oaw.py` contains the `unittest` coverage for resolver behavior, duplicate handling, and lifecycle writes.
 - `skills/oaw/` documents the agent-facing workflow for using the CLI.
+- `skills/obsidian-capture/` preserves side observations in the vault capture workflow.
 - `skills/oaw-task-execution/` provides safe repository execution for OAW-owned tasks.
 - `skills/oaw-task-review/` provides the interactive project-task status review workflow.
 - `skills/oaw-research/` provides provider handoff and report-intake workflow plus tests.

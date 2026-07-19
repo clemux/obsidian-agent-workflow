@@ -8,6 +8,8 @@ README = ROOT / "README.md"
 TASK_REVIEW_SKILL = ROOT / "skills" / "oaw-task-review" / "SKILL.md"
 TASK_EXECUTION_SKILL = ROOT / "skills" / "oaw-task-execution" / "SKILL.md"
 TASK_EXECUTION_METADATA = ROOT / "skills" / "oaw-task-execution" / "agents" / "openai.yaml"
+CAPTURE_SKILL = ROOT / "skills" / "obsidian-capture" / "SKILL.md"
+CAPTURE_METADATA = ROOT / "skills" / "obsidian-capture" / "agents" / "openai.yaml"
 
 
 def read(path: Path) -> str:
@@ -75,6 +77,18 @@ def test_skill_metadata_uses_current_interface_schema():
     assert metadata.startswith("interface:\n")
     assert 'short_description: "Resolve Obsidian IDs and manage task/session workflow."' in metadata
     assert "Use $oaw" in metadata
+
+
+def test_obsidian_capture_skill_metadata_and_privacy_are_current():
+    skill = read(CAPTURE_SKILL)
+    metadata = read(CAPTURE_METADATA)
+
+    assert skill.startswith("---\nname: obsidian-capture\n")
+    assert 'vault="Vault Name"' in skill
+    assert "/home/" not in skill
+    assert metadata.startswith("interface:\n")
+    assert 'short_description: "Capture side observations into the vault."' in metadata
+    assert "Use $obsidian-capture" in metadata
 
 
 def test_task_guidance_keeps_lifecycle_preparedness_and_blockers_separate():
