@@ -5634,3 +5634,80 @@ Routing-regression evidence.
         self.assertFalse(
             (self.vault / "Projects/Obsidian Agent Workflow/Tasks/Must not be created.md").exists()
         )
+
+    def _write_canonical_capture(self, note_id: str, project_line: str) -> Path:
+        path = self.vault / "Captures/Entries" / f"{note_id}.md"
+        write(
+            path,
+            "---\n"
+            f"id: {note_id}\n"
+            "aliases:\n"
+            f"  - {note_id}\n"
+            "type: capture\n"
+            "created: 2026-07-19T10:00:00+00:00\n"
+            "status: inbox\n"
+            f"{project_line}\n"
+            "review_after:\n"
+            "destinations:\n"
+            "---\n"
+            "\n"
+            f"# {note_id}\n",
+        )
+        return path
+
+    def test_task_create_from_canonical_capture_metadata(self):
+        self._write_canonical_capture("OAW-CAP-canon", "project: obsidian-agent-workflow")
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--from-capture",
+            "OAW-CAP-canon",
+            "--title",
+            "Promoted canonical capture",
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        task_path = (
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Promoted canonical capture.md"
+        )
+        self.assertTrue(task_path.exists())
+        self.assertIn("Capture: OAW-CAP-canon -> triaged", proc.stdout)
+        capture = (self.vault / "Captures/Entries/OAW-CAP-canon.md").read_text(encoding="utf-8")
+        self.assertIn("status: triaged", capture)
+        self.assertIn(
+            "[[Projects/Obsidian Agent Workflow/Tasks/Promoted canonical capture"
+            "|OAW-TSK-promoted-canonical-capture]]",
+            capture,
+        )
+
+    def test_task_create_from_capture_project_conflict(self):
+        self._write_canonical_capture("OAW-CAP-conflict", "project: obsidian-agent-workflow")
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--from-capture",
+            "OAW-CAP-conflict",
+            "--project",
+            "obs:CDX",
+            "--title",
+            "Wrong project promotion",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("conflicts with the capture's project metadata", proc.stderr)
+        self.assertFalse(
+            (self.vault / "Projects/Codex Delegation/Tasks/Wrong project promotion.md").exists()
+        )
+        capture = (self.vault / "Captures/Entries/OAW-CAP-conflict.md").read_text(encoding="utf-8")
+        self.assertIn("status: inbox", capture)
+
+    def test_task_create_from_capture_no_metadata_outside_projects(self):
+        self._write_canonical_capture("OAW-CAP-orphan", "project:")
+        proc = self.run_oaw(
+            "task",
+            "create",
+            "--from-capture",
+            "OAW-CAP-orphan",
+            "--title",
+            "Orphan promotion",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("--project", proc.stderr)

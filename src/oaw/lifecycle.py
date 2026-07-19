@@ -662,6 +662,35 @@ def _slugify(value: str) -> str:
     return slug or "session"
 
 
+def _resolve_capture_project_metadata(value, root, references):
+    """Resolve a capture's ``project`` metadata to a project folder and alias.
+
+    The stored metadata is the folder slug (``_slugify`` of the folder name), so
+    an alias/folder lookup is tried first, then a slug match across project index
+    folders. An unresolvable or ambiguous value is a hard error.
+    """
+    try:
+        return resolve_project_root_from_references(value, root, references)
+    except OawError:
+        pass
+    folders = sorted(
+        {
+            parts[1]
+            for reference in references
+            if (parts := Path(reference.relpath).parts)
+            and len(parts) == 3
+            and parts[0] == "Projects"
+            and parts[2] == "Index.md"
+            and _slugify(parts[1]) == value
+        }
+    )
+    if len(folders) == 1:
+        return resolve_project_root_from_references(folders[0], root, references)
+    if len(folders) > 1:
+        raise OawError(f"capture project metadata '{value}' is ambiguous: {', '.join(folders)}")
+    raise OawError(f"capture project metadata does not resolve to a project: {value}")
+
+
 def _durable_wikilink(match: NoteMatch, label: str | None = None) -> str:
     display = (label or match.note_id or match.title).strip()
     target = Path(match.relpath).with_suffix("").as_posix()
@@ -703,18 +732,33 @@ def create_task(
         raise OawError("task create requires a non-empty --title")
     if "/" in clean_title or clean_title.startswith("."):
         raise OawError("task title must not contain '/' or start with '.'")
-    raw_project = project
-    if not raw_project and capture:
+    metadata_project: tuple[Path, str | None] | None = None
+    if capture:
+        raw_metadata = capture.frontmatter.get("project")
+        metadata_value = raw_metadata.strip() if isinstance(raw_metadata, str) else ""
+        if metadata_value:
+            metadata_project = _resolve_capture_project_metadata(metadata_value, root, references)
+    if project:
+        project_root, alias = resolve_project_root_from_references(project, root, references)
+        if metadata_project is not None and metadata_project[0] != project_root:
+            raise OawError(
+                "--project conflicts with the capture's project metadata; they resolve to "
+                "different projects"
+            )
+    elif metadata_project is not None:
+        project_root, alias = metadata_project
+    elif capture:
         try:
-            relative = capture.path.relative_to(root / "Projects")
-            raw_project = relative.parts[0]
+            inferred = capture.path.relative_to(root / "Projects").parts[0]
         except (ValueError, IndexError) as exc:
-            raise OawError("--project is required when the capture is outside Projects/") from exc
-    if not raw_project:
+            raise OawError(
+                "pass --project: the capture has no project metadata and is outside Projects/"
+            ) from exc
+        project_root, alias = resolve_project_root_from_references(inferred, root, references)
+    else:
         raise OawError(
             "task create requires --project unless --from-capture identifies a project capture"
         )
-    project_root, alias = resolve_project_root_from_references(raw_project, root, references)
     if execution not in {None, "human", "agent", "hybrid"}:
         raise OawError("task execution must be human, agent, or hybrid")
     if preparedness not in TASK_PREPAREDNESS_STATES:
