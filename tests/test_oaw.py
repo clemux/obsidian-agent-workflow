@@ -2225,6 +2225,61 @@ aliases:
         self.assertEqual(task.count("  - earlier-thread # prior run\n"), 1)
         self.assertEqual(task.count('  - "test-thread"\n'), 1)
 
+    def test_task_note_ignores_inline_agent_sessions_marker_before_real_heading(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        before_board = board_path.read_text(encoding="utf-8")
+        write(
+            task_path,
+            """---
+type: task
+project: obsidian-agent-workflow
+status: todo
+id: OAW-TSK-cli
+aliases:
+  - OAW-TSK-cli
+---
+
+# Track feature dogfooding sessions in an Obsidian Base
+
+## Problem
+
+The task's `session-ids` and `## Agent sessions` mix implementation and dogfooding provenance.
+
+## Outcome
+
+Keep the two concepts separate.
+
+## Agent sessions
+
+- 2026-07-13 - Claude Code - `CLAUDE_CODE_SESSION_ID=old-thread` - Created task note.
+""",
+        )
+
+        proc = self.run_oaw(
+            "task",
+            "note",
+            "OAW-TSK-cli",
+            "--note",
+            "Finished the implementation-ready design.",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        task = task_path.read_text(encoding="utf-8")
+        self.assertIn(
+            "The task's `session-ids` and `## Agent sessions` mix implementation and "
+            "dogfooding provenance.\n\n"
+            "## Outcome\n\n"
+            "Keep the two concepts separate.\n\n"
+            "## Agent sessions\n\n"
+            "- 2026-07-13 - Claude Code - `CLAUDE_CODE_SESSION_ID=old-thread` - "
+            "Created task note.\n"
+            f"- {dt.date.today().isoformat()} - Codex - `CODEX_THREAD_ID=test-thread` - "
+            "Finished the implementation-ready design.\n",
+            task,
+        )
+        self.assertEqual(before_board, board_path.read_text(encoding="utf-8"))
+
     def test_task_note_requires_session_id_unless_allowed(self):
         env = {
             "CODEX_THREAD_ID": "",
@@ -2485,6 +2540,49 @@ Work that has no priority or effort assigned yet.
         self.assertIn('session-ids:\n  - "test-thread"\n', note)
         self.assertIn("Reviewed resolver policy.", note)
         self.assertIn("Updated: Agents/Tasks/Resolve vault-wide Obsidian task IDs.md", proc.stdout)
+
+    def test_note_session_leaves_blank_line_before_following_heading(self):
+        path = self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
+        write(
+            path,
+            """---
+type: task
+status: open
+id: AGT-TSK-obsidian-task-ids
+aliases:
+  - AGT-TSK-obsidian-task-ids
+---
+
+# Resolve vault-wide Obsidian task IDs
+
+## Problem
+
+Text.
+
+## Agent sessions
+
+- 2026-07-13 - Claude Code - `CLAUDE_CODE_SESSION_ID=old-thread` - Existing entry.
+
+## Decisions
+
+Keep this decision.
+""",
+        )
+
+        proc = self.run_oaw(
+            "note",
+            "session",
+            "AGT-TSK-obsidian-task-ids",
+            "--note",
+            "Reviewed resolver policy.",
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        note = path.read_text(encoding="utf-8")
+        self.assertIn("Reviewed resolver policy.", note)
+        after_entry = note.split("Reviewed resolver policy.", 1)[1]
+        before_heading = after_entry.split("## Decisions", 1)[0]
+        self.assertEqual(before_heading, "\n\n")
 
     def test_note_session_refuses_unsupported_session_ids_without_writing(self):
         path = self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"

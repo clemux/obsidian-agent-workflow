@@ -16,7 +16,7 @@ from .frontmatter import (
     set_frontmatter_scalar,
     split_inline_comment,
 )
-from .notes import VaultTransaction, append_markdown_block_to_section, split_note
+from .notes import VaultTransaction, append_markdown_block_to_section, locate_section, split_note
 from .relations import blocker_problems, prepare_relation_add, prepare_relation_remove
 from .resolver import (
     NoteMatch,
@@ -93,32 +93,58 @@ def append_session_id_frontmatter(text: str, session_ref: str) -> str:
     return append_frontmatter_list_value(text, "session-ids", value)
 
 
+_SESSION_ENTRY_LINE = re.compile(r"^- \d{4}-\d{2}-\d{2} - .+ - `[^`]+` - .+$")
+
+
+def _is_session_entry_line(line: str) -> bool:
+    return bool(_SESSION_ENTRY_LINE.fullmatch(line))
+
+
 def append_session_entry(
     text: str, provider: str, session_ref: str, note: str, checks: str | None
 ) -> str:
+    """Append one dated entry under a task note's ``## Agent sessions`` section.
+
+    Reuses ``notes.locate_section`` for fence-aware, heading-exact section
+    lookup (so headings inside fenced or indented code, or an inline
+    occurrence of the heading text, are never mistaken for the real
+    section). When the section already ends in a line that itself looks
+    like a rendered session entry, the new entry is appended directly below
+    it with no blank line, keeping the log contiguous; otherwise it is
+    separated from whatever precedes it by exactly one blank line, matching
+    ``append_markdown_block_to_section``'s general block-append behavior.
+    """
     today = dt.date.today().isoformat()
     detail = note.strip()
     if checks:
         detail = f"{detail}; checks: {checks.strip()}"
-    entry = f"- {today} - {provider} - `{session_ref}` - {detail}\n"
-    if "## Agent sessions" not in text:
-        suffix = "" if text.endswith("\n") else "\n"
-        return f"{text}{suffix}\n## Agent sessions\n\n{entry}"
-    marker = "## Agent sessions"
-    idx = text.index(marker)
-    after = text.index("\n", idx) + 1
-    if after >= len(text):
-        return f"{text}\n\n{entry}"
-    next_heading = re.search(r"\n## ", text[after:])
-    if not next_heading:
-        suffix = "" if text.endswith("\n") else "\n"
-        return f"{text}{suffix}{entry}"
-    insert_at = after + next_heading.start() + 1
-    before = text[:insert_at]
-    after_text = text[insert_at:]
-    if not before.endswith("\n"):
-        before += "\n"
-    return before + entry + after_text
+    entry = f"- {today} - {provider} - `{session_ref}` - {detail}"
+    heading = "## Agent sessions"
+
+    located = locate_section(text, heading)
+    if located is None:
+        return append_markdown_block_to_section(text, heading, entry)
+
+    lines, heading_idx, section_end = located
+    section_lines = lines[heading_idx + 1 : section_end]
+    last_idx = len(section_lines) - 1
+    while last_idx >= 0 and section_lines[last_idx] == "":
+        last_idx -= 1
+    if last_idx < 0:
+        return append_markdown_block_to_section(text, heading, entry)
+
+    trimmed_section = section_lines[: last_idx + 1]
+    if _is_session_entry_line(trimmed_section[-1]):
+        new_section = [*trimmed_section, entry]
+    else:
+        new_section = [*trimmed_section, "", entry]
+
+    before = lines[: heading_idx + 1]
+    after = lines[section_end:]
+    new_lines = [*before, *new_section, ""]
+    if after:
+        new_lines.extend(after)
+    return "\n".join(new_lines).rstrip() + "\n"
 
 
 def append_note_session(
