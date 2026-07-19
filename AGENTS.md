@@ -16,6 +16,19 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 
 Keep small workflow changes close to `bin/oaw` and mirror behavior changes in tests and docs. Update the CLI, `tests/test_oaw.py`, `README.md`, and `skills/oaw/SKILL.md` together so agent-facing behavior does not drift from implementation.
 
+## Skill Ownership Boundary
+
+This repository owns skills and adapters that require OAW commands, lifecycle state, note schemas,
+vault relationships, or other OAW-specific behavior. Keep those integrations here beside the CLI
+and schema they depend on.
+
+When part of an OAW workflow is broadly reusable, extract only its backend-neutral core to the
+shared `agent-skills` repository. The shared core must not mention OAW commands, vault IDs, note
+schemas, personal paths, private project history, or custom dependencies that are not bundled with
+that shared skill or supplied by an official platform. Keep the OAW adapter here and make the
+dependency direction explicit: this repository may compose a shared core, but the shared core must
+not depend on this repository.
+
 The Typer frontend is the current CLI implementation. Native command-contract
 coverage lives in `tests/test_typer_cli.py` and covers command-tree completeness,
 exit classes, output routing, accepted values, conflicts, and no-write behavior.
