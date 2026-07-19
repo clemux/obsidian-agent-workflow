@@ -79,7 +79,7 @@ oaw session lookup 00000000-0000-4000-8000-000000000001 --codex-root /tmp/exampl
 oaw session lookup 00000000-0000-4000-8000-000000000001 --verbose
 ```
 
-`--verbose` adds best-effort per-artifact metadata; `references/session-artifacts.md` documents the exact metric semantics. Override the harness roots for demo and tests with flags or the shared `OAW_CODEX_SESSIONS_ROOT` and `OAW_CLAUDE_PROJECTS_ROOT` environment variables; fallback roots are `~/.codex/sessions` and `~/.claude/projects`.
+`--verbose` adds best-effort per-artifact metadata; `references/session-artifacts.md` documents the exact metric semantics. By default, Codex lookup searches both `$CODEX_HOME/sessions` and `$CODEX_HOME/archived_sessions` (`~/.codex` when `CODEX_HOME` is unset), preferring the active copy when the same rollout filename exists in both. `--codex-root` or `OAW_CODEX_SESSIONS_ROOT` selects exactly one Codex root for controlled fixtures or alternate installations. `--claude-root` and `OAW_CLAUDE_PROJECTS_ROOT` similarly override the `~/.claude/projects` fallback.
 
 ## Listing project notes
 

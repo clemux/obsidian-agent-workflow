@@ -506,6 +506,12 @@ artifact does not record are printed as `unavailable`. Other harness formats cur
 report unavailable metrics, leaving room for provider-specific parsers later. Without
 `--verbose`, output is unchanged.
 
+By default, Codex discovery treats `sessions/` and `archived_sessions/` below
+`$CODEX_HOME` as one read-only corpus (`~/.codex` when `CODEX_HOME` is unset).
+Active `sessions/` wins when both roots contain the same rollout filename. Passing
+`--codex-root` or setting `OAW_CODEX_SESSIONS_ROOT` selects exactly that one root,
+which keeps fixture and alternate-installation overrides isolated.
+
 ### Session snapshots
 
 Session snapshots copy transient harness artifacts into the vault's retrospective attachments folder:
@@ -525,15 +531,16 @@ oaw session snapshot "$CODEX_THREAD_ID" \
   --slug codex-dogfood
 ```
 
-By default the command finds the Claude parent transcript plus nested subagent transcripts, task outputs under `tasks/`, workflow run artifacts under `subagents/workflows/`, persisted workflow scripts under `workflows/scripts/`, discoverable Codex rollouts, referenced plugin job logs, and fork parents referenced by explicit Claude/fork markers or `--claude-session`. Use `--codex-only` when the positional ID is a Codex thread with no Claude parent transcript; the command requires that primary rollout even when extra discovery options are supplied. Bare JSON `sessionId` fields do not trigger fork discovery. It writes `manifest.json` with source paths, copy time, file hashes, category, snapshot mode, and transcript completeness. Use `--codex-rollout` for an exact rollout filename or path. Use `--grep` only for a literal that identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags. Re-run the same command to refresh a partial transcript, preserve nested artifacts, pick up new artifacts, and remove stale files listed in the previous manifest.
+By default the command finds the Claude parent transcript plus nested subagent transcripts, task outputs under `tasks/`, workflow run artifacts under `subagents/workflows/`, persisted workflow scripts under `workflows/scripts/`, discoverable active or archived Codex rollouts, referenced plugin job logs, and fork parents referenced by explicit Claude/fork markers or `--claude-session`. Codex lineage expansion crosses both default Codex roots, so a parent and referenced children may live in different roots. Use `--codex-only` when the positional ID is a Codex thread with no Claude parent transcript; the command requires that primary rollout even when extra discovery options are supplied. Bare JSON `sessionId` fields do not trigger fork discovery. It writes `manifest.json` with source paths, copy time, file hashes, category, snapshot mode, and transcript completeness. Use `--codex-rollout` for an exact rollout filename or path. Use `--grep` only for a literal that identifies one rollout; ambiguous grep matches fail and should be replaced with explicit `--codex-thread` or `--codex-rollout` flags. Re-run the same command to refresh a partial transcript, preserve nested artifacts, pick up new artifacts, and remove stale files listed in the previous manifest.
 
 Use `--partial` or `--complete` to override automatic transcript completeness,
 and `--date` to override the folder date. Test or demo runs can override the
 destination with `--output-root` and artifact roots with `--codex-root`,
 `--claude-root`, and `--plugin-data-root`. Lookup and snapshot commands share
 the `OAW_CODEX_SESSIONS_ROOT` and `OAW_CLAUDE_PROJECTS_ROOT` environment
-overrides; their fallback roots are `~/.codex/sessions` and
-`~/.claude/projects`.
+overrides. The default Codex corpus is `$CODEX_HOME/sessions` plus
+`$CODEX_HOME/archived_sessions` (with `~/.codex` as the home fallback); the
+Claude fallback remains `~/.claude/projects`.
 
 ## Notes and retrospectives
 
