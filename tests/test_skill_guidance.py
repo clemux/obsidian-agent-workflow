@@ -10,6 +10,7 @@ TASK_EXECUTION_SKILL = ROOT / "skills" / "oaw-task-execution" / "SKILL.md"
 TASK_EXECUTION_METADATA = ROOT / "skills" / "oaw-task-execution" / "agents" / "openai.yaml"
 CAPTURE_SKILL = ROOT / "skills" / "obsidian-capture" / "SKILL.md"
 CAPTURE_METADATA = ROOT / "skills" / "obsidian-capture" / "agents" / "openai.yaml"
+RESOLVER = ROOT / "src" / "oaw" / "resolver.py"
 
 
 def read(path: Path) -> str:
@@ -89,6 +90,14 @@ def test_obsidian_capture_skill_metadata_and_privacy_are_current():
     assert metadata.startswith("interface:\n")
     assert 'short_description: "Capture side observations into the vault."' in metadata
     assert "Use $obsidian-capture" in metadata
+
+
+def test_vault_resolution_has_no_machine_specific_default():
+    source = read(RESOLVER)
+
+    assert "DEFAULT_VAULT" not in source
+    assert "/home/" not in source
+    assert 'os.environ.get("OAW_VAULT"' in source
 
 
 def test_task_guidance_keeps_lifecycle_preparedness_and_blockers_separate():

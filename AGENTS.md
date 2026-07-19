@@ -44,7 +44,7 @@ snapshot against the checkout's help surfaces and source bytes.
   native Typer contracts and the installed-vs-checkout staleness check tests.
 - `uv run python bin/oaw --help` shows top-level CLI commands.
 - `uv run python bin/oaw resolve --json OAW-TSK-cli` exercises vault resolution.
-- `OAW_VAULT=/tmp/example-vault uv run python bin/oaw ...` points the CLI at a non-default vault for manual testing.
+- `OAW_VAULT=/tmp/example-vault uv run python bin/oaw ...` sets the required vault root for manual testing.
 
 The CLI has one runtime dependency, `typer`, so the checkout must be run inside the
 project environment: use `uv run python bin/oaw ...`, not bare `python bin/oaw ...`
@@ -67,7 +67,7 @@ known CLI limitations; the OAW skill is not a substitute for it.
 
 ## Coding Style & Naming Conventions
 
-Write Python 3 with 4-space indentation, useful type hints, and small functions with user-facing errors raised as `OawError`. Use `snake_case` for functions and variables, `PascalCase` for classes and dataclasses, and uppercase constants such as `DEFAULT_VAULT`.
+Write Python 3 with 4-space indentation, useful type hints, and small functions with user-facing errors raised as `OawError`. Use `snake_case` for functions and variables, `PascalCase` for classes and dataclasses, and uppercase constants such as `SESSION_ENV`.
 
 Prefer `pathlib.Path`, UTF-8 file reads/writes, and `json.dumps` for machine-readable modes. Keep CLI messages concise and stable because tests and agents may rely on them.
 
@@ -89,13 +89,13 @@ Pull requests should include a behavior summary, the test command run, and any v
 
 ## Security & Configuration Tips
 
-The default vault path is user-specific. Use `OAW_VAULT` for tests, demos, and automation so commands do not accidentally modify a real Obsidian vault. Lifecycle commands require a real session environment variable unless `--allow-missing-session-id` is intentionally accepted.
+`OAW_VAULT` is required for every command that accesses the vault. Use a temporary value for tests, demos, and automation so commands do not accidentally modify a real Obsidian vault. Lifecycle commands require a real session environment variable unless `--allow-missing-session-id` is intentionally accepted.
 
 ## Privacy & Portability
 
-This project is used on multiple machines (personal and work), so hard-coded personal paths and identifiers are technical debt. Existing occurrences (the `DEFAULT_VAULT` constant, README examples) are known legacy debt; do not add new ones, and prefer removing them when touching nearby code or docs.
+This project is used on multiple machines (personal and work), so hard-coded personal paths and identifiers are technical debt. Do not add new occurrences, and prefer removing legacy examples when touching nearby code or docs.
 
-- Never introduce new hard-coded absolute paths, usernames, hostnames, or vault names in code. Route any new machine- or user-specific value through an environment variable (like `OAW_VAULT`), a CLI flag, or a `~`-relative default expanded with `Path.expanduser()`.
+- Never introduce new hard-coded absolute paths, usernames, hostnames, or vault names in code. Route any new machine- or user-specific value through an environment variable such as `OAW_VAULT` or an explicit CLI flag.
 - In `README.md`, `skills/oaw/SKILL.md`, and other tracked docs, write examples with placeholders (`/path/to/vault`, `$OAW_VAULT`, `~/vaults/example`) instead of pasting real command output. Redact `/home/<user>/...` paths and real vault or project names from terminal snippets before committing them.
 - Keep personal names and usernames out of prose in tracked files; write "the user's vault" rather than naming its owner.
 - Machine-local configuration such as `.claude/settings.local.json` must stay untracked; it is listed in `.gitignore` and must not be committed even if it seems useful to share.

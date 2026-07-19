@@ -6,7 +6,7 @@ Local-first tooling for agent-driven Obsidian workflows: the `oaw` CLI resolves 
 
 This project has been written entirely by AI. The repository owner has not read or reviewed any of the code. Use it at your own risk.
 
-This repository is tooling tailored for a local Obsidian and agent workflow. It is not intended as reusable software, and it probably does not make sense to install or use as-is. Some paths are machine-specific legacy debt; prefer `OAW_VAULT` for any new automation.
+This repository is tooling tailored for a local Obsidian and agent workflow. It is not intended as reusable software, and it probably does not make sense to install or use as-is. Set `OAW_VAULT` to the vault root before running any vault command.
 
 ## Install
 
@@ -31,7 +31,7 @@ If `uv tool upgrade oaw` does not rebuild the local checkout source, use
 `uv tool install --reinstall .` and rerun the parity check.
 
 During development, run the checkout through the project environment with
-`uv run python bin/oaw ...` (preferably against a temp vault via `OAW_VAULT`).
+`uv run python bin/oaw ...` and set `OAW_VAULT` (preferably to a temporary vault).
 The CLI depends on `typer` at runtime, so bare `python bin/oaw ...` fails with
 `ModuleNotFoundError: No module named 'typer'`. The installed `oaw` command
 carries its own dependencies and needs no prefix.
@@ -105,7 +105,13 @@ pytest
 GitHub Actions runs the same four checks on pushes and pull requests. Tests
 continue to exercise the CLI through subprocesses and isolated temporary vaults.
 
-The default vault path is machine-specific legacy debt; override with `OAW_VAULT`.
+`OAW_VAULT` is required for commands that access the vault; there is no built-in
+machine-specific default. An unset or blank value fails with exit code `1` and a
+clear configuration error. For example:
+
+```bash
+export OAW_VAULT=~/vaults/example
+```
 
 ## Table of contents
 

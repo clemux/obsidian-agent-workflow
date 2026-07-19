@@ -9,7 +9,8 @@ description: This skill should be used when an `obs:`-prefixed reference appears
 
 The `oaw` CLI resolves reference IDs against note frontmatter (`id` and `aliases` only) in the user's Obsidian vault, and records agent work on project task notes. Use it instead of grepping the vault or searching local agent state: body-text mentions of an ID are not the note itself, so text search finds decoys; frontmatter matching is narrow and auditable.
 
-Set `OAW_VAULT` when running against a non-default vault, tests, demos, or automation.
+Set `OAW_VAULT` to the vault root before any command that accesses the vault. There is
+no built-in default; an unset or blank value fails with a clear configuration error.
 
 For checkout development, shared errors, note splitting/reading, and the
 hand-rolled frontmatter parser/mutators are importable from `oaw.errors`,

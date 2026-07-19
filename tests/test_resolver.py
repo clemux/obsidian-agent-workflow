@@ -8,6 +8,26 @@ from oaw.frontmatter import FRONTMATTER_READ_LIMIT
 from oaw.resolver import resolve_id, resolve_project_root_from_references, scan_note_references
 
 
+@pytest.mark.parametrize("configured", [None, "", "   "])
+def test_vault_root_requires_configured_environment(monkeypatch, configured: str | None):
+    if configured is None:
+        monkeypatch.delenv("OAW_VAULT", raising=False)
+    else:
+        monkeypatch.setenv("OAW_VAULT", configured)
+
+    with pytest.raises(
+        OawError,
+        match="OAW_VAULT is required; set it to the Obsidian vault path",
+    ):
+        resolver.vault_root()
+
+
+def test_vault_root_resolves_configured_environment(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("OAW_VAULT", str(tmp_path))
+
+    assert resolver.vault_root() == tmp_path.resolve()
+
+
 def large_frontmatter_note(note_id: str) -> str:
     padding = "x" * (FRONTMATTER_READ_LIMIT + 1)
     return f"---\npadding: {padding}\nid: {note_id}\n---\n\n# Large target\n"

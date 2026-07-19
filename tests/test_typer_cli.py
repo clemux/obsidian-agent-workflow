@@ -272,6 +272,19 @@ aliases:
     assert result.output == f"{tmp_path / 'Projects/Example/Tasks/Resolver CLI.md'}\n"
 
 
+@pytest.mark.parametrize("configured", [None, "", "   "])
+def test_typer_frontend_requires_configured_vault(configured: str | None) -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        ["resolve", "EXM-TSK-resolver"],
+        env={"OAW_VAULT": configured},
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr == ("oaw: OAW_VAULT is required; set it to the Obsidian vault path\n")
+
+
 @pytest.mark.parametrize(
     ("arguments", "error_line"),
     [

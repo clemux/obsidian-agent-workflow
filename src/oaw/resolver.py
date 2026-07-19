@@ -18,11 +18,12 @@ from .frontmatter import (
 )
 from .notes import read_note, split_note
 
-DEFAULT_VAULT = Path("/path/to/vault")
-
 
 def vault_root() -> Path:
-    return Path(os.environ.get("OAW_VAULT", DEFAULT_VAULT)).expanduser().resolve()
+    configured = os.environ.get("OAW_VAULT", "").strip()
+    if not configured:
+        raise OawError("OAW_VAULT is required; set it to the Obsidian vault path")
+    return Path(configured).expanduser().resolve()
 
 
 @dataclass(frozen=True)
