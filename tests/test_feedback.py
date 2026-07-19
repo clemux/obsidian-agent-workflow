@@ -6,7 +6,12 @@ from typer.testing import CliRunner
 from oaw import cli, feedback
 from oaw.errors import OawError
 from oaw.notes import write_new_note_atomic
+from oaw.sessions import SESSION_ENV
 from oaw.tags import creation_tag_block, creation_tags
+
+# Unset every supported harness session variable so the test outcome does not
+# depend on which agent harness runs the suite.
+NO_SESSION_ENV: dict[str, str | None] = {env_name: None for _, env_name in SESSION_ENV}
 
 
 def vault_state(vault: Path) -> dict[str, bytes | None]:
@@ -357,9 +362,7 @@ def test_feedback_requires_session_unless_the_explicit_missing_path_is_accepted(
 ) -> None:
     runner = CliRunner()
     arguments = feedback_args("--date", "2026-07-14")
-    result = runner.invoke(
-        cli.app, arguments, env={"OAW_VAULT": str(tmp_path), "CODEX_THREAD_ID": None}
-    )
+    result = runner.invoke(cli.app, arguments, env={"OAW_VAULT": str(tmp_path), **NO_SESSION_ENV})
     assert result.exit_code == 1
     assert "no stable session ID found" in result.stderr
     assert not (tmp_path / "Agents/Feedback").exists()
@@ -367,7 +370,7 @@ def test_feedback_requires_session_unless_the_explicit_missing_path_is_accepted(
     result = runner.invoke(
         cli.app,
         [*arguments, "--allow-missing-session-id"],
-        env={"OAW_VAULT": str(tmp_path), "CODEX_THREAD_ID": None},
+        env={"OAW_VAULT": str(tmp_path), **NO_SESSION_ENV},
     )
     assert result.exit_code == 0, result.stderr
     note = (tmp_path / "Agents/Feedback/2026-07-14 Feedback title.md").read_text(encoding="utf-8")
