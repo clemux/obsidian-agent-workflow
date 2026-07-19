@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "private_reference_prefixes": ["PRIVATE", "INTERNAL"],
+  "private_markers": ["alice-personal", "Private Project", "alice-workstation"]
+}

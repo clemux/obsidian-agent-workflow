@@ -12,6 +12,7 @@ oaw = "oaw.cli:main"
 
 [dependency-groups]
 dev = [
+    "pre-commit",
     "pyinstrument",
     "pyrefly",
     "pytest",

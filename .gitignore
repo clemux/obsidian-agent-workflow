@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .worktrees/
 .claude/settings.local.json
+.publication-boundary-local.json
 tmp-goals/
 .idea/
 .claude/workflows

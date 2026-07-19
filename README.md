@@ -99,11 +99,33 @@ Run the complete local gate with:
 ruff check
 ruff format --check
 pyrefly check
+python scripts/check_publication_boundary.py
 pytest
 ```
 
-GitHub Actions runs the same four checks on pushes and pull requests. Tests
+GitHub Actions runs the same checks on pushes and pull requests. Tests
 continue to exercise the CLI through subprocesses and isolated temporary vaults.
+
+### Publication boundary
+
+The publication-boundary check rejects tracked text containing personal absolute
+home paths. Add repository-specific private project names, machine names, and
+reference-ID prefixes to an ignored local configuration:
+
+```bash
+cp .publication-boundary-local.sample.json .publication-boundary-local.json
+```
+
+Edit the copied values for this machine; never force-add the local file. Install
+the pre-push gate once per checkout with `uv run pre-commit install`. Run the
+same check directly at any time with:
+
+```bash
+uv run python scripts/check_publication_boundary.py
+```
+
+The check reports only the file, line, and matched rule so CI or terminal output
+does not repeat the private value.
 
 `OAW_VAULT` is required for commands that access the vault; there is no built-in
 machine-specific default. An unset or blank value fails with exit code `1` and a
