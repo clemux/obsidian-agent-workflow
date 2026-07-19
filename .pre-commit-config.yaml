@@ -1,11 +1,29 @@
-default_install_hook_types: [pre-push]
+default_install_hook_types: [pre-commit, pre-push]
 
 repos:
   - repo: local
     hooks:
+      - id: ruff-lint
+        name: Ruff lint
+        entry: mise run lint
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: ruff-format-check
+        name: Ruff format check
+        entry: mise run format-check
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: pyrefly-typecheck
+        name: Pyrefly typecheck
+        entry: mise run typecheck
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
       - id: publication-boundary
         name: Public-safe repository boundary
-        entry: uv run python scripts/check_publication_boundary.py
+        entry: mise run publication-check
         language: system
         pass_filenames: false
         stages: [pre-push]
