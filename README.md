@@ -38,7 +38,7 @@ carries its own dependencies and needs no prefix.
 
 ### Agent skills
 
-The repository also contains six agent skills:
+The repository also contains seven agent skills:
 
 - `skills/obsidian-capture` preserves side observations in the vault capture workflow.
 - `skills/oaw` documents ID resolution and lifecycle operations.
@@ -46,6 +46,7 @@ The repository also contains six agent skills:
 - `skills/oaw-task-review` runs a resumable, one-task-at-a-time project status review.
 - `skills/oaw-research` handles provider-visible research handoff and finished-report intake.
 - `skills/oaw-retro-backend` persists the shared `retro` skill's tasks, captures, and draft notes in the vault.
+- `skills/oaw-wrap-up` closes a session operationally: run and worktree inventory, lifecycle writes, resume instructions, and a closure receipt.
 
 Link them into the Codex, Claude, and neutral skill directories so edits in the
 checkout remain live:
@@ -53,7 +54,7 @@ checkout remain live:
 ```bash
 for skill_root in "${CODEX_HOME:-$HOME/.codex}/skills" "$HOME/.claude/skills" "$HOME/.agents/skills"; do
   mkdir -p "$skill_root"
-  for skill in obsidian-capture oaw oaw-task-execution oaw-task-review oaw-research oaw-retro-backend; do
+  for skill in obsidian-capture oaw oaw-task-execution oaw-task-review oaw-research oaw-retro-backend oaw-wrap-up; do
     ln -s "$(pwd)/skills/$skill" "$skill_root/$skill"
   done
 done
@@ -348,12 +349,13 @@ Inspect and administer the registry without changing task lifecycle state:
 
 ```bash
 oaw run list --task OAW-TSK-cli --state running
-oaw run list --json
+oaw run list --state running --current-session --json
+oaw run list --session 00000000-0000-4000-8000-000000000001 --json
 oaw run close AGT-RUN-OAW-TSK-cli-codex-0123456789ab --reason "superseded session"
 oaw run audit
 ```
 
-`run list` marks records older than 24 hours as `stale` without changing them or releasing concurrency. `run close` requires the real closer session, preserves the original `agent_session_id`, appends the closer to `session-ids`, and changes only the run. `run audit` reports registry inconsistencies.
+`run list` marks records older than 24 hours as `stale` without changing them or releasing concurrency. `--session` keeps only runs whose `session-ids` include the given ID (falling back to `agent_session_id` on legacy records); `--current-session` uses the harness session ID and fails without one; the two filters are mutually exclusive. `run close` requires the real closer session, preserves the original `agent_session_id`, appends the closer to `session-ids`, and changes only the run. `run audit` reports registry inconsistencies.
 
 New task notes are created with `oaw task create` instead of hand-writing frontmatter:
 

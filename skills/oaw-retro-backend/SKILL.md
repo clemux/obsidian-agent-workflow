@@ -10,6 +10,15 @@ retrospective *workflow* (evidence gathering, agenda, one-item-at-a-time discuss
 owns where its durable artifacts *go*. Use these command mappings for the workflow's step 4
 (convert follow-ups into owned work) and step 5 (write the retrospective note).
 
+## Opening step: operational closure before reflection
+
+Before starting the retro agenda, check whether this session left open operational state:
+`oaw run list --state running --json` for open runs, plus dirty task worktrees from the
+session's repository work. If any exist and closure has not already happened this session,
+run the `oaw-wrap-up` skill first, then return to the retro. Vault-only sessions with no
+open runs or worktrees skip this naturally. This check lives in the adapter on purpose —
+the shared `retro` core stays backend-neutral and untouched.
+
 ## Step 4 mappings: give follow-ups a home
 
 - **Actionable work with a clear owner** → `oaw task create --project <alias> --title "..."`

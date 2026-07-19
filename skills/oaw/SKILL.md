@@ -154,7 +154,9 @@ Agent runs are durable records under `Agents/Runs/`. The same task/provider/sess
 `start` is idempotent; distinct sessions get distinct records. Multiple sessions may
 run the same task, but `review` and `complete` refuse while another record remains
 `running`. A derived `stale` age (more than 24 hours) is visible but never changes
-state or releases concurrency. Use `oaw run list [--task ID] [--state STATE] [--json]`,
+state or releases concurrency. Use `oaw run list [--task ID] [--state STATE]
+[--session ID | --current-session] [--json]` (`--current-session` reads the harness
+session ID and errors without one),
 `oaw run close <RUN-ID> --reason <reason>`, and `oaw run audit`. Administrative close
 records the real closer while preserving the original agent identity and never
 changes task lifecycle state.
@@ -173,7 +175,7 @@ preflight, GTR feature isolation, and proportional implementation and review
 delegation. Keep task resolution, provenance, relationships, and lifecycle writes in
 this skill. Do not load the companion for status-only or vault-only work.
 
-At wrap-up, check whether substantive work occurred. If it did and no task owns it, create or promote the source capture into a task before retrospective closeout. A retrospective may close only after that task is `done` via `oaw task complete ... --checks "<verification actually run>"`; link the retrospective primarily to the completed task and retain the source-capture link as provenance. Do not treat a capture `Outcome` as a completion report.
+At wrap-up — the user stopping, asking whether the session is done, or ending urgently — load the `oaw-wrap-up` companion skill; it owns end-of-session closure: run and worktree inventory, classification, resume blocks, and the closure receipt. Two rules it enforces also apply whenever closing out here: substantive work with no owning task must be created or promoted (from its source capture) into a task before retrospective closeout, and a retrospective may close only after that task is `done` via `oaw task complete ... --checks "<verification actually run>"`. Link the retrospective primarily to the completed task and retain the source-capture link as provenance. Do not treat a capture `Outcome` as a completion report.
 
 For any project tracked through OAW, keep pre-implementation architecture,
 designs, and proposals on the owning task note by default. Do not create a
