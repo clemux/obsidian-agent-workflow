@@ -36,7 +36,9 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.pyrefly]
-project-includes = ["src", "tests"]
+project-includes = ["src/**/*.py", "tests/**/*.py"]
+project-excludes = ["**/__pycache__", ".venv"]
+disable-project-excludes-heuristics = true
 python-version = "3.10"
 search-path = ["."]
 
