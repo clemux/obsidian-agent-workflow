@@ -106,7 +106,8 @@ USAGE_BY_COMMAND = {
     "                       [--execution {human,agent,hybrid}]\n"
     "                       [--allow-missing-session-id]\n",
     "oaw run": "usage: oaw run [-h] {list,close,audit} ...\n",
-    "oaw run list": "usage: oaw run list [-h] [--task TASK] [--state {running,paused,completed,closed}] [--json]\n",
+    "oaw run list": "usage: oaw run list [-h] [--task TASK] [--state {running,paused,completed,closed}]\n"
+    "                    [--session SESSION | --current-session] [--json]\n",
     "oaw run close": "usage: oaw run close [-h] --reason REASON id\n",
     "oaw run audit": "usage: oaw run audit [-h]\n",
     "oaw note": "usage: oaw note [-h] {session,observe} ...\n",
@@ -792,9 +793,22 @@ def task_create(
 def run_list(
     task: Annotated[str | None, typer.Option("--task")] = None,
     state: Annotated[RunState | None, typer.Option("--state")] = None,
+    session: Annotated[str | None, typer.Option("--session")] = None,
+    current_session: Annotated[bool, typer.Option("--current-session")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    _run(lambda: list_runs(task, state.value if state else None, json_output, vault_root()))
+    if session is not None and current_session:
+        _usage_error("argument --current-session: not allowed with argument --session")
+    _run(
+        lambda: list_runs(
+            task,
+            state.value if state else None,
+            session,
+            current_session,
+            json_output,
+            vault_root(),
+        )
+    )
 
 
 @run_app.command("close", help="administratively close a run")
