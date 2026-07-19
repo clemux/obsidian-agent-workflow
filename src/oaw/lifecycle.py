@@ -31,6 +31,7 @@ from .resolver import (
     strip_obs_prefix,
 )
 from .runs import (
+    Run,
     audit_runs,
     detect_identity,
     find_run,
@@ -535,14 +536,31 @@ def update_task_relation(
     print(f"Status: {mutation.source.frontmatter.get('status', '')}")
 
 
-def list_runs(task_id: str | None, state: str | None, as_json: bool, root: Path) -> None:
+def run_belongs_to_session(run: Run, session_id: str) -> bool:
+    values = run.data.get("session-ids")
+    if isinstance(values, list) and all(isinstance(value, str) for value in values):
+        return session_id in values
+    return run.data.get("agent_session_id") == session_id
+
+
+def list_runs(
+    task_id: str | None,
+    state: str | None,
+    session_id: str | None,
+    current_session: bool,
+    as_json: bool,
+    root: Path,
+) -> None:
     now = utc_now()
+    if current_session:
+        session_id = detect_identity().session_id
     selected_task = strip_obs_prefix(task_id) if task_id else None
     rows = [
         run
         for run in iter_runs(root)
         if (not selected_task or run.data.get("task_id") == selected_task)
         and (not state or run.state == state)
+        and (session_id is None or run_belongs_to_session(run, session_id))
     ]
     if as_json:
         print(

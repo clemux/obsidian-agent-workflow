@@ -1069,6 +1069,88 @@ aliases:
         self.assertTrue(stale["stale"])
         self.assertEqual(stale["run_state"], "running")
 
+    def test_run_list_filters_by_session_and_current_session(self):
+        mine = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Mine.")
+        other = self.run_oaw(
+            "task",
+            "start",
+            "OAW-TSK-cli",
+            "--note",
+            "Other session.",
+            env={"CODEX_THREAD_ID": "other-thread"},
+        )
+        self.assertEqual(mine.returncode, 0, mine.stderr)
+        self.assertEqual(other.returncode, 0, other.stderr)
+
+        by_session = self.run_oaw("run", "list", "--session", "test-thread", "--json")
+        self.assertEqual(by_session.returncode, 0, by_session.stderr)
+        rows = json.loads(by_session.stdout)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["agent_session_id"], "test-thread")
+
+        current = self.run_oaw("run", "list", "--current-session", "--json")
+        self.assertEqual(current.returncode, 0, current.stderr)
+        self.assertEqual(json.loads(current.stdout), rows)
+
+        other_rows = json.loads(
+            self.run_oaw("run", "list", "--session", "other-thread", "--json").stdout
+        )
+        self.assertEqual(len(other_rows), 1)
+        self.assertEqual(other_rows[0]["agent_session_id"], "other-thread")
+
+        missing = self.run_oaw("run", "list", "--session", "unknown-thread", "--json")
+        self.assertEqual(missing.returncode, 0, missing.stderr)
+        self.assertEqual(json.loads(missing.stdout), [])
+
+    def test_run_list_session_filter_matches_appended_closer_session(self):
+        started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Mine.")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        run_id = next(
+            line.split("Run: ", 1)[1]
+            for line in started.stdout.splitlines()
+            if line.startswith("Run: ")
+        )
+        closed = self.run_oaw(
+            "run",
+            "close",
+            run_id,
+            "--reason",
+            "administrative cleanup",
+            env={"CODEX_THREAD_ID": "closer-thread"},
+        )
+        self.assertEqual(closed.returncode, 0, closed.stderr)
+
+        rows = json.loads(
+            self.run_oaw("run", "list", "--session", "closer-thread", "--json").stdout
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], run_id)
+        self.assertEqual(rows[0]["agent_session_id"], "test-thread")
+
+    def test_run_list_current_session_requires_a_real_session_id(self):
+        result = self.run_oaw(
+            "run",
+            "list",
+            "--current-session",
+            env={
+                "CODEX_THREAD_ID": "",
+                "CLAUDE_SESSION_ID": "",
+                "CLAUDE_CODE_SESSION_ID": "",
+                "OPENCODE_SESSION_ID": "",
+                "GEMINI_SESSION_ID": "",
+            },
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no stable session ID found", result.stderr)
+
+    def test_run_list_rejects_session_combined_with_current_session(self):
+        result = self.run_oaw("run", "list", "--session", "test-thread", "--current-session")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            "argument --current-session: not allowed with argument --session", result.stderr
+        )
+        self.assertIn("usage: oaw run list", result.stderr)
+
     @pytest.mark.parametrize("command", ["review", "complete"])
     @pytest.mark.parametrize(
         ("old", "new", "expected"),

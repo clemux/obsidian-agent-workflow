@@ -307,6 +307,11 @@ def test_typer_frontend_requires_configured_vault(configured: str | None) -> Non
             "oaw link ensure: error: argument --write: not allowed with argument --dry-run\n",
         ),
         (
+            ["run", "list", "--session", "example-session", "--current-session"],
+            "oaw run list: error: argument --current-session: "
+            "not allowed with argument --session\n",
+        ),
+        (
             [
                 "link",
                 "ensure-bidirectional",
