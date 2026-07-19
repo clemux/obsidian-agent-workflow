@@ -49,6 +49,7 @@ EXPECTED_COMMAND_PATHS = {
     ("link", "ensure"),
     ("link", "ensure-bidirectional"),
     ("link", "lint"),
+    ("link", "materialize"),
     ("export",),
     ("export", "note"),
     ("export", "validate"),

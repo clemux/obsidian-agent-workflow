@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from oaw import cli, lifecycle, resolver
+from oaw import cli, lifecycle, links, resolver
 from oaw.errors import OawError
 
 from .assertions import Assertions
@@ -3700,6 +3700,747 @@ aliases:
             ),
             1,
         )
+
+    def test_link_materialize_previews_writes_and_is_idempotent(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        original = task_path.read_text(encoding="utf-8").replace(
+            "tags:\n", "materialize-example: obs:DOES-NOT-EXIST\ntags:\n"
+        )
+        source = (
+            original
+            + """
+## Materialization examples
+
+See obs:OAW-TSK-cli, obs:OAW-TSK-archived! Keep \\obs:OAW-TSK-cli literal.
+[[OAW-TSK-cli|existing obs:OAW-TSK-archived]] and `obs:OAW-TSK-cli` stay literal.
+[obs:OAW-TSK-cli](https://example.test/obs:OAW-TSK-cli)
+![[Existing embed|obs:OAW-TSK-cli]] and ![obs:OAW-TSK-cli](image.png).
+[obs:OAW-TSK-cli][reference] and <https://example.test/obs:OAW-TSK-cli>.
+[reference]: https://example.test/obs:OAW-TSK-cli
+Keep prefixobs:OAW-TSK-cli, /obs:OAW-TSK-cli, obs:OAW-TSK-cli/path, and obs:OAW-TSK-cli.md.
+Bare OAW-TSK-cli stays bare; project obs:OAW resolves normally.
+| Reference |
+| obs:OAW-TSK-cli |
+```text
+obs:OAW-TSK-cli
+```
+"""
+        )
+        task_path.write_text(source, encoding="utf-8")
+
+        preview = self.run_oaw("link", "materialize", "OAW-TSK-cli")
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        self.assertIn(
+            "obs:OAW-TSK-cli -> [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]",
+            preview.stdout,
+        )
+        self.assertIn("Dry-run: would update", preview.stdout)
+        self.assertEqual(task_path.read_text(encoding="utf-8"), source)
+
+        written = self.run_oaw("link", "materialize", "OAW-TSK-cli", "--write")
+        self.assertEqual(written.returncode, 0, written.stderr)
+        materialized = task_path.read_text(encoding="utf-8")
+        self.assertIn(
+            "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]], "
+            "[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]!",
+            materialized,
+        )
+        self.assertIn("\\obs:OAW-TSK-cli literal", materialized)
+        self.assertIn("[[OAW-TSK-cli|existing obs:OAW-TSK-archived]]", materialized)
+        self.assertIn("`obs:OAW-TSK-cli`", materialized)
+        self.assertIn("[obs:OAW-TSK-cli](https://example.test/obs:OAW-TSK-cli)", materialized)
+        self.assertIn("![[Existing embed|obs:OAW-TSK-cli]]", materialized)
+        self.assertIn("![obs:OAW-TSK-cli](image.png)", materialized)
+        self.assertIn("[obs:OAW-TSK-cli][reference]", materialized)
+        self.assertIn("<https://example.test/obs:OAW-TSK-cli>", materialized)
+        self.assertIn("[reference]: https://example.test/obs:OAW-TSK-cli", materialized)
+        self.assertIn("prefixobs:OAW-TSK-cli", materialized)
+        self.assertIn("/obs:OAW-TSK-cli", materialized)
+        self.assertIn("obs:OAW-TSK-cli/path", materialized)
+        self.assertIn("obs:OAW-TSK-cli.md", materialized)
+        self.assertIn("Bare OAW-TSK-cli stays bare", materialized)
+        self.assertIn("[[Projects/Obsidian Agent Workflow/Index|OAW]]", materialized)
+        self.assertIn(
+            "| [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI\\|OAW-TSK-cli]] |",
+            materialized,
+        )
+        self.assertIn("materialize-example: obs:DOES-NOT-EXIST", materialized)
+        self.assertIn("```text\nobs:OAW-TSK-cli\n```", materialized)
+
+        again = self.run_oaw("link", "materialize", "OAW-TSK-cli", "--write")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("References: none", again.stdout)
+        self.assertEqual(task_path.read_text(encoding="utf-8"), materialized)
+
+    def test_link_materialize_errors_without_writing_for_missing_or_ambiguous_ids(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8")
+            + "\nValid obs:OAW-TSK-archived then missing obs:OAW-TSK-nope.\n",
+            encoding="utf-8",
+        )
+        before_missing = task_path.read_bytes()
+        missing = self.run_oaw("link", "materialize", "OAW-TSK-cli", "--write")
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("no note with frontmatter id or alias 'OAW-TSK-nope'", missing.stderr)
+        self.assertEqual(task_path.read_bytes(), before_missing)
+
+        write(
+            self.vault / "Projects/Other/Tasks/Duplicate.md",
+            "---\nid: OAW-TSK-archived\n---\n\n# Duplicate\n",
+        )
+        task_path.write_text(
+            "---\nid: OAW-TSK-materialize-source\n---\n\n# Source\n\nobs:OAW-TSK-archived\n"
+        )
+        before_ambiguous = task_path.read_bytes()
+        ambiguous = self.run_oaw("link", "materialize", "OAW-TSK-materialize-source", "--write")
+        self.assertEqual(ambiguous.returncode, 1)
+        self.assertIn("id 'OAW-TSK-archived' is not unique", ambiguous.stderr)
+        self.assertEqual(task_path.read_bytes(), before_ambiguous)
+
+    def test_link_materialize_rejects_malformed_reference_and_rolls_back(self, monkeypatch):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8") + "\nMalformed obs: stays literal.\n",
+            encoding="utf-8",
+        )
+        malformed_before = task_path.read_bytes()
+        malformed = self.run_oaw("link", "materialize", "OAW-TSK-cli", "--write")
+        self.assertEqual(malformed.returncode, 1)
+        self.assertIn("malformed obs reference", malformed.stderr)
+        self.assertEqual(task_path.read_bytes(), malformed_before)
+
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8").replace(
+                "Malformed obs: stays literal.", "Valid obs:OAW-TSK-archived."
+            ),
+            encoding="utf-8",
+        )
+        rollback_before = task_path.read_bytes()
+
+        def fail_commit(_self):
+            raise OawError("simulated transaction failure")
+
+        monkeypatch.setenv("OAW_VAULT", str(self.vault))
+        monkeypatch.setattr(links.VaultTransaction, "commit", fail_commit)
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            returncode = cli.main(["link", "materialize", "OAW-TSK-cli", "--write"])
+
+        self.assertEqual(returncode, 1)
+        self.assertIn("simulated transaction failure", stderr.getvalue())
+        self.assertEqual(task_path.read_bytes(), rollback_before)
+
+    def test_obs_materialization_caches_repeated_resolution(self, monkeypatch):
+        references = resolver.scan_note_references(self.vault)
+        original = links.resolve_id_from_references
+        calls = []
+
+        def recording_resolve(target, root, cached_references):
+            calls.append(target)
+            return original(target, root, cached_references)
+
+        monkeypatch.setattr(links, "resolve_id_from_references", recording_resolve)
+        rendered, replacements = links.materialize_obs_references(
+            "obs:OAW-TSK-cli and obs:OAW-TSK-cli", self.vault, references
+        )
+
+        self.assertEqual(calls, ["OAW-TSK-cli"])
+        self.assertEqual(len(replacements), 2)
+        self.assertEqual(rendered.count("[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI"), 2)
+
+    def test_obs_materialization_preserves_bytes_and_complex_protected_spans(self):
+        write(
+            self.vault / "Projects/Legacy/Tasks/Underscore.md",
+            "---\nid: OAW-TSK-legacy_v2\n---\n\n# Legacy\n",
+        )
+        durable = "[[Projects/Legacy/Tasks/Underscore|OAW-TSK-legacy_v2]]"
+        source = (
+            "  obs:OAW-TSK-legacy_v2  \r\n"
+            "[[Existing|alias]] and obs:OAW-TSK-cli\r\n"
+            "````text\r\n"
+            "obs:OAW-TSK-cli\r\n"
+            "```\r\n"
+            "obs:OAW-TSK-archived\r\n"
+            "````\r\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertTrue(rendered.startswith(f"  {durable}  \r\n"))
+        self.assertIn(
+            "[[Existing|alias]] and "
+            "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]\r\n",
+            rendered,
+        )
+        self.assertIn(
+            "````text\r\nobs:OAW-TSK-cli\r\n```\r\nobs:OAW-TSK-archived\r\n````\r\n",
+            rendered,
+        )
+        self.assertEqual(
+            [item.reference for item in replacements], ["obs:OAW-TSK-legacy_v2", "obs:OAW-TSK-cli"]
+        )
+
+    def test_obs_materialization_protects_commonmark_indented_code_blocks(self):
+        source = (
+            "    obs:OAW-TSK-cli\n"
+            "\tobs:OAW-TSK-archived\n"
+            "\n"
+            "Paragraph continuation:\n"
+            "    obs:OAW-TSK-cli\n"
+            "\n"
+            "    obs:OAW-TSK-archived\n"
+            "\tobs:OAW-TSK-cli\n"
+            "outside obs:OAW-TSK-archived\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertTrue(rendered.startswith("    obs:OAW-TSK-cli\n\tobs:OAW-TSK-archived\n"))
+        self.assertIn(
+            "    [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]\n",
+            rendered,
+        )
+        self.assertIn("    obs:OAW-TSK-archived\n\tobs:OAW-TSK-cli\n", rendered)
+        self.assertIn(
+            "outside [[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]",
+            rendered,
+        )
+        self.assertEqual(
+            [item.reference for item in replacements], ["obs:OAW-TSK-cli", "obs:OAW-TSK-archived"]
+        )
+
+    def test_link_materialize_write_preserves_crlf_bytes(self):
+        path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/CRLF source.md"
+        path.write_bytes(
+            b"---\r\n"
+            b"id: OAW-TSK-crlf-source\r\n"
+            b"aliases:\r\n"
+            b"  - OAW-TSK-crlf-source\r\n"
+            b"---\r\n\r\n"
+            b"# CRLF source\r\n\r\n"
+            b"See obs:OAW-TSK-cli.\r\n"
+        )
+
+        proc = self.run_oaw("link", "materialize", "OAW-TSK-crlf-source", "--write")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        written = path.read_bytes()
+        self.assertNotIn(b"\n", written.replace(b"\r\n", b""))
+        self.assertIn(
+            b"[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]].\r\n",
+            written,
+        )
+
+    def test_obs_materialization_protects_complex_markdown_link_labels(self):
+        source = (
+            "[nested [obs:OAW-TSK-cli] label](https://example.test/a_(b)) "
+            "then obs:OAW-TSK-cli.\n"
+            "[escaped \\] obs:OAW-TSK-archived](https://example.test/target) "
+            "then obs:OAW-TSK-archived.\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertIn(
+            "[nested [obs:OAW-TSK-cli] label](https://example.test/a_(b)) then "
+            "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]].",
+            rendered,
+        )
+        self.assertIn(
+            "[escaped \\] obs:OAW-TSK-archived](https://example.test/target) then "
+            "[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]].",
+            rendered,
+        )
+        self.assertEqual(
+            [item.reference for item in replacements],
+            ["obs:OAW-TSK-cli", "obs:OAW-TSK-archived"],
+        )
+
+    def test_obs_materialization_protects_multiline_markdown_links_and_images(self):
+        source = (
+            "[See obs:OAW-TSK-cli\r\nfor details](https://example.test/path) | "
+            "obs:OAW-TSK-archived |\r\n"
+            "[See obs:OAW-TSK-archived\r\nby reference][details]\r\n"
+            "![Alt obs:OAW-TSK-cli\r\ncontinued](image.png)\r\n"
+            "Outside obs:OAW-TSK-archived.\r\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertEqual(
+            rendered,
+            "[See obs:OAW-TSK-cli\r\nfor details](https://example.test/path) | "
+            "[[Projects/Obsidian Agent Workflow/Tasks/Archived task\\|"
+            "OAW-TSK-archived]] |\r\n"
+            "[See obs:OAW-TSK-archived\r\nby reference][details]\r\n"
+            "![Alt obs:OAW-TSK-cli\r\ncontinued](image.png)\r\n"
+            "Outside [[Projects/Obsidian Agent Workflow/Tasks/Archived task|"
+            "OAW-TSK-archived]].\r\n",
+        )
+        self.assertEqual(
+            [item.reference for item in replacements],
+            ["obs:OAW-TSK-archived", "obs:OAW-TSK-archived"],
+        )
+
+    def test_obs_materialization_protects_only_defined_shortcut_reference_links(self):
+        source = (
+            "[obs:OAW-TSK-cli] and [arbitrary obs:OAW-TSK-archived].\n"
+            "[See obs:OAW-TSK-archived\nfor details]\n"
+            "[fenced obs:OAW-TSK-archived]\n"
+            "[obs:OAW-TSK-cli]: https://example.test/cli\n"
+            "[See obs:OAW-TSK-archived for details]: https://example.test/details\n"
+            "```text\n[fenced obs:OAW-TSK-archived]: https://example.test/fenced\n```\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertIn("[obs:OAW-TSK-cli]", rendered)
+        self.assertIn(
+            "[arbitrary [[Projects/Obsidian Agent Workflow/Tasks/Archived task|"
+            "OAW-TSK-archived]]].",
+            rendered,
+        )
+        self.assertIn("[See obs:OAW-TSK-archived\nfor details]\n", rendered)
+        self.assertIn(
+            "[fenced [[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]]",
+            rendered,
+        )
+        self.assertIn("[obs:OAW-TSK-cli]: https://example.test/cli\n", rendered)
+        self.assertEqual(
+            [item.reference for item in replacements],
+            ["obs:OAW-TSK-archived", "obs:OAW-TSK-archived"],
+        )
+
+    def test_fake_definitions_in_multiline_protected_spans_do_not_activate_shortcuts(self):
+        source = (
+            "``code starts\n"
+            "[code obs:OAW-TSK-cli]: https://example.test/code\n"
+            "code ends``\n"
+            "[outer label\n"
+            "[link obs:OAW-TSK-archived]: https://example.test/link\n"
+            "continued](https://example.test/outer)\n"
+            "[code obs:OAW-TSK-cli]\n"
+            "[link obs:OAW-TSK-archived]\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertIn("[code obs:OAW-TSK-cli]: https://example.test/code", rendered)
+        self.assertIn("[link obs:OAW-TSK-archived]: https://example.test/link", rendered)
+        self.assertIn(
+            "[code [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]]",
+            rendered,
+        )
+        self.assertIn(
+            "[link [[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]]",
+            rendered,
+        )
+        self.assertEqual(len(replacements), 2)
+
+    def test_shortcut_definitions_require_valid_destination_variants(self):
+        source = (
+            "[angle obs:OAW-TSK-cli] and [bare obs:OAW-TSK-archived].\n"
+            "[empty obs:OAW-TSK-cli]\n"
+            "[angle obs:OAW-TSK-cli]: <https://example.test/angle>\n"
+            '[bare obs:OAW-TSK-archived]: /docs_(v1) "Documentation"\n'
+            "[empty obs:OAW-TSK-cli]:\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertIn("[angle obs:OAW-TSK-cli] and [bare obs:OAW-TSK-archived].", rendered)
+        self.assertEqual(
+            rendered.count("[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|"), 2
+        )
+        self.assertIn("[angle obs:OAW-TSK-cli]: <https://example.test/angle>", rendered)
+        self.assertIn('[bare obs:OAW-TSK-archived]: /docs_(v1) "Documentation"', rendered)
+        self.assertEqual(
+            [item.reference for item in replacements],
+            ["obs:OAW-TSK-cli", "obs:OAW-TSK-cli"],
+        )
+
+    def test_reference_definition_continuation_titles_are_protected(self):
+        source = (
+            "[double obs:OAW-TSK-cli] [single obs:OAW-TSK-archived] "
+            "[paren obs:OAW-TSK-cli]\n"
+            "[double obs:OAW-TSK-cli]: /double\n"
+            '  "Double title obs:OAW-TSK-archived"\n'
+            "[single obs:OAW-TSK-archived]: <https://example.test/single>\n"
+            " 'Single title obs:OAW-TSK-cli'\n"
+            "[paren obs:OAW-TSK-cli]: /paren\n"
+            "   (Parenthesized title obs:OAW-TSK-archived)\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertEqual(rendered, source)
+        self.assertEqual(replacements, [])
+
+    def test_invalid_reference_definition_title_continuation_remains_prose(self):
+        source = (
+            "[invalid obs:OAW-TSK-cli]\n"
+            "[invalid obs:OAW-TSK-cli]: /invalid\n"
+            '  "unterminated title obs:OAW-TSK-archived\n'
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertIn("[invalid obs:OAW-TSK-cli]\n", rendered)
+        self.assertIn("[invalid obs:OAW-TSK-cli]: /invalid\n", rendered)
+        self.assertIn(
+            '  "unterminated title [[Projects/Obsidian Agent Workflow/Tasks/Archived task|'
+            "OAW-TSK-archived]]\n",
+            rendered,
+        )
+        self.assertEqual([item.reference for item in replacements], ["obs:OAW-TSK-archived"])
+
+    def test_reference_definition_title_rejects_tabs_and_nested_parentheses(self):
+        source = (
+            "[tab obs:OAW-TSK-cli] [nested obs:OAW-TSK-cli] "
+            "[escaped obs:OAW-TSK-cli]\n"
+            "[tab obs:OAW-TSK-cli]: /tab\n"
+            '\t"tab title obs:OAW-TSK-archived"\n'
+            "[nested obs:OAW-TSK-cli]: /nested\n"
+            "  (outer (nested title obs:OAW-TSK-archived)\n"
+            "[escaped obs:OAW-TSK-cli]: /escaped\n"
+            "  (escaped \\( title obs:OAW-TSK-archived)\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertIn("[tab obs:OAW-TSK-cli] [nested obs:OAW-TSK-cli]", rendered)
+        self.assertIn(
+            '\t"tab title [[Projects/Obsidian Agent Workflow/Tasks/Archived task|'
+            'OAW-TSK-archived]]"\n',
+            rendered,
+        )
+        self.assertIn(
+            "  (outer (nested title "
+            "[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]])\n",
+            rendered,
+        )
+        self.assertIn("  (escaped \\( title obs:OAW-TSK-archived)\n", rendered)
+        self.assertEqual(len(replacements), 2)
+
+    def test_cross_line_link_candidate_stops_at_blank_block_boundary(self):
+        source = "[not a link obs:OAW-TSK-cli\n\ncontinued](https://example.test)\n"
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertEqual(
+            rendered,
+            "[not a link [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|"
+            "OAW-TSK-cli]]\n\ncontinued](https://example.test)\n",
+        )
+        self.assertEqual([item.reference for item in replacements], ["obs:OAW-TSK-cli"])
+
+    def test_obs_materialization_protects_balanced_reference_definition_labels(self):
+        source = (
+            "[nested [obs:OAW-TSK-cli] label]: https://example.test/obs:OAW-TSK-archived\n"
+            "[escaped \\] obs:OAW-TSK-archived]: https://example.test/obs:OAW-TSK-cli\n"
+            "Outside obs:OAW-TSK-cli.\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertIn(
+            "[nested [obs:OAW-TSK-cli] label]: https://example.test/obs:OAW-TSK-archived\n",
+            rendered,
+        )
+        self.assertIn(
+            "[escaped \\] obs:OAW-TSK-archived]: https://example.test/obs:OAW-TSK-cli\n",
+            rendered,
+        )
+        self.assertIn(
+            "Outside [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]].",
+            rendered,
+        )
+        self.assertEqual([item.reference for item in replacements], ["obs:OAW-TSK-cli"])
+
+    def test_obs_materialization_protects_complete_multiline_reference_definitions(self):
+        source = (
+            "[next-line obs:OAW-TSK-cli]:\n"
+            "  <https://example.test/obs:OAW-TSK-archived>\n"
+            "[multi\n"
+            "label obs:OAW-TSK-archived]: /docs\n"
+            "[title obs:OAW-TSK-cli]: /title\n"
+            '  "title obs:OAW-TSK-archived"\n'
+            "Outside obs:OAW-TSK-cli.\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertEqual(
+            rendered,
+            source.removesuffix("Outside obs:OAW-TSK-cli.\n")
+            + "Outside [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]].\n",
+        )
+        self.assertEqual([item.reference for item in replacements], ["obs:OAW-TSK-cli"])
+
+    def test_obs_materialization_rejects_invalid_reference_definition_destinations_and_labels(self):
+        oversized_label = "x" * 1000
+        source = (
+            "[invalid destination obs:OAW-TSK-cli]: https://example.test/<bad>\n"
+            f"[{oversized_label} obs:OAW-TSK-archived]: /too-long\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertIn(
+            "[invalid destination [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|"
+            "OAW-TSK-cli]]]: https://example.test/<bad>",
+            rendered,
+        )
+        self.assertIn(
+            "[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]]: /too-long",
+            rendered,
+        )
+        self.assertEqual(
+            [item.reference for item in replacements],
+            ["obs:OAW-TSK-cli", "obs:OAW-TSK-archived"],
+        )
+
+    def test_cross_line_link_candidate_stops_at_setext_block_boundary(self):
+        source = "[not a link obs:OAW-TSK-cli\n===\ncontinued](https://example.test)\n"
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertEqual(
+            rendered,
+            "[not a link [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|"
+            "OAW-TSK-cli]]\n===\ncontinued](https://example.test)\n",
+        )
+        self.assertEqual([item.reference for item in replacements], ["obs:OAW-TSK-cli"])
+
+    def test_multiline_code_spans_are_protected_by_shared_automatic_materialization(self):
+        note = (
+            "`single line break\nobs:OAW-TSK-cli\nclosing` then obs:OAW-TSK-cli.\n"
+            "``multi line break\nobs:OAW-TSK-archived\nclosing`` then "
+            "obs:OAW-TSK-archived."
+        )
+        rendered, replacements = links.materialize_obs_references(note, self.vault)
+
+        self.assertIn("`single line break\nobs:OAW-TSK-cli\nclosing` then [[", rendered)
+        self.assertIn("``multi line break\nobs:OAW-TSK-archived\nclosing`` then [[", rendered)
+        self.assertEqual(len(replacements), 2)
+
+        created = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Multiline materialization",
+            "--note",
+            note,
+        )
+        self.assertEqual(created.returncode, 0, created.stderr)
+        created_text = (
+            self.vault / "Projects/Obsidian Agent Workflow/Tasks/Multiline materialization.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("`single line break\nobs:OAW-TSK-cli\nclosing` then [[", created_text)
+        self.assertIn("``multi line break\nobs:OAW-TSK-archived\nclosing`` then [[", created_text)
+
+    def test_table_pipe_detection_inherits_cross_line_code_span_state(self):
+        source = "``code starts\nobs:OAW-TSK-archived closes`` | obs:OAW-TSK-cli |\n"
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertEqual(
+            rendered,
+            "``code starts\nobs:OAW-TSK-archived closes`` | "
+            "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI\\|OAW-TSK-cli]] |\n",
+        )
+        self.assertEqual(len(replacements), 1)
+        self.assertEqual(
+            replacements[0].link,
+            "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI\\|OAW-TSK-cli]]",
+        )
+
+    def test_automatic_materialization_failures_do_not_partially_write(self):
+        board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"
+        before_board = board_path.read_bytes()
+        missing_task = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Missing materialized target",
+            "--note",
+            "See obs:OAW-TSK-does-not-exist.",
+        )
+        self.assertEqual(missing_task.returncode, 1)
+        self.assertFalse(
+            (
+                self.vault / "Projects/Obsidian Agent Workflow/Tasks/Missing materialized target.md"
+            ).exists()
+        )
+        self.assertEqual(board_path.read_bytes(), before_board)
+
+        target = self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
+        before_target = target.read_bytes()
+        missing_observation = self.run_oaw(
+            "note",
+            "observe",
+            "AGT-TSK-obsidian-task-ids",
+            "--title",
+            "Missing target",
+            "--body",
+            "See obs:OAW-TSK-does-not-exist.",
+        )
+        self.assertEqual(missing_observation.returncode, 1)
+        self.assertEqual(target.read_bytes(), before_target)
+
+    def test_durable_prose_writes_share_obs_materialization(self):
+        created = self.run_oaw(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Materialized prose",
+            "--note",
+            "Start from obs:OAW-TSK-cli.",
+        )
+        self.assertEqual(created.returncode, 0, created.stderr)
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Materialized prose.md"
+        task = task_path.read_text(encoding="utf-8")
+        durable = "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]"
+        self.assertIn(f"Start from {durable}.", task)
+
+        transitioned = self.run_oaw(
+            "task",
+            "start",
+            "OAW-TSK-materialized-prose",
+            "--note",
+            "Continue with obs:OAW-TSK-archived.",
+        )
+        self.assertEqual(transitioned.returncode, 0, transitioned.stderr)
+        task = task_path.read_text(encoding="utf-8")
+        self.assertIn(
+            "Continue with [[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]].",
+            task,
+        )
+
+        noted = self.run_oaw(
+            "task",
+            "note",
+            "OAW-TSK-materialized-prose",
+            "--note",
+            "Task note obs:OAW-TSK-cli.",
+            "--checks",
+            "obs:OAW-TSK-archived",
+        )
+        self.assertEqual(noted.returncode, 0, noted.stderr)
+        task_text = task_path.read_text(encoding="utf-8")
+        self.assertIn(f"Task note {durable}.", task_text)
+        self.assertIn("checks: obs:OAW-TSK-archived", task_text)
+
+        project = self.run_oaw(
+            "project",
+            "create",
+            "--name",
+            "Materialized Project",
+            "--alias",
+            "MAT",
+            "--goal",
+            "Build from obs:OAW-TSK-cli.",
+        )
+        self.assertEqual(project.returncode, 0, project.stderr)
+        project_index = self.vault / "Projects/Materialized Project/Index.md"
+        self.assertIn(f"Build from {durable}.", project_index.read_text(encoding="utf-8"))
+
+        session = self.run_oaw(
+            "note",
+            "session",
+            "AGT-TSK-obsidian-task-ids",
+            "--note",
+            "Session note obs:OAW-TSK-cli.",
+        )
+        self.assertEqual(session.returncode, 0, session.stderr)
+        agent_task = self.vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
+        self.assertIn(f"Session note {durable}.", agent_task.read_text(encoding="utf-8"))
+
+        observation = self.run_oaw(
+            "note",
+            "observe",
+            "AGT-TSK-obsidian-task-ids",
+            "--title",
+            "Literal title obs:OAW-TSK-cli",
+            "--body",
+            "Observation body obs:OAW-TSK-cli.",
+        )
+        self.assertEqual(observation.returncode, 0, observation.stderr)
+        agent_text = agent_task.read_text(encoding="utf-8")
+        self.assertIn("Literal title obs:OAW-TSK-cli", agent_text)
+        self.assertIn(f"Observation body {durable}.", agent_text)
+
+        feedback = self.run_oaw(
+            "feedback",
+            "create",
+            "--title",
+            "Materialized feedback",
+            "--type",
+            "verified",
+            "--scope",
+            "materialization",
+            "--body",
+            "Feedback body obs:OAW-TSK-cli.",
+            "--command",
+            "obs:OAW-TSK-archived",
+        )
+        self.assertEqual(feedback.returncode, 0, feedback.stderr)
+        feedback_note = next((self.vault / "Agents/Feedback").glob("*Materialized feedback.md"))
+        feedback_text = feedback_note.read_text(encoding="utf-8")
+        self.assertIn(f"Feedback body {durable}.", feedback_text)
+        self.assertIn('command: "obs:OAW-TSK-archived"', feedback_text)
+
+        retro = self.run_oaw(
+            "retro",
+            "create",
+            "--title",
+            "Materialized retrospective",
+            "--summary",
+            "Summary obs:OAW-TSK-cli.",
+        )
+        self.assertEqual(retro.returncode, 0, retro.stderr)
+        retro_note = next(
+            (self.vault / "Agents/Retrospectives").glob("*materialized retrospective.md")
+        )
+        self.assertIn(f"Summary {durable}.", retro_note.read_text(encoding="utf-8"))
+
+        research = self.run_oaw(
+            "research",
+            "scaffold",
+            "--project",
+            "obs:OAW",
+            "--track",
+            "materialization-exclusion",
+            "--title",
+            "Research obs:OAW-TSK-cli",
+        )
+        self.assertEqual(research.returncode, 0, research.stderr)
+        prompt = self.vault / (
+            "Projects/Obsidian Agent Workflow/Research/materialization-exclusion/Prompt.md"
+        )
+        self.assertIn("Research obs:OAW-TSK-cli", prompt.read_text(encoding="utf-8"))
+
+    def test_link_materialize_rejects_conflicting_dry_run_and_write(self):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8") + "\nobs:OAW-TSK-archived\n",
+            encoding="utf-8",
+        )
+        before = task_path.read_bytes()
+
+        proc = self.run_oaw("link", "materialize", "OAW-TSK-cli", "--dry-run", "--write")
+
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(proc.stdout, "")
+        self.assertIn("not allowed with argument", proc.stderr)
+        self.assertEqual(task_path.read_bytes(), before)
 
     def test_link_ensure_rejects_conflicting_dry_run_and_write(self):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
