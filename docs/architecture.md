@@ -134,8 +134,9 @@ adapter modules above them would violate the non-goals.
 All dev-only, via `[dependency-groups] dev` (uv-managed):
 
 - **pytest** (+ `pytest-cov`): migrate from `unittest`. Test split below.
-- **ruff**: lint + format (`[tool.ruff]`, line-length 100, rules `E,F,W,I,UP,B,SIM`;
-  format replaces manual style policing in review).
+- **ruff**: lint + format (`[tool.ruff]`, line-length 100; format replaces manual
+  style policing in review). The maintained rule rationale and exceptions live
+  in [`docs/linting.md`](linting.md).
 - **pyrefly**: type checking (`[tool.pyrefly]`, `project-includes = ["src", "tests"]`,
   `python-version = "3.13"` to match `requires-python`). The codebase already
   carries useful hints; the checker makes them load-bearing.

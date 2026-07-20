@@ -33,8 +33,15 @@ line-length = 100
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "TID251"]
 ignore = ["E501"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"argparse".msg = "The OAW frontend uses Typer; argparse is allowed only in standalone scripts."
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/check_cli_parity.py" = ["TID251"]
+"skills/oaw-research/scripts/oaw_research.py" = ["TID251"]
 
 [tool.pyrefly]
 project-includes = ["src/**/*.py", "tests/**/*.py"]

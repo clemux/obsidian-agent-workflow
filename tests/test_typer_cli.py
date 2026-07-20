@@ -1,9 +1,6 @@
-import ast
-import inspect
 from pathlib import Path
 
 import pytest
-import typer
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -69,26 +66,6 @@ EXPECTED_COMMAND_PATHS = {
 }
 
 
-def imported_targets(source: str) -> set[str]:
-    tree = ast.parse(source)
-    targets: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            targets.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            relative_prefix = "." * node.level
-            module_prefix = f"{relative_prefix}{node.module or ''}"
-            for alias in node.names:
-                separator = "." if node.module else ""
-                targets.add(f"{module_prefix}{separator}{alias.name}")
-    return targets
-
-
-def is_forbidden_cli_dependency(target: str) -> bool:
-    normalized = target.lstrip(".")
-    return normalized == "argparse" or normalized.startswith("argparse.")
-
-
 def command_paths() -> set[tuple[str, ...]]:
     paths: set[tuple[str, ...]] = {()}
 
@@ -143,23 +120,6 @@ def test_run_changing_commands_do_not_offer_missing_session_escape_hatch(command
 
     assert result.exit_code == 0, result.stderr
     assert "--allow-missing-session-id" not in result.stdout
-
-
-def test_typer_frontend_has_no_argparse_or_cli_dependency() -> None:
-    targets = imported_targets(inspect.getsource(cli))
-
-    assert not {target for target in targets if is_forbidden_cli_dependency(target)}
-
-
-@pytest.mark.parametrize(
-    "statement",
-    [
-        "import argparse",
-        "from argparse import ArgumentParser",
-    ],
-)
-def test_typer_dependency_guard_recognizes_forbidden_import_forms(statement: str) -> None:
-    assert any(is_forbidden_cli_dependency(target) for target in imported_targets(statement))
 
 
 @pytest.mark.parametrize("help_flag", ["-h", "--help"])
@@ -432,7 +392,6 @@ aliases:
         env={"OAW_VAULT": str(tmp_path)},
     )
 
-    assert isinstance(cli.app, typer.Typer)
     assert result.exit_code == 0, result.output
     assert result.output == f"{tmp_path / 'Projects/Example/Tasks/Resolver CLI.md'}\n"
 
