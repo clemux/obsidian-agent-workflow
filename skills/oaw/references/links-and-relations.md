@@ -50,7 +50,8 @@ oaw link materialize OAW-TSK-cli --write
   (`?ref=obs:OAW-TSK-cli`, `file/obs:OAW-TSK-cli.md`, `obs:OAW-TSK-cli.md`,
   `obs:OAW-TSK-cli#Heading`, `obs:OAW-TSK-cli^block`).
 - The same engine runs at write time for `oaw task create`, task lifecycle notes
-  (`task backlog|start|review|complete`, `task note`), `oaw project create`
+  (`task backlog|promote|start|pause|review|complete`, `task note`, `task priority`,
+  `task preparedness`, and `task relation` mutations), `oaw project create`
   (`--goal`), `oaw note session`, `oaw note observe`, `oaw feedback create`, and
   `oaw retro create` (summary). Each of those commands aborts the whole write under
   the same strict-resolution rule before touching the vault.
