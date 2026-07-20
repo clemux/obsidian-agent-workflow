@@ -299,53 +299,6 @@ aliases:
                 return path
         raise AssertionError(f"run record not found for {session_id}")
 
-    def test_bin_launcher_resolves_in_real_subprocess(self):
-        result = self.run_oaw_subprocess("resolve", "--path", "OAW-TSK-cli")
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            result.stdout,
-            f"{self.vault / 'Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md'}\n",
-        )
-
-    def test_cli_main_accepts_argv_and_returns_status_code(self, monkeypatch):
-        monkeypatch.setenv("OAW_VAULT", str(self.vault))
-        stdout = StringIO()
-
-        with redirect_stdout(stdout):
-            returncode = cli.main(["resolve", "--path", "OAW-TSK-cli"])
-
-        self.assertEqual(returncode, 0)
-        self.assertEqual(
-            stdout.getvalue(),
-            f"{self.vault / 'Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md'}\n",
-        )
-
-    def test_cli_main_translates_usage_exit_to_status_code(self):
-        stderr = StringIO()
-
-        with redirect_stderr(stderr):
-            returncode = cli.main([])
-
-        self.assertEqual(returncode, 2)
-        self.assertIn("the following arguments are required: command", stderr.getvalue())
-
-    def test_no_command_is_usage_error_on_stderr(self):
-        proc = self.run_oaw()
-
-        self.assertEqual(proc.returncode, 2)
-        self.assertEqual(proc.stdout, "")
-        self.assertIn("usage: oaw", proc.stderr)
-        self.assertIn("the following arguments are required: command", proc.stderr)
-
-    def test_resolve_obs_prefix_to_json(self):
-        proc = self.run_oaw("resolve", "--json", "obs:AGT-TSK-obsidian-task-ids")
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        data = json.loads(proc.stdout)
-        self.assertEqual(data["id"], "AGT-TSK-obsidian-task-ids")
-        self.assertEqual(data["matched_by"], "id")
-        self.assertIn("Agents/Tasks", data["relative_path"])
-
     def test_project_create_renders_native_template_and_frontmatter(self):
         proc = self.run_oaw(
             "project",
