@@ -16,6 +16,7 @@ dev = [
     "pyrefly",
     "pytest",
     "pytest-cov",
+    "pytest-xdist>=3.8.0",
     "pyyaml>=6.0.3",
     "ruff",
 ]
@@ -45,3 +46,7 @@ search-path = ["."]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# Parallel by default: the suite is dominated by subprocess-spawn wait, which
+# scales almost linearly with workers. Use -n 0 for serial runs (profiling,
+# --durations, pyinstrument, or debugging a single test).
+addopts = ["-n", "auto"]
