@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-20
 **Result:** 44.14s → 6.48–6.62s (~6.7x faster)
+**Round 2 result (same day, suite grown to 513 tests):** serial 45.8s → 16.5s, parallel 6.2s → 4.2s — see [Round 2](#round-2--subprocess-reduction-and-re-profile) below.
 
 *Update 2026-07-20: the xdist recommendation below was approved and applied after the initial profiling run — see Fix 1.*
 
@@ -97,4 +98,62 @@ No "same setup, different assertions" or "one atomic function, many tests" dupli
 ## Recommendations
 
 1. **Adopt pytest-xdist.** ✅ **Applied as Fix 1** (approved by maintainer after the initial run).
-2. **Reconsider subprocess-vs-in-process architecture for CLI tests** *(not applied — needs per-test maintainer review)*. `tests/test_oaw.py` has ~250 tests paying a fixed ~90ms Python-interpreter + `typer`/`oaw.cli` import cost per subprocess spawn (confirmed via `pyinstrument` and `-X importtime`), and several tests spawn 3–7 subprocesses each. Only a handful of tests in `test_cli_parity.py` specifically target launcher/shebang-level concerns that require a real subprocess; if most of `test_oaw.py`'s coverage doesn't require process-level isolation, converting a subset to in-process `cli.main()` calls (as `test_cli_main_accepts_argv_and_returns_status_code` already does) would cut wall time further. This changes what each converted test verifies, so it needs per-test review and maintainer sign-off — not a mechanical fix.
+2. **Reconsider subprocess-vs-in-process architecture for CLI tests** *(✅ applied in Round 2 after a 212-test audit — see below)*. `tests/test_oaw.py` has ~250 tests paying a fixed ~90ms Python-interpreter + `typer`/`oaw.cli` import cost per subprocess spawn (confirmed via `pyinstrument` and `-X importtime`), and several tests spawn 3–7 subprocesses each. Only a handful of tests in `test_cli_parity.py` specifically target launcher/shebang-level concerns that require a real subprocess; if most of `test_oaw.py`'s coverage doesn't require process-level isolation, converting a subset to in-process `cli.main()` calls (as `test_cli_main_accepts_argv_and_returns_status_code` already does) would cut wall time further. This changes what each converted test verifies, so it needs per-test review and maintainer sign-off — not a mechanical fix.
+
+## Round 2 — subprocess reduction and re-profile
+
+**Date:** 2026-07-20 (after the xdist merge; suite had grown from 472 to 512 tests)
+
+### Fix 2: run CLI tests in-process by default
+
+**Commit:** `perf(tests): run CLI tests in-process by default`
+**File:** `tests/test_oaw.py`
+**Time saved (serial):** 45.8s → 25.4s
+
+A per-test audit of all 204 `test_oaw.py` tests plus the 8 `test_cli_parity.py`
+tests (212 total, independently adjudicated) found no `test_oaw.py` test whose
+intent depends on real process semantics. `run_oaw` now invokes `cli.main(argv)`
+in-process, swapping `os.environ` wholesale per call and capturing both streams;
+exceptions the CLI does not translate propagate as test failures instead of
+being downgraded to exit-code 1. The subprocess path remains as
+`run_oaw_subprocess`, deliberately covering:
+
+- one `bin/oaw` launcher bootstrap smoke test (added, +1 test → 513);
+- fresh-process canaries whose second invocation must prove reconstruction from
+  durable vault state, not in-memory reuse (`task start` idempotency, provider
+  refresh, session-snapshot refresh, export retry);
+- the OS argv unicode boundary (accented-title slug test);
+- all of `test_cli_parity.py`, whose two shebang tests require a real dying
+  interpreter and whose remaining tests target the installed-launcher surface.
+
+### Fix 3: build the Click command tree once per process
+
+**Commit:** `perf(cli): build the Click command tree once per process`
+**File:** `src/oaw/cli.py`
+**Time saved (serial):** 25.4s → 16.5s
+
+Re-profiling after Fix 2 (`pyinstrument`, serial) showed `get_command(app)`
+rebuilding the full Typer→Click command tree on every `cli.main` call (~50ms),
+~12s across the suite — cost that subprocess spawning had hidden inside the
+90ms interpreter startup. `cli.main` now caches the built command in a module
+global. A real CLI process calls `main` once, so production behavior is
+unchanged; invocation state lives in per-call `Context` objects.
+
+### Round 2 combined result
+
+| State | Serial (`-n 0`) | Parallel (`-n auto`, 24 cores) |
+|---|---|---|
+| Post-merge main (512 tests) | 45.8s | 6.2s |
+| + Fix 2: in-process `run_oaw` (513 tests) | 25.4s | ~4.6s |
+| + Fix 3: command-tree cache | 16.5s | **4.2s** |
+
+### Remaining time is genuine workload
+
+`pyinstrument` on the slowest converted test now bottoms out in `fsync` inside
+`VaultTransaction.commit` — real vault I/O, not overhead. The durations top-20
+is headed by intentionally-subprocess tests: `test_cli_parity.py` (~2.7s total,
+one spawn per subcommand in the help-surface walk) and the ~0.2s fresh-process
+canaries. The ~245 converted tests each run in single-digit milliseconds of
+CLI logic plus per-test tempdir vault setup. No further mechanical lever was
+identified; further gains would come from test-architecture changes (fixture
+factories, thinner CLI-contract layer) tracked separately.
