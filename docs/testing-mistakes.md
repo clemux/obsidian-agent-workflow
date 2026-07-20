@@ -82,8 +82,10 @@ the static tool cannot observe.
 
 ### Shared test helpers became dead framework code
 
-**Evidence:** commit `4585e25` (`test: remove redundant coverage`); unused
-helpers in `tests/support.py` and `tests/test_captures.py`.
+**Evidence:** commits `4585e25` (`test: remove redundant coverage`) and
+`91ec15f` (`test: trim redundant validation scaffolding`); unused and one-call
+helpers in `tests/support.py`, `tests/test_captures.py`, and
+`tests/test_note_body_input.py`.
 
 Several shared assertion and capture-creation helpers had no callers after test
 architecture refactors.
@@ -164,6 +166,27 @@ and failure behavior rather than reimplementing the invariant in another test.
 Keep separate assertions only for additional metadata quality the validator
 does not enforce.
 
+### Invalid-input matrices repeated the same validation branch
+
+**Evidence:** commit `91ec15f`; blank lifecycle notes, invalid capture dates,
+feedback IDs and dates, ambiguous frontmatter values, and invalid CLI choices.
+
+Several parametrized tests supplied multiple values that reached the same
+`strip()`, regex, date-parser exception, or framework choice-rejection branch.
+The extra rows increased test count and repeated filesystem no-write snapshots
+without representing another failure mode.
+
+**Why it was bloat:** counting examples is not the same as covering branches.
+Large-looking matrices obscured which input classes were actually distinct and
+made every new validation test appear to require exhaustive enumeration.
+
+**Candidate cross-project instruction:** choose invalid examples by distinct
+validation path or boundary class, not by the number of plausible bad values.
+Keep one representative per branch plus meaningful boundary pairs, such as a
+format error and a calendar-validity error. Preserve broader matrices only for
+security-sensitive parsers, portable filename rules, or explicit compatibility
+tables where each value represents a separate contract.
+
 ### Compatibility coverage can resemble bloat without being obsolete
 
 **Evidence:** exploration of historical capture locations, safe-export markers,
@@ -190,8 +213,9 @@ a short reusable policy built around these themes:
 2. Prefer outcomes over private call counts.
 3. Prefer static gates over source-inspection tests.
 4. Make parametrized setup proportional to each case.
-5. Audit test scaffolding when migrations or features finish.
-6. Require production/docs/data tracing before retiring compatibility tests.
+5. Select parameter cases by distinct branch or boundary class.
+6. Audit test scaffolding when migrations or features finish.
+7. Require production/docs/data tracing before retiring compatibility tests.
 
 The shared policy should remain concise. Keep the detailed rationale and local
 examples here rather than copying this entire document into every project's
