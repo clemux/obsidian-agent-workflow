@@ -9,19 +9,7 @@ from typer.testing import CliRunner
 from oaw import captures, cli, notes
 from oaw.frontmatter import parse_frontmatter
 from oaw.notes import split_note
-
-SESSION_ENV = {
-    "CODEX_THREAD_ID": "test-thread",
-    "CLAUDE_SESSION_ID": "",
-    "CLAUDE_CODE_SESSION_ID": "",
-    "OPENCODE_SESSION_ID": "",
-    "GEMINI_SESSION_ID": "",
-}
-
-
-def write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+from tests.support import SESSION_ENV, add_project_index, file_state, write
 
 
 def run(vault: Path, args, *, env=None, **kwargs):
@@ -36,10 +24,7 @@ def local_date() -> str:
 
 
 def write_project_index(vault: Path, folder: str, index_id: str) -> None:
-    write(
-        vault / f"Projects/{folder}/Index.md",
-        f"---\ntype: project\nid: {index_id}\naliases:\n  - {index_id}\n---\n\n# {folder}\n",
-    )
+    add_project_index(vault, folder, index_id)
 
 
 def capture_fm(vault: Path, note_id: str) -> dict:
@@ -51,14 +36,6 @@ def create_capture(vault: Path, title: str, *extra) -> str:
     result = run(vault, ["capture", "create", "--title", title, "--json", *extra])
     assert result.exit_code == 0, result.stderr
     return json.loads(result.stdout)["id"]
-
-
-def vault_state(vault: Path) -> dict[str, bytes]:
-    return {
-        path.relative_to(vault).as_posix(): path.read_bytes()
-        for path in sorted(vault.rglob("*"))
-        if path.is_file()
-    }
 
 
 CANONICAL = "Captures/Entries"
@@ -209,11 +186,11 @@ def test_create_url_validation_and_dedup(tmp_path: Path):
     assert '  - "https://example.com/a"' in text
     assert '  - "https://example.com/b"' in text
 
-    before = vault_state(tmp_path)
+    before = file_state(tmp_path)
     bad = run(tmp_path, ["capture", "create", "--title", "Bad", "--url", "ftp://example.com/x"])
     assert bad.exit_code == 2
     assert bad.stdout == ""
-    assert vault_state(tmp_path) == before
+    assert file_state(tmp_path) == before
 
 
 @pytest.mark.parametrize(
@@ -224,14 +201,14 @@ def test_create_url_validation_and_dedup(tmp_path: Path):
     ],
 )
 def test_create_rejects_multiline_url_without_writing(tmp_path: Path, url: str):
-    before = vault_state(tmp_path)
+    before = file_state(tmp_path)
 
     result = run(tmp_path, ["capture", "create", "--title", "Bad URL", "--url", url])
 
     assert result.exit_code == 2
     assert "single-line" in result.stderr
     assert result.stdout == ""
-    assert vault_state(tmp_path) == before
+    assert file_state(tmp_path) == before
 
 
 def test_create_collision_suffixes(tmp_path: Path):
@@ -252,7 +229,7 @@ def test_create_collision_suffixes(tmp_path: Path):
 
 def test_create_concurrent_collision_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_project_index(tmp_path, "Demo", "DEMO-index")
-    before = vault_state(tmp_path)
+    before = file_state(tmp_path)
 
     def always_exists(*_args, **_kwargs):
         raise FileExistsError("racing creator")
@@ -262,7 +239,7 @@ def test_create_concurrent_collision_bounded(tmp_path: Path, monkeypatch: pytest
     result = run(tmp_path, ["capture", "create", "--title", "Race", "--project", "obs:DEMO"])
     assert result.exit_code == 1
     assert "unique capture id" in result.stderr
-    assert vault_state(tmp_path) == before
+    assert file_state(tmp_path) == before
 
 
 @pytest.mark.parametrize(
@@ -275,11 +252,11 @@ def test_create_concurrent_collision_bounded(tmp_path: Path, monkeypatch: pytest
     ],
 )
 def test_create_usage_errors(tmp_path: Path, args):
-    before = vault_state(tmp_path)
+    before = file_state(tmp_path)
     result = run(tmp_path, args, input="stdin must not matter")
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert vault_state(tmp_path) == before
+    assert file_state(tmp_path) == before
 
 
 def test_create_session_provenance(tmp_path: Path):
@@ -580,7 +557,7 @@ def test_triage_incubating_flow(tmp_path: Path):
 @pytest.mark.parametrize("review_after", ["2026-13-01", "2026-04-31", "2025-02-29"])
 def test_triage_incubating_rejects_invalid_calendar_date(tmp_path: Path, review_after: str):
     make_canonical_capture(tmp_path, "CAP-invalid-date")
-    before = vault_state(tmp_path)
+    before = file_state(tmp_path)
 
     result = run(
         tmp_path,
@@ -600,7 +577,7 @@ def test_triage_incubating_rejects_invalid_calendar_date(tmp_path: Path, review_
     assert result.exit_code == 2
     assert "argument --review-after: must use YYYY-MM-DD" in result.stderr
     assert result.stdout == ""
-    assert vault_state(tmp_path) == before
+    assert file_state(tmp_path) == before
 
 
 def test_triage_incubating_accepts_valid_leap_date(tmp_path: Path):
@@ -711,7 +688,7 @@ def test_triage_triaged_requires_destination(tmp_path: Path):
 
 def test_triage_rejects_capture_as_its_own_destination_without_writing(tmp_path: Path):
     make_canonical_capture(tmp_path, "CAP-self")
-    before = vault_state(tmp_path)
+    before = file_state(tmp_path)
 
     result = run(
         tmp_path,
@@ -732,7 +709,7 @@ def test_triage_rejects_capture_as_its_own_destination_without_writing(tmp_path:
     assert result.exit_code == 1
     assert "cannot be its own destination" in result.stderr
     assert result.stdout == ""
-    assert vault_state(tmp_path) == before
+    assert file_state(tmp_path) == before
 
 
 def test_triage_reason_contract(tmp_path: Path):

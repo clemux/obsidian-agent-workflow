@@ -1,0 +1,486 @@
+"""Shared, importable test infrastructure for the oaw CLI suite.
+
+This module is a plain library of helpers and vault factories (NOT pytest
+fixtures) so that both fixture-based tests and non-fixture callers (for example
+the class-based ``tests/test_oaw.py`` and throwaway verification scripts) can
+reuse exactly the same building blocks. Thin pytest fixtures wrapping these
+helpers live in ``tests/conftest.py``.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from collections.abc import Sequence
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
+
+from oaw import cli
+from oaw.sessions import SESSION_ENV as _SESSION_ENV_VARS
+
+ROOT = Path(__file__).resolve().parents[1]
+BIN = ROOT / "bin" / "oaw"
+FIXTURES = ROOT / "tests" / "fixtures"
+
+# --------------------------------------------------------------------------- #
+# Process emulation and filesystem snapshots
+# --------------------------------------------------------------------------- #
+
+
+def run_oaw_in_process(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run the CLI via cli.main in this process, emulating the subprocess contract.
+
+    The merged mapping replaces os.environ wholesale for the duration of the call,
+    matching subprocess.run(env=...). Environment swapping assumes tests within one
+    xdist worker run on a single thread. An exception cli.main does not translate is
+    a programmer error, not CLI behavior: it propagates and fails the test instead
+    of being downgraded to a subprocess-style nonzero exit.
+    """
+    stdout = StringIO()
+    stderr = StringIO()
+    saved_environ = os.environ.copy()
+    os.environ.clear()
+    os.environ.update(env)
+    try:
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            returncode = cli.main(args)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_environ)
+    return subprocess.CompletedProcess(
+        args=["oaw", *args],
+        returncode=returncode,
+        stdout=stdout.getvalue(),
+        stderr=stderr.getvalue(),
+    )
+
+
+def run_oaw_subprocess(
+    args: Sequence[str], env: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Run the checkout CLI through ``bin/oaw`` in a real subprocess.
+
+    Reserved for tests whose subject is the process boundary itself (launcher
+    resolution, filesystem effects of a genuinely separate process); everything
+    else uses :func:`run_oaw_in_process`.
+    """
+    return subprocess.run(
+        [sys.executable, str(BIN), *args],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def run_record_for(vault: Path, session_id: str) -> Path:
+    """Return the run record under ``Agents/Runs`` whose agent session matches."""
+    for path in (vault / "Agents/Runs").glob("*.md"):
+        if f'agent_session_id: "{session_id}"' in path.read_text(encoding="utf-8"):
+            return path
+    raise AssertionError(f"run record not found for {session_id}")
+
+
+def snapshot_tree_without_following_symlinks(
+    root: Path,
+) -> dict[str, tuple[str, bytes | str | None]]:
+    """Snapshot every entry under ``root`` without following symlinks.
+
+    Directories, symlinks, and regular files are all recorded, so this is the
+    single source of truth for exact tree reproduction and diffing (structure,
+    symlink targets, and file bytes). Use :func:`vault_state` for the lighter
+    file-content-only snapshot used in "no write" assertions.
+    """
+    snapshot: dict[str, tuple[str, bytes | str | None]] = {}
+    for current, directories, files in os.walk(root, followlinks=False):
+        parent = Path(current)
+        for name in sorted([*directories, *files]):
+            path = parent / name
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                snapshot[relative] = ("symlink", os.readlink(path))
+            elif path.is_dir():
+                snapshot[relative] = ("directory", None)
+            else:
+                snapshot[relative] = ("file", path.read_bytes())
+    return snapshot
+
+
+def file_state(root: Path) -> dict[str, bytes]:
+    """Return a relpath -> file-bytes snapshot of every file under ``root``.
+
+    Only regular files are recorded (directories are omitted). This is the
+    lightweight "did any file change?" snapshot for before/after "no write"
+    assertions where directory creation is not part of the contract. For a
+    snapshot that also captures directory structure and symlink targets, use
+    :func:`snapshot_tree_without_following_symlinks`.
+    """
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Session environment presets (derived from oaw.sessions.SESSION_ENV)
+# --------------------------------------------------------------------------- #
+
+# One active Codex thread; every other supported harness variable is set to the
+# empty string so its harness is treated as inactive.
+SESSION_ENV: dict[str, str] = {
+    env_name: ("test-thread" if env_name == "CODEX_THREAD_ID" else "")
+    for _, env_name in _SESSION_ENV_VARS
+}
+
+# Unset every supported harness session variable so test outcomes do not depend
+# on which agent harness (if any) happens to be running the suite. The ``None``
+# values are a CliRunner convention (unset the variable); this mapping must NOT
+# be passed to run_oaw_in_process, which requires str values for os.environ.
+NO_SESSION_ENV: dict[str, str | None] = {env_name: None for _, env_name in _SESSION_ENV_VARS}
+
+
+# --------------------------------------------------------------------------- #
+# Outcome assertion helpers
+# --------------------------------------------------------------------------- #
+
+
+def _outcome(result: object) -> tuple[int, str, str]:
+    """Normalize a click Result or subprocess.CompletedProcess to (code, out, err)."""
+    if hasattr(result, "returncode"):
+        return (
+            result.returncode,  # type: ignore[attr-defined]
+            result.stdout,  # type: ignore[attr-defined]
+            result.stderr,  # type: ignore[attr-defined]
+        )
+    return (
+        result.exit_code,  # type: ignore[attr-defined]
+        result.stdout,  # type: ignore[attr-defined]
+        result.stderr,  # type: ignore[attr-defined]
+    )
+
+
+def _streams(stdout: str, stderr: str) -> str:
+    return f"\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
+
+
+def assert_ok(result: object, *, allow_stderr: bool = False) -> None:
+    """Assert a successful invocation: exit code 0 and (by default) empty stderr.
+
+    Pass ``allow_stderr=True`` for commands whose success contract includes
+    stderr warnings (for example ``capture list`` reporting malformed notes).
+    """
+    code, stdout, stderr = _outcome(result)
+    if code != 0:
+        raise AssertionError(f"expected exit 0, got {code}{_streams(stdout, stderr)}")
+    if not allow_stderr and stderr != "":
+        raise AssertionError(f"expected empty stderr on success{_streams(stdout, stderr)}")
+
+
+def assert_usage_error(result: object, *fragments: str) -> None:
+    """Assert a usage error: exit code 2, empty stdout, each fragment in stderr."""
+    code, stdout, stderr = _outcome(result)
+    if code != 2:
+        raise AssertionError(f"expected exit 2 (usage), got {code}{_streams(stdout, stderr)}")
+    if stdout != "":
+        raise AssertionError(f"expected empty stdout on usage error{_streams(stdout, stderr)}")
+    for fragment in fragments:
+        if fragment not in stderr:
+            raise AssertionError(f"expected {fragment!r} in stderr{_streams(stdout, stderr)}")
+
+
+def assert_domain_error(result: object, *fragments: str) -> None:
+    """Assert a domain error: exit code 1, empty stdout, each fragment in stderr."""
+    code, stdout, stderr = _outcome(result)
+    if code != 1:
+        raise AssertionError(f"expected exit 1 (domain), got {code}{_streams(stdout, stderr)}")
+    if stdout != "":
+        raise AssertionError(f"expected empty stdout on domain error{_streams(stdout, stderr)}")
+    for fragment in fragments:
+        if fragment not in stderr:
+            raise AssertionError(f"expected {fragment!r} in stderr{_streams(stdout, stderr)}")
+
+
+# --------------------------------------------------------------------------- #
+# Filesystem helper
+# --------------------------------------------------------------------------- #
+
+
+def write(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` as UTF-8, creating parent directories."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# Composable vault factories
+#
+# Each factory takes an explicit vault root and writes exactly the note bodies
+# used by tests/test_oaw.py's setup_method. Composing all of them via
+# build_legacy_vault reproduces that fixture tree byte-for-byte.
+# --------------------------------------------------------------------------- #
+
+
+def make_vault(root: Path) -> Path:
+    """Ensure ``root`` exists as a bare vault directory and return it."""
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _task_frontmatter(project: str, task_id: str, status: str, tags: Sequence[str]) -> str:
+    lines = [
+        "---",
+        "type: task",
+        f"project: {project}",
+        f"status: {status}",
+        f"id: {task_id}",
+        "aliases:",
+        f"  - {task_id}",
+    ]
+    if tags:
+        lines.append("tags:")
+        lines.extend(f"  - {tag}" for tag in tags)
+    lines.append("---")
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def add_task(
+    root: Path,
+    folder: str,
+    filename: str,
+    task_id: str,
+    *,
+    project: str,
+    status: str = "todo",
+    tags: Sequence[str] = (),
+    body: str,
+) -> Path:
+    """Write a project task note under ``Projects/<folder>/Tasks/<filename>``.
+
+    ``project`` is the frontmatter ``project:`` value (which may differ from the
+    display ``folder``). ``body`` is the complete Markdown following the
+    frontmatter block, including the ``# Title`` heading.
+    """
+    path = root / "Projects" / folder / "Tasks" / filename
+    write(path, _task_frontmatter(project, task_id, status, tags) + body)
+    return path
+
+
+def add_agent_task(
+    root: Path,
+    filename: str,
+    task_id: str,
+    *,
+    status: str = "open",
+    body: str,
+) -> Path:
+    """Write a vault-wide agent task note under ``Agents/Tasks/<filename>``.
+
+    Agent tasks carry no ``project:`` frontmatter. ``body`` is the complete
+    Markdown following the frontmatter, including the ``# Title`` heading.
+    """
+    frontmatter = (
+        f"---\ntype: task\nstatus: {status}\nid: {task_id}\naliases:\n  - {task_id}\n---\n\n"
+    )
+    path = root / "Agents" / "Tasks" / filename
+    write(path, frontmatter + body)
+    return path
+
+
+def add_project_index(
+    root: Path,
+    name: str,
+    alias_id: str,
+    *,
+    title: str | None = None,
+) -> Path:
+    """Write a project ``Index.md`` under ``Projects/<name>/``.
+
+    ``alias_id`` is the frontmatter id and sole alias; the ``# <title>`` heading
+    defaults to ``name`` when ``title`` is not given.
+    """
+    heading = name if title is None else title
+    content = f"---\ntype: project\nid: {alias_id}\naliases:\n  - {alias_id}\n---\n\n# {heading}\n"
+    path = root / "Projects" / name / "Index.md"
+    write(path, content)
+    return path
+
+
+_RESEARCH_TEMPLATE = """---
+type: research-prompt
+project: {{project}}
+track: {{track}}
+title: {{title}}
+created: {{date}}
+---
+
+# Prompt - {{title}}
+
+## Running research sessions
+
+## Local packet context
+
+- Project: {{project}}
+- Track: {{track}}
+
+## Deep research prompt
+
+```text
+Research {{title}} for a reader with no access to local notes or files.
+
+Precise questions:
+1. Replace this placeholder with the research questions.
+
+Deliverable: Replace this placeholder with the expected output format.
+```
+"""
+
+
+def add_research_template(root: Path) -> Path:
+    """Write ``Templates/Research packet.md`` used by the research workflow."""
+    path = root / "Templates" / "Research packet.md"
+    write(path, _RESEARCH_TEMPLATE)
+    return path
+
+
+_PROJECT_TEMPLATE = """---
+type: project
+project: example-project
+status: active
+repo: /path/to/repo
+tags:
+  - projects
+---
+
+# {{title}}
+
+## Goal
+
+Write the smallest useful description of the project outcome.
+
+## Current state
+
+- Status:
+- Repo:
+- Next action:
+
+## Shared project workspace
+
+![[Templates/Project workspace.base#Work queue]]
+
+## Agent notes
+
+Start here, then read active task notes before acting.
+"""
+
+
+def add_project_template(root: Path) -> Path:
+    """Write ``Templates/Small project index.md`` used by project creation."""
+    path = root / "Templates" / "Small project index.md"
+    write(path, _PROJECT_TEMPLATE)
+    return path
+
+
+_LEGACY_BOARD = """---
+kanban-plugin: board
+type: board
+project: obsidian-agent-workflow
+id: OAW-board
+aliases:
+  - OAW-board
+---
+
+## Active
+
+## Todo
+
+- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli
+
+## Done
+
+"""
+
+
+def add_legacy_board(root: Path) -> Path:
+    """Write the retired kanban board note used to prove lifecycle non-interference."""
+    path = root / "Projects" / "Obsidian Agent Workflow" / "Board.md"
+    write(path, _LEGACY_BOARD)
+    return path
+
+
+def add_captures(root: Path) -> list[Path]:
+    """Write the legacy active and archived capture notes under the project Inbox."""
+    active = root / "Projects" / "Obsidian Agent Workflow" / "Inbox" / "Active capture.md"
+    write(
+        active,
+        "---\n"
+        "type: capture\n"
+        "project: obsidian-agent-workflow\n"
+        "status: active\n"
+        "id: OAW-CAP-active\n"
+        "aliases:\n"
+        "  - OAW-CAP-active\n"
+        "---\n"
+        "\n"
+        "# Active capture\n",
+    )
+    archived = root / "Projects" / "Obsidian Agent Workflow" / "Inbox" / "Archived capture.md"
+    write(
+        archived,
+        "---\n"
+        "type: capture\n"
+        "project: obsidian-agent-workflow\n"
+        "status: archived\n"
+        "id: OAW-CAP-archived\n"
+        "aliases:\n"
+        "  - OAW-CAP-archived\n"
+        "---\n"
+        "\n"
+        "# Archived capture\n",
+    )
+    return [active, archived]
+
+
+def build_legacy_vault(root: Path) -> Path:
+    """Reproduce tests/test_oaw.py setup_method's full fixture tree at ``root``.
+
+    Composing every factory here yields the same nine-note vault the class-based
+    suite seeds, byte-for-byte. Returns the vault root.
+    """
+    make_vault(root)
+    add_agent_task(
+        root,
+        "Resolve vault-wide Obsidian task IDs.md",
+        "AGT-TSK-obsidian-task-ids",
+        status="open",
+        body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
+    )
+    add_task(
+        root,
+        "Obsidian Agent Workflow",
+        "Resolver CLI.md",
+        "OAW-TSK-cli",
+        project="obsidian-agent-workflow",
+        status="todo",
+        tags=("projects",),
+        body="# Resolver CLI\n\n## Goal\n\nBuild it.\n\n## Agent sessions\n\n",
+    )
+    add_project_index(root, "Obsidian Agent Workflow", "OAW-index")
+    add_research_template(root)
+    add_project_template(root)
+    add_project_index(root, "Codex Delegation", "CDX-index")
+    add_task(
+        root,
+        "Obsidian Agent Workflow",
+        "Archived task.md",
+        "OAW-TSK-archived",
+        project="obsidian-agent-workflow",
+        status="archived",
+        body="# Archived task\n",
+    )
+    add_legacy_board(root)
+    add_captures(root)
+    return root

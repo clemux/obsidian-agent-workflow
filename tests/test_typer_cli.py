@@ -8,6 +8,7 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from oaw import cli
+from tests.support import add_project_index, snapshot_tree_without_following_symlinks, write
 
 EXPECTED_COMMAND_PATHS = {
     (),
@@ -68,11 +69,6 @@ EXPECTED_COMMAND_PATHS = {
 }
 
 
-def write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
 def imported_targets(source: str) -> set[str]:
     tree = ast.parse(source)
     targets: set[str] = set()
@@ -125,25 +121,7 @@ def test_top_level_usage_contract_lists_registered_commands(args: list[str], err
 
 
 def write_project_index(vault: Path) -> None:
-    write(
-        vault / "Projects/Parity/Index.md",
-        """---
-type: project
-id: PRT-index
-aliases:
-  - PRT-index
----
-
-# Parity
-""",
-    )
-
-
-def vault_state(vault: Path) -> dict[str, bytes | None]:
-    return {
-        path.relative_to(vault).as_posix(): path.read_bytes() if path.is_file() else None
-        for path in sorted(vault.rglob("*"))
-    }
+    add_project_index(vault, "Parity", "PRT-index")
 
 
 def test_typer_command_tree_matches_declared_contract() -> None:
@@ -710,7 +688,7 @@ def test_typer_domain_error_uses_stderr_and_exit_class_one(tmp_path: Path) -> No
 
 def test_typer_domain_error_does_not_write_the_vault(tmp_path: Path) -> None:
     write_project_index(tmp_path)
-    before = vault_state(tmp_path)
+    before = snapshot_tree_without_following_symlinks(tmp_path)
 
     result = CliRunner().invoke(
         cli.app,
@@ -727,4 +705,4 @@ def test_typer_domain_error_does_not_write_the_vault(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert result.stdout == ""
     assert "no note with frontmatter id or alias" in result.stderr
-    assert vault_state(tmp_path) == before
+    assert snapshot_tree_without_following_symlinks(tmp_path) == before

@@ -6,19 +6,8 @@ from typer.testing import CliRunner
 from oaw import cli, feedback
 from oaw.errors import OawError
 from oaw.notes import write_new_note_atomic
-from oaw.sessions import SESSION_ENV
 from oaw.tags import creation_tag_block, creation_tags
-
-# Unset every supported harness session variable so the test outcome does not
-# depend on which agent harness runs the suite.
-NO_SESSION_ENV: dict[str, str | None] = {env_name: None for _, env_name in SESSION_ENV}
-
-
-def vault_state(vault: Path) -> dict[str, bytes | None]:
-    return {
-        path.relative_to(vault).as_posix(): path.read_bytes() if path.is_file() else None
-        for path in sorted(vault.rglob("*"))
-    }
+from tests.support import NO_SESSION_ENV, snapshot_tree_without_following_symlinks
 
 
 def feedback_args(*extra: str) -> list[str]:
@@ -244,7 +233,7 @@ def test_feedback_create_accepts_explicit_id_body_file_and_stdin(tmp_path: Path)
 def test_feedback_body_source_validation_empty_and_unreadable_do_not_write(tmp_path: Path) -> None:
     runner = CliRunner()
     env = {"OAW_VAULT": str(tmp_path), "CODEX_THREAD_ID": "thread"}
-    before = vault_state(tmp_path)
+    before = snapshot_tree_without_following_symlinks(tmp_path)
     missing = runner.invoke(
         cli.app,
         [
@@ -263,7 +252,7 @@ def test_feedback_body_source_validation_empty_and_unreadable_do_not_write(tmp_p
     )
     assert missing.exit_code == 1
     assert "could not read feedback body file" in missing.stderr
-    assert vault_state(tmp_path) == before
+    assert snapshot_tree_without_following_symlinks(tmp_path) == before
 
     empty_file = tmp_path / "empty.md"
     empty_file.write_text("\n", encoding="utf-8")
@@ -285,8 +274,8 @@ def test_feedback_body_source_validation_empty_and_unreadable_do_not_write(tmp_p
     )
     assert empty_file_result.exit_code == 1
     assert "feedback body must not be empty" in empty_file_result.stderr
-    after_empty_file = vault_state(tmp_path)
-    assert after_empty_file == {**before, "empty.md": b"\n"}
+    after_empty_file = snapshot_tree_without_following_symlinks(tmp_path)
+    assert after_empty_file == {**before, "empty.md": ("file", b"\n")}
 
     empty = runner.invoke(
         cli.app,
@@ -295,7 +284,7 @@ def test_feedback_body_source_validation_empty_and_unreadable_do_not_write(tmp_p
     )
     assert empty.exit_code == 1
     assert "feedback body must not be empty" in empty.stderr
-    assert vault_state(tmp_path) == after_empty_file
+    assert snapshot_tree_without_following_symlinks(tmp_path) == after_empty_file
 
     neither = runner.invoke(
         cli.app,
