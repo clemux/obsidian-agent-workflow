@@ -128,7 +128,7 @@ def _build_capture_text(
     ]
     if urls:
         lines.append("urls:")
-        lines.extend(f"  - {url}" for url in urls)
+        lines.extend(f"  - {yaml_quote(url)}" for url in urls)
     if session_id:
         lines += ["session-ids:", f"  - {yaml_quote(session_id)}"]
     try:

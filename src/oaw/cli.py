@@ -1307,6 +1307,8 @@ def capture_create(
         _usage_error("capture create requires a non-empty --title")
     urls: list[str] = []
     for value in url or []:
+        if "\n" in value or "\r" in value:
+            _usage_error("argument --url: must be a single-line http:// or https:// URL")
         if not (value.startswith("http://") or value.startswith("https://")):
             _usage_error(f"argument --url: '{value}' must be an http:// or https:// URL")
         if value not in urls:
