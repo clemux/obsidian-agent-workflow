@@ -48,6 +48,24 @@ def test_append_session_entry_leaves_one_blank_line_before_following_heading():
     )
 
 
+@pytest.mark.parametrize("blank_line", ["  ", "\t"])
+def test_append_session_entry_trims_markdown_blank_section_tail(blank_line):
+    original = (
+        f"## Agent sessions\n\n{EXISTING_SESSION}\n{blank_line}\n"
+        "## Decisions\n\nKeep this decision.  \n"
+    )
+
+    result = append(original)
+
+    assert result == (
+        "## Agent sessions\n\n"
+        f"{EXISTING_SESSION}\n"
+        f"{session_entry('New entry.')}\n\n"
+        "## Decisions\n\n"
+        "Keep this decision.  \n"
+    )
+
+
 @pytest.mark.parametrize("line_ending", ["\n", "\r\n"])
 def test_append_session_entry_preserves_following_suffix_exactly(line_ending):
     suffix = f"## Decisions{line_ending}{line_ending}Keep this hard break.  {line_ending}"
