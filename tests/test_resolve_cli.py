@@ -1,8 +1,22 @@
 import json
 
-from oaw import cli, resolver
+import pytest
 
-from .support import write
+from oaw import cli, resolver
+from tests import support
+from tests.support import write
+
+
+@pytest.fixture
+def vault(tmp_path):
+    root = support.make_vault(tmp_path)
+    support.add_project_index(root, "Codex Delegation", "CDX-index")
+    return root
+
+
+@pytest.fixture
+def run_oaw(vault):
+    return support.make_runner(vault)
 
 
 def test_resolve_short_project_alias_to_project_index(run_oaw):
@@ -14,9 +28,9 @@ def test_resolve_short_project_alias_to_project_index(run_oaw):
     assert data["relative_path"] == "Projects/Codex Delegation/Index.md"
 
 
-def test_resolve_exact_match_wins_over_project_alias(run_oaw, legacy_vault):
+def test_resolve_exact_match_wins_over_project_alias(run_oaw, vault):
     write(
-        legacy_vault / "Projects/Codex Delegation/Tasks/Short code.md",
+        vault / "Projects/Codex Delegation/Tasks/Short code.md",
         """---
 type: task
 id: CDX
@@ -34,9 +48,9 @@ aliases:
     assert data["matched_by"] == "id"
 
 
-def test_resolve_ambiguous_project_alias_fails_with_candidates(run_oaw, legacy_vault):
+def test_resolve_ambiguous_project_alias_fails_with_candidates(run_oaw, vault):
     write(
-        legacy_vault / "Projects/Other Codex/Index.md",
+        vault / "Projects/Other Codex/Index.md",
         """---
 type: project
 id: CDX-index
@@ -54,9 +68,16 @@ aliases:
     assert "Projects/Other Codex/Index.md (project-alias)" in proc.stderr
 
 
-def test_duplicate_ids_fail(run_oaw, legacy_vault):
+def test_duplicate_ids_fail(run_oaw, vault):
+    support.add_agent_task(
+        vault,
+        "Resolve vault-wide Obsidian task IDs.md",
+        "AGT-TSK-obsidian-task-ids",
+        status="open",
+        body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
+    )
     write(
-        legacy_vault / "Other.md",
+        vault / "Other.md",
         """---
 id: AGT-TSK-obsidian-task-ids
 ---
@@ -69,12 +90,10 @@ id: AGT-TSK-obsidian-task-ids
     assert "not unique" in proc.stderr
 
 
-def test_resolve_prefilters_unrelated_frontmatter_before_parsing(
-    run_oaw, legacy_vault, monkeypatch
-):
+def test_resolve_prefilters_unrelated_frontmatter_before_parsing(vault, monkeypatch):
     for index in range(50):
         write(
-            legacy_vault / f"Noise/{index}.md",
+            vault / f"Noise/{index}.md",
             f"""---
 id: NOISE-{index}
 aliases:
@@ -85,7 +104,7 @@ aliases:
 """,
         )
     write(
-        legacy_vault / "Target.md",
+        vault / "Target.md",
         """---
 id: PERF-TARGET
 aliases:
@@ -104,7 +123,7 @@ aliases:
 
     monkeypatch.setattr(resolver, "parse_frontmatter", recording_parse)
 
-    match = cli.resolve_id("PERF-TARGET", legacy_vault)
+    match = cli.resolve_id("PERF-TARGET", vault)
 
     assert match.title == "Performance target"
     assert len(parsed) == 1

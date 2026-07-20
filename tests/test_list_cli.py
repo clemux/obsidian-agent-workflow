@@ -3,7 +3,45 @@ from pathlib import Path
 
 import pytest
 
+from tests import support
 from tests.support import write
+
+
+@pytest.fixture
+def vault(tmp_path: Path) -> Path:
+    """Vault with the "Obsidian Agent Workflow" project (index + a live and an
+    archived task) plus its capture notes -- the data most tests in this file
+    exercise. Tests needing other projects (Ranking, Ties, No Index, ...) seed
+    their own notes on top of this bare project.
+    """
+    root = support.make_vault(tmp_path)
+    support.add_project_index(root, "Obsidian Agent Workflow", "OAW-index")
+    support.add_task(
+        root,
+        "Obsidian Agent Workflow",
+        "Resolver CLI.md",
+        "OAW-TSK-cli",
+        project="obsidian-agent-workflow",
+        status="todo",
+        tags=("projects",),
+        body="# Resolver CLI\n\n## Goal\n\nBuild it.\n\n## Agent sessions\n\n",
+    )
+    support.add_task(
+        root,
+        "Obsidian Agent Workflow",
+        "Archived task.md",
+        "OAW-TSK-archived",
+        project="obsidian-agent-workflow",
+        status="archived",
+        body="# Archived task\n",
+    )
+    support.add_captures(root)
+    return root
+
+
+@pytest.fixture
+def run_oaw(vault: Path):
+    return support.make_runner(vault)
 
 
 def seed_ranked_tasks(vault: Path) -> None:
@@ -62,14 +100,14 @@ Work that has no priority or effort assigned yet.
     )
 
 
-def test_list_tasks_preserves_archived_rows(run_oaw, legacy_vault):
+def test_list_tasks_preserves_archived_rows(run_oaw, vault):
     proc = run_oaw("list", "--project", "Obsidian Agent Workflow")
     assert proc.returncode == 0, proc.stderr
     assert "OAW-TSK-cli" in proc.stdout
     assert "OAW-TSK-archived" in proc.stdout
 
 
-def test_list_default_output_unchanged_by_new_flags(run_oaw, legacy_vault):
+def test_list_default_output_unchanged_by_new_flags(run_oaw, vault):
     proc = run_oaw("list", "--project", "Obsidian Agent Workflow")
     assert proc.returncode == 0, proc.stderr
     for line in proc.stdout.splitlines():
@@ -79,8 +117,8 @@ def test_list_default_output_unchanged_by_new_flags(run_oaw, legacy_vault):
     ) in proc.stdout
 
 
-def test_list_sort_priority_orders_by_rank_then_effort_then_title(run_oaw, legacy_vault):
-    seed_ranked_tasks(legacy_vault)
+def test_list_sort_priority_orders_by_rank_then_effort_then_title(run_oaw, vault):
+    seed_ranked_tasks(vault)
     proc = run_oaw(
         "list",
         "--project",
@@ -94,8 +132,8 @@ def test_list_sort_priority_orders_by_rank_then_effort_then_title(run_oaw, legac
     assert proc.stdout.splitlines() == ["RNK-TSK-high", "RNK-TSK-mid", "RNK-TSK-untriaged"]
 
 
-def test_list_sort_priority_tie_breaks_on_effort_and_title(run_oaw, legacy_vault):
-    tasks = legacy_vault / "Projects/Ties/Tasks"
+def test_list_sort_priority_tie_breaks_on_effort_and_title(run_oaw, vault):
+    tasks = vault / "Projects/Ties/Tasks"
     write(
         tasks / "A.md",
         "---\ntype: task\nstatus: todo\npriority: 1\neffort: L\nid: TIE-TSK-a\n---\n\n# Aardvark\n",
@@ -114,8 +152,8 @@ def test_list_sort_priority_tie_breaks_on_effort_and_title(run_oaw, legacy_vault
     assert proc.stdout.splitlines() == ["TIE-TSK-c", "TIE-TSK-b", "TIE-TSK-a"]
 
 
-def test_list_field_projection_adds_frontmatter_columns(run_oaw, legacy_vault):
-    seed_ranked_tasks(legacy_vault)
+def test_list_field_projection_adds_frontmatter_columns(run_oaw, vault):
+    seed_ranked_tasks(vault)
     proc = run_oaw(
         "list",
         "--project",
@@ -132,23 +170,23 @@ def test_list_field_projection_adds_frontmatter_columns(run_oaw, legacy_vault):
     assert lines[-1] == "RNK-TSK-untriaged\t\t\tUntriaged task"
 
 
-def test_list_unknown_field_errors_clearly(run_oaw, legacy_vault):
-    seed_ranked_tasks(legacy_vault)
+def test_list_unknown_field_errors_clearly(run_oaw, vault):
+    seed_ranked_tasks(vault)
     proc = run_oaw("list", "--project", "Ranking", "--fields", "id,bogus")
     assert proc.returncode != 0
     assert proc.stdout == ""
     assert "unknown list field: bogus" in proc.stderr
 
 
-def test_list_goal_column_snippets_problem_section(run_oaw, legacy_vault):
-    seed_ranked_tasks(legacy_vault)
+def test_list_goal_column_snippets_problem_section(run_oaw, vault):
+    seed_ranked_tasks(vault)
     proc = run_oaw("list", "--project", "Ranking", "--fields", "id", "--goal")
     assert proc.returncode == 0, proc.stderr
     assert "RNK-TSK-high\tHigh priority work that must ship the ranked view first." in proc.stdout
 
 
-def test_list_json_emits_sorted_projected_records(run_oaw, legacy_vault):
-    seed_ranked_tasks(legacy_vault)
+def test_list_json_emits_sorted_projected_records(run_oaw, vault):
+    seed_ranked_tasks(vault)
     proc = run_oaw(
         "list",
         "--project",
@@ -171,7 +209,7 @@ def test_list_json_emits_sorted_projected_records(run_oaw, legacy_vault):
     assert payload[0]["goal"] == "High priority work that must ship the ranked view first."
 
 
-def test_list_invalid_sort_choice_is_usage_error(run_oaw, legacy_vault):
+def test_list_invalid_sort_choice_is_usage_error(run_oaw, vault):
     proc = run_oaw("list", "--project", "Obsidian Agent Workflow", "--sort", "nope")
     assert proc.returncode == 2
     assert "usage: oaw list" in proc.stderr
@@ -185,7 +223,7 @@ def test_list_invalid_sort_choice_is_usage_error(run_oaw, legacy_vault):
         pytest.param("obs:OAW", id="obs-prefixed-alias"),
     ],
 )
-def test_list_accepts_project_aliases(run_oaw, legacy_vault, alias):
+def test_list_accepts_project_aliases(run_oaw, vault, alias):
     expected = run_oaw("list", "--project", "Obsidian Agent Workflow")
     assert expected.returncode == 0, expected.stderr
     proc = run_oaw("list", "--project", alias)
@@ -193,8 +231,8 @@ def test_list_accepts_project_aliases(run_oaw, legacy_vault, alias):
     assert proc.stdout == expected.stdout
 
 
-def test_list_prefers_exact_project_folder_over_bare_alias(run_oaw, legacy_vault):
-    task = legacy_vault / "Projects/OAW/Tasks/Exact folder task.md"
+def test_list_prefers_exact_project_folder_over_bare_alias(run_oaw, vault):
+    task = vault / "Projects/OAW/Tasks/Exact folder task.md"
     write(
         task,
         "---\nid: EXACT-TSK-folder\nstatus: todo\ntype: task\n---\n\n# Exact folder task\n",
@@ -210,8 +248,8 @@ def test_list_prefers_exact_project_folder_over_bare_alias(run_oaw, legacy_vault
     assert "EXACT-TSK-folder" not in explicit_alias.stdout.splitlines()
 
 
-def test_list_accepts_project_folder_without_index_note(run_oaw, legacy_vault):
-    task = legacy_vault / "Projects/No Index/Tasks/Loose task.md"
+def test_list_accepts_project_folder_without_index_note(run_oaw, vault):
+    task = vault / "Projects/No Index/Tasks/Loose task.md"
     write(
         task,
         "---\nid: NOIDX-TSK-loose\nstatus: todo\ntype: task\n---\n\n# Loose task\n",
@@ -223,13 +261,13 @@ def test_list_accepts_project_folder_without_index_note(run_oaw, legacy_vault):
     assert "NOIDX-TSK-loose" in proc.stdout
 
 
-def test_list_rejects_unknown_project_alias(run_oaw, legacy_vault):
+def test_list_rejects_unknown_project_alias(run_oaw, vault):
     proc = run_oaw("list", "--project", "obs:BOGUS")
     assert proc.returncode != 0
     assert "project not found: obs:BOGUS" in proc.stderr
 
 
-def test_list_capture_hides_archived_by_default(run_oaw, legacy_vault):
+def test_list_capture_hides_archived_by_default(run_oaw, vault):
     proc = run_oaw(
         "list",
         "--project",
@@ -242,7 +280,7 @@ def test_list_capture_hides_archived_by_default(run_oaw, legacy_vault):
     assert "OAW-CAP-archived" not in proc.stdout
 
 
-def test_list_capture_can_include_or_select_archived(run_oaw, legacy_vault):
+def test_list_capture_can_include_or_select_archived(run_oaw, vault):
     proc = run_oaw(
         "list",
         "--project",

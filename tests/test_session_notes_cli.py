@@ -5,7 +5,26 @@ import pytest
 from tests import support
 
 
-def test_lifecycle_supports_agents_task_without_board_output(run_oaw, legacy_vault):
+@pytest.fixture
+def vault(tmp_path):
+    """Minimal vault: just the AGT- agent task most of this file's tests exercise."""
+    root = support.make_vault(tmp_path)
+    support.add_agent_task(
+        root,
+        "Resolve vault-wide Obsidian task IDs.md",
+        "AGT-TSK-obsidian-task-ids",
+        status="open",
+        body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
+    )
+    return root
+
+
+@pytest.fixture
+def run_oaw(vault):
+    return support.make_runner(vault)
+
+
+def test_lifecycle_supports_agents_task_without_board_output(run_oaw, vault):
     proc = run_oaw(
         "task",
         "start",
@@ -14,13 +33,13 @@ def test_lifecycle_supports_agents_task_without_board_output(run_oaw, legacy_vau
         "Should fail.",
     )
     assert proc.returncode == 0, proc.stderr
-    note = (legacy_vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md").read_text()
+    note = (vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md").read_text()
     assert "status: active" in note
     assert "execution: agent" in note
     assert "Board:" not in proc.stdout
 
 
-def test_note_session_appends_agent_session_to_non_project_note(run_oaw, legacy_vault):
+def test_note_session_appends_agent_session_to_non_project_note(run_oaw, vault):
     proc = run_oaw(
         "note",
         "session",
@@ -29,7 +48,7 @@ def test_note_session_appends_agent_session_to_non_project_note(run_oaw, legacy_
         "Reviewed resolver policy.",
     )
     assert proc.returncode == 0, proc.stderr
-    note = (legacy_vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md").read_text()
+    note = (vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md").read_text()
     assert "## Agent sessions" in note
     assert "CODEX_THREAD_ID=test-thread" in note
     assert 'session-ids:\n  - "test-thread"\n' in note
@@ -37,8 +56,8 @@ def test_note_session_appends_agent_session_to_non_project_note(run_oaw, legacy_
     assert "Updated: Agents/Tasks/Resolve vault-wide Obsidian task IDs.md" in proc.stdout
 
 
-def test_note_session_leaves_blank_line_before_following_heading(run_oaw, legacy_vault):
-    path = legacy_vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
+def test_note_session_leaves_blank_line_before_following_heading(run_oaw, vault):
+    path = vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
     support.write(
         path,
         """---
@@ -91,14 +110,12 @@ Keep this decision.
         pytest.param("session-ids:\n  - null\n", id="null-entry"),
     ],
 )
-def test_note_session_refuses_unsupported_session_ids_without_writing(
-    run_oaw, legacy_vault, session_ids
-):
-    path = legacy_vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
+def test_note_session_refuses_unsupported_session_ids_without_writing(run_oaw, vault, session_ids):
+    path = vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
     baseline = path.read_text(encoding="utf-8")
     seeded = baseline.replace("status: open\n", "status: open\n" + session_ids)
     path.write_text(seeded, encoding="utf-8")
-    before = support.snapshot_tree_without_following_symlinks(legacy_vault)
+    before = support.snapshot_tree_without_following_symlinks(vault)
 
     proc = run_oaw(
         "note",
@@ -110,12 +127,12 @@ def test_note_session_refuses_unsupported_session_ids_without_writing(
 
     assert proc.returncode != 0
     assert "session-ids must" in proc.stderr
-    assert support.snapshot_tree_without_following_symlinks(legacy_vault) == before
+    assert support.snapshot_tree_without_following_symlinks(vault) == before
 
 
-def test_note_observe_appends_block_under_target_section(run_oaw, legacy_vault):
+def test_note_observe_appends_block_under_target_section(run_oaw, vault):
     support.write(
-        legacy_vault / "Projects/Obsidian Agent Workflow/Research/Evidence.md",
+        vault / "Projects/Obsidian Agent Workflow/Research/Evidence.md",
         """---
 type: research
 id: OAW-RES-evidence
@@ -146,14 +163,14 @@ Later.
         "Provider-visible text needs a mechanical check.",
     )
     assert proc.returncode == 0, proc.stderr
-    note = (legacy_vault / "Projects/Obsidian Agent Workflow/Research/Evidence.md").read_text()
+    note = (vault / "Projects/Obsidian Agent Workflow/Research/Evidence.md").read_text()
     assert re.search(r"### \d{4}-\d{2}-\d{2} - Lint gap", note)
     assert "Provider-visible text needs a mechanical check." in note
     assert note.index("Lint gap") < note.index("## Decisions")
 
 
-def test_note_observe_ignores_headings_inside_fenced_code(run_oaw, legacy_vault):
-    path = legacy_vault / "Projects/Obsidian Agent Workflow/Research/Fenced.md"
+def test_note_observe_ignores_headings_inside_fenced_code(run_oaw, vault):
+    path = vault / "Projects/Obsidian Agent Workflow/Research/Fenced.md"
     support.write(
         path,
         """---
@@ -194,7 +211,7 @@ Later.
     assert note.index("Fence-safe append") < note.index("## Decisions")
 
 
-def test_retro_create_writes_dated_template(run_oaw, legacy_vault):
+def test_retro_create_writes_dated_template(run_oaw, vault):
     proc = run_oaw(
         "retro",
         "create",
@@ -206,7 +223,7 @@ def test_retro_create_writes_dated_template(run_oaw, legacy_vault):
         "2026-07-09",
     )
     assert proc.returncode == 0, proc.stderr
-    path = legacy_vault / "Agents/Retrospectives/2026-07-09 resolver dogfood.md"
+    path = vault / "Agents/Retrospectives/2026-07-09 resolver dogfood.md"
     assert path.exists()
     note = path.read_text(encoding="utf-8")
     assert "type: retrospective" in note
@@ -219,7 +236,7 @@ def test_retro_create_writes_dated_template(run_oaw, legacy_vault):
     assert "Created: Agents/Retrospectives/2026-07-09 resolver dogfood.md" in proc.stdout
 
 
-def test_retro_create_rejects_duplicate_id(run_oaw, legacy_vault):
+def test_retro_create_rejects_duplicate_id(run_oaw, vault):
     proc = run_oaw(
         "retro",
         "create",
@@ -233,7 +250,7 @@ def test_retro_create_rejects_duplicate_id(run_oaw, legacy_vault):
 
     assert proc.returncode != 0
     assert "id 'AGT-TSK-obsidian-task-ids' is already in use" in proc.stderr
-    assert not (legacy_vault / "Agents/Retrospectives/2026-07-09 duplicate id.md").exists()
+    assert not (vault / "Agents/Retrospectives/2026-07-09 duplicate id.md").exists()
 
 
 def test_retro_create_rejects_whitespace_only_id(run_oaw):
@@ -252,7 +269,7 @@ def test_retro_create_rejects_whitespace_only_id(run_oaw):
     assert "requires a non-empty --id" in proc.stderr
 
 
-def test_retro_create_normalizes_accented_title_slug(legacy_vault, base_env):
+def test_retro_create_normalizes_accented_title_slug(vault):
     proc = support.run_oaw_subprocess(
         [
             "retro",
@@ -262,11 +279,11 @@ def test_retro_create_normalizes_accented_title_slug(legacy_vault, base_env):
             "--date",
             "2026-07-09",
         ],
-        base_env,
+        support.cli_env(vault),
     )
 
     assert proc.returncode == 0, proc.stderr
-    path = legacy_vault / "Agents/Retrospectives/2026-07-09 revision generale.md"
+    path = vault / "Agents/Retrospectives/2026-07-09 revision generale.md"
     assert path.exists()
     note = path.read_text(encoding="utf-8")
     assert "id: AGT-RETRO-2026-07-09-revision-generale" in note

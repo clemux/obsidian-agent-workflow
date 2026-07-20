@@ -18,12 +18,43 @@ from tests.support import (
 )
 
 
-def test_task_start_updates_status_and_session_without_touching_legacy_board(run_oaw, legacy_vault):
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
+@pytest.fixture
+def vault(tmp_path: Path) -> Path:
+    """Minimal lifecycle vault: the project index, the Resolver CLI task, and the board.
+
+    Shadows the conftest ``legacy_vault`` fixture so this file's tests pay only for
+    the notes nearly all of them touch (``OAW-TSK-cli`` plus the non-interference
+    board). Tests that need the archived task, captures, or the vault-wide agent
+    task add them inline.
+    """
+    root = support.make_vault(tmp_path)
+    support.add_project_index(root, "Obsidian Agent Workflow", "OAW-index")
+    support.add_task(
+        root,
+        "Obsidian Agent Workflow",
+        "Resolver CLI.md",
+        "OAW-TSK-cli",
+        project="obsidian-agent-workflow",
+        status="todo",
+        tags=("projects",),
+        body="# Resolver CLI\n\n## Goal\n\nBuild it.\n\n## Agent sessions\n\n",
+    )
+    support.add_legacy_board(root)
+    return root
+
+
+@pytest.fixture
+def run_oaw(vault: Path):
+    """In-process runner bound to the minimal ``vault``; mirrors the conftest fixture."""
+    return support.make_runner(vault)
+
+
+def test_task_start_updates_status_and_session_without_touching_legacy_board(run_oaw, vault):
+    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
     board_before = board_path.read_bytes()
     proc = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Started work.")
     assert proc.returncode == 0, proc.stderr
-    task = (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+    task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
     assert "status: active" in task
     assert "CODEX_THREAD_ID=test-thread" in task
     assert 'session-ids:\n  - "test-thread"\n' in task
@@ -31,27 +62,28 @@ def test_task_start_updates_status_and_session_without_touching_legacy_board(run
     assert board_before == board_path.read_bytes()
 
 
-def test_task_start_is_idempotent_for_same_identity(base_env, legacy_vault):
+def test_task_start_is_idempotent_for_same_identity(vault):
+    env = support.cli_env(vault)
     first = support.run_oaw_subprocess(
-        ["task", "start", "OAW-TSK-cli", "--note", "First start."], base_env
+        ["task", "start", "OAW-TSK-cli", "--note", "First start."], env
     )
     second = support.run_oaw_subprocess(
-        ["task", "start", "OAW-TSK-cli", "--note", "Refresh start."], base_env
+        ["task", "start", "OAW-TSK-cli", "--note", "Refresh start."], env
     )
 
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr
-    records = list((legacy_vault / "Agents/Runs").glob("*.md"))
+    records = list((vault / "Agents/Runs").glob("*.md"))
     assert len(records) == 1
     text = records[0].read_text(encoding="utf-8")
     assert " — start — First start." in text
     assert " — refresh — Refresh start." in text
-    task = (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+    task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
     assert "execution: agent" in task
 
 
 def test_claude_refresh_uses_provider_and_session_identity_and_preserves_env(
-    base_env, legacy_vault
+    vault,
 ):
     cleared = {
         "CODEX_THREAD_ID": "",
@@ -68,7 +100,7 @@ def test_claude_refresh_uses_provider_and_session_identity_and_preserves_env(
             "--note",
             "Claude Code env start.",
         ],
-        {**base_env, **cleared, "CLAUDE_CODE_SESSION_ID": "shared-claude-session"},
+        {**support.cli_env(vault), **cleared, "CLAUDE_CODE_SESSION_ID": "shared-claude-session"},
     )
     second = support.run_oaw_subprocess(
         [
@@ -78,19 +110,19 @@ def test_claude_refresh_uses_provider_and_session_identity_and_preserves_env(
             "--note",
             "Claude env refresh.",
         ],
-        {**base_env, **cleared, "CLAUDE_SESSION_ID": "shared-claude-session"},
+        {**support.cli_env(vault), **cleared, "CLAUDE_SESSION_ID": "shared-claude-session"},
     )
 
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr
-    records = list((legacy_vault / "Agents/Runs").glob("*.md"))
+    records = list((vault / "Agents/Runs").glob("*.md"))
     assert len(records) == 1
     run_text = records[0].read_text(encoding="utf-8")
     assert "agent_session_env: CLAUDE_CODE_SESSION_ID" in run_text
     assert "agent_session_env: CLAUDE_SESSION_ID\n" not in run_text
     assert " — start — Claude Code env start." in run_text
     assert " — refresh — Claude env refresh." in run_text
-    task_text = (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text(
+    task_text = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text(
         encoding="utf-8"
     )
     assert "`CLAUDE_CODE_SESSION_ID=shared-claude-session`" in task_text
@@ -105,12 +137,10 @@ def test_claude_refresh_uses_provider_and_session_identity_and_preserves_env(
         ("complete", ["--checks", "pytest"]),
     ],
 )
-def test_lifecycle_rejects_corrupt_deterministic_run_before_writing(
-    command, extra, run_oaw, legacy_vault
-):
+def test_lifecycle_rejects_corrupt_deterministic_run_before_writing(command, extra, run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
-    run_path = run_record_for(legacy_vault, "test-thread")
+    run_path = run_record_for(vault, "test-thread")
     run_path.write_text(
         run_path.read_text(encoding="utf-8").replace(
             "agent_session_env: CODEX_THREAD_ID",
@@ -118,7 +148,7 @@ def test_lifecycle_rejects_corrupt_deterministic_run_before_writing(
         ),
         encoding="utf-8",
     )
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     result = run_oaw(
         "task",
@@ -132,7 +162,7 @@ def test_lifecycle_rejects_corrupt_deterministic_run_before_writing(
     assert result.returncode == 1
     assert "run record validation failed" in result.stderr
     assert "unsupported provider/session environment" in result.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
 @pytest.mark.parametrize(
@@ -150,25 +180,21 @@ def test_lifecycle_rejects_corrupt_deterministic_run_before_writing(
         ),
     ],
 )
-def test_refresh_rejects_misplaced_deterministic_task_scope(
-    old, new, expected, run_oaw, legacy_vault
-):
+def test_refresh_rejects_misplaced_deterministic_task_scope(old, new, expected, run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
-    run_path = run_record_for(legacy_vault, "test-thread")
+    run_path = run_record_for(vault, "test-thread")
     run_path.write_text(run_path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     refreshed = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Must not refresh.")
 
     assert refreshed.returncode == 1
     assert expected in refreshed.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_multiple_sessions_run_same_task_and_review_conflicts_even_when_stale(
-    run_oaw, legacy_vault
-):
+def test_multiple_sessions_run_same_task_and_review_conflicts_even_when_stale(run_oaw, vault):
     first = run_oaw("task", "start", "OAW-TSK-cli", "--note", "First session.")
     second = run_oaw(
         "task",
@@ -180,9 +206,9 @@ def test_multiple_sessions_run_same_task_and_review_conflicts_even_when_stale(
     )
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr
-    assert len(list((legacy_vault / "Agents/Runs").glob("*.md"))) == 2
+    assert len(list((vault / "Agents/Runs").glob("*.md"))) == 2
 
-    other = run_record_for(legacy_vault, "other-thread")
+    other = run_record_for(vault, "other-thread")
     other.write_text(
         other.read_text(encoding="utf-8")
         .replace(
@@ -216,7 +242,7 @@ def test_multiple_sessions_run_same_task_and_review_conflicts_even_when_stale(
     assert "another session remains running" in review.stderr
     assert (
         "status: active"
-        in (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+        in (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
     )
     listed = run_oaw("run", "list", "--json")
     rows = json.loads(listed.stdout)
@@ -318,7 +344,7 @@ def test_run_list_rejects_session_combined_with_current_session(run_oaw):
     ],
 )
 def test_transition_fails_closed_on_corrupt_sibling_record(
-    command, old, new, expected, run_oaw, legacy_vault
+    command, old, new, expected, run_oaw, vault
 ):
     current = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Current.")
     sibling = run_oaw(
@@ -331,12 +357,12 @@ def test_transition_fails_closed_on_corrupt_sibling_record(
     )
     assert current.returncode == 0, current.stderr
     assert sibling.returncode == 0, sibling.stderr
-    sibling_path = run_record_for(legacy_vault, "other-thread")
+    sibling_path = run_record_for(vault, "other-thread")
     sibling_path.write_text(
         sibling_path.read_text(encoding="utf-8").replace(old, new, 1),
         encoding="utf-8",
     )
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     result = run_oaw(
         "task",
@@ -350,10 +376,10 @@ def test_transition_fails_closed_on_corrupt_sibling_record(
 
     assert result.returncode == 1
     assert expected in result.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_legacy_direct_complete_refuses_another_running_session(run_oaw, legacy_vault):
+def test_legacy_direct_complete_refuses_another_running_session(run_oaw, vault):
     started = run_oaw(
         "task",
         "start",
@@ -363,7 +389,7 @@ def test_legacy_direct_complete_refuses_another_running_session(run_oaw, legacy_
         env={"CODEX_THREAD_ID": "other-thread"},
     )
     assert started.returncode == 0, started.stderr
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
     completed = run_oaw(
         "task",
         "complete",
@@ -375,10 +401,10 @@ def test_legacy_direct_complete_refuses_another_running_session(run_oaw, legacy_
     )
     assert completed.returncode == 1
     assert "another session remains running" in completed.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_cross_task_run_does_not_block_one_shot_completion(run_oaw, legacy_vault):
+def test_cross_task_run_does_not_block_one_shot_completion(run_oaw, vault):
     started = run_oaw(
         "task",
         "start",
@@ -389,7 +415,7 @@ def test_cross_task_run_does_not_block_one_shot_completion(run_oaw, legacy_vault
     )
     assert started.returncode == 0, started.stderr
     write(
-        legacy_vault / "Tasks/Independent.md",
+        vault / "Tasks/Independent.md",
         """---
 type: task
 status: todo
@@ -411,15 +437,15 @@ aliases:
         "pytest",
     )
     assert completed.returncode == 0, completed.stderr
-    task = (legacy_vault / "Tasks/Independent.md").read_text(encoding="utf-8")
+    task = (vault / "Tasks/Independent.md").read_text(encoding="utf-8")
     assert "status: done" in task
     assert "execution:" not in task
-    run = run_record_for(legacy_vault, "test-thread").read_text(encoding="utf-8")
+    run = run_record_for(vault, "test-thread").read_text(encoding="utf-8")
     assert "run_state: completed" in run
     assert "verification: pytest" in run
 
 
-def test_pause_changes_only_callers_run_and_preserves_task_status(run_oaw, legacy_vault):
+def test_pause_changes_only_callers_run_and_preserves_task_status(run_oaw, vault):
     for session in ("test-thread", "other-thread"):
         started = run_oaw(
             "task",
@@ -432,15 +458,15 @@ def test_pause_changes_only_callers_run_and_preserves_task_status(run_oaw, legac
         assert started.returncode == 0, started.stderr
     paused = run_oaw("task", "pause", "OAW-TSK-cli", "--note", "Pausing caller.")
     assert paused.returncode == 0, paused.stderr
-    assert "run_state: paused" in run_record_for(legacy_vault, "test-thread").read_text()
-    assert "run_state: running" in run_record_for(legacy_vault, "other-thread").read_text()
-    task = (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+    assert "run_state: paused" in run_record_for(vault, "test-thread").read_text()
+    assert "run_state: running" in run_record_for(vault, "other-thread").read_text()
+    task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
     assert "status: active" in task
 
 
 @pytest.mark.parametrize("execution", [None, "invalid"])
-def test_pause_requires_explicit_agent_or_hybrid_execution(execution, run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_pause_requires_explicit_agent_or_hybrid_execution(execution, run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     if execution:
         task_path.write_text(
             task_path.read_text(encoding="utf-8").replace(
@@ -448,51 +474,51 @@ def test_pause_requires_explicit_agent_or_hybrid_execution(execution, run_oaw, l
             ),
             encoding="utf-8",
         )
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
     paused = run_oaw("task", "pause", "OAW-TSK-cli", "--note", "No run.")
     assert paused.returncode == 1
     assert "requires execution: agent or hybrid" in paused.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_human_task_refuses_agent_start_before_any_write(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_human_task_refuses_agent_start_before_any_write(run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8").replace(
             "status: todo", "status: todo\nexecution: human"
         ),
         encoding="utf-8",
     )
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Must refuse.")
     assert started.returncode == 1
     assert "managed in Obsidian UI" in started.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
 @pytest.mark.parametrize("command", ["backlog", "promote"])
-def test_queue_transition_refuses_while_any_run_is_running(command, run_oaw, legacy_vault):
+def test_queue_transition_refuses_while_any_run_is_running(command, run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Run remains active.")
     assert started.returncode == 0, started.stderr
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     moved = run_oaw("task", command, "OAW-TSK-cli", "--note", "Must wait.")
 
     assert moved.returncode == 1
     assert "while an agent run is running" in moved.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_task_note_refreshes_only_existing_matching_running_run(run_oaw, legacy_vault):
+def test_task_note_refreshes_only_existing_matching_running_run(run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
     noted = run_oaw("task", "note", "OAW-TSK-cli", "--note", "Progress.", "--checks", "pytest")
     assert noted.returncode == 0, noted.stderr
-    run_text = run_record_for(legacy_vault, "test-thread").read_text(encoding="utf-8")
+    run_text = run_record_for(vault, "test-thread").read_text(encoding="utf-8")
     assert " — note — Progress. — verification: pytest" in run_text
 
     write(
-        legacy_vault / "Tasks/Unstarted.md",
+        vault / "Tasks/Unstarted.md",
         """---
 type: task
 status: todo
@@ -504,18 +530,18 @@ aliases:
 # Unstarted
 """,
     )
-    count = len(list((legacy_vault / "Agents/Runs").glob("*.md")))
+    count = len(list((vault / "Agents/Runs").glob("*.md")))
     unstarted = run_oaw("task", "note", "ROOT-TSK-unstarted", "--note", "Trace only.")
     assert unstarted.returncode == 0, unstarted.stderr
-    assert len(list((legacy_vault / "Agents/Runs").glob("*.md"))) == count
+    assert len(list((vault / "Agents/Runs").glob("*.md"))) == count
 
 
-def test_run_close_records_closer_without_changing_task(run_oaw, legacy_vault):
+def test_run_close_records_closer_without_changing_task(run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     task_before = task_path.read_bytes()
-    run_path = run_record_for(legacy_vault, "test-thread")
+    run_path = run_record_for(vault, "test-thread")
     identifier = run_path.stem
 
     closed = run_oaw(
@@ -537,8 +563,8 @@ def test_run_close_records_closer_without_changing_task(run_oaw, legacy_vault):
     assert task_before == task_path.read_bytes()
 
 
-def test_run_close_rejects_an_unsafe_run_id_without_writes(run_oaw, legacy_vault):
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+def test_run_close_rejects_an_unsafe_run_id_without_writes(run_oaw, vault):
+    before = snapshot_tree_without_following_symlinks(vault)
 
     closed = run_oaw(
         "run",
@@ -550,7 +576,7 @@ def test_run_close_rejects_an_unsafe_run_id_without_writes(run_oaw, legacy_vault
 
     assert closed.returncode == 1
     assert "invalid run id" in closed.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
 @pytest.mark.parametrize(
@@ -568,12 +594,12 @@ def test_run_close_rejects_an_unsafe_run_id_without_writes(run_oaw, legacy_vault
         ),
     ],
 )
-def test_run_close_rejects_forged_identity_or_task_scope(old, new, expected, run_oaw, legacy_vault):
+def test_run_close_rejects_forged_identity_or_task_scope(old, new, expected, run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
-    run_path = run_record_for(legacy_vault, "test-thread")
+    run_path = run_record_for(vault, "test-thread")
     run_path.write_text(run_path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     closed = run_oaw(
         "run",
@@ -586,7 +612,7 @@ def test_run_close_rejects_forged_identity_or_task_scope(old, new, expected, run
 
     assert closed.returncode == 1
     assert expected in closed.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
 @pytest.mark.parametrize(
@@ -606,13 +632,13 @@ def test_run_close_rejects_forged_identity_or_task_scope(old, new, expected, run
     ],
 )
 def test_run_close_rejects_malformed_mutable_schema_without_writes(
-    old, new, expected, run_oaw, legacy_vault
+    old, new, expected, run_oaw, vault
 ):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
-    run_path = run_record_for(legacy_vault, "test-thread")
+    run_path = run_record_for(vault, "test-thread")
     run_path.write_text(run_path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     closed = run_oaw(
         "run",
@@ -626,18 +652,25 @@ def test_run_close_rejects_malformed_mutable_schema_without_writes(
     assert closed.returncode == 1
     assert "run record validation failed" in closed.stderr
     assert expected in closed.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
 @pytest.mark.parametrize("operation", ["list", "audit", "close", "start", "create-start"])
-def test_symlinked_run_directory_fails_closed_without_writes(operation, run_oaw, legacy_vault):
+def test_symlinked_run_directory_fails_closed_without_writes(operation, run_oaw, vault):
+    support.add_agent_task(
+        vault,
+        "Resolve vault-wide Obsidian task IDs.md",
+        "AGT-TSK-obsidian-task-ids",
+        status="open",
+        body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
+    )
     with tempfile.TemporaryDirectory() as outside_raw:
         outside = Path(outside_raw)
         marker = outside / "outside-marker.txt"
         marker.write_text("outside must remain untouched\n", encoding="utf-8")
-        registry = legacy_vault / "Agents/Runs"
+        registry = vault / "Agents/Runs"
         registry.symlink_to(outside, target_is_directory=True)
-        before_vault = snapshot_tree_without_following_symlinks(legacy_vault)
+        before_vault = snapshot_tree_without_following_symlinks(vault)
         before_outside = snapshot_tree_without_following_symlinks(outside)
         identifier = "AGT-RUN-OAW-TSK-cli-codex-0123456789ab"
         arguments = {
@@ -666,22 +699,22 @@ def test_symlinked_run_directory_fails_closed_without_writes(operation, run_oaw,
 
         assert result.returncode == 1
         assert "run registry directory must not be a symlink" in result.stderr
-        assert before_vault == snapshot_tree_without_following_symlinks(legacy_vault)
+        assert before_vault == snapshot_tree_without_following_symlinks(vault)
         assert before_outside == snapshot_tree_without_following_symlinks(outside)
 
 
 @pytest.mark.parametrize("operation", ["list", "audit", "close", "start", "create-start"])
-def test_canonical_run_symlink_entry_fails_closed_without_writes(operation, run_oaw, legacy_vault):
+def test_canonical_run_symlink_entry_fails_closed_without_writes(operation, run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
-    canonical = run_record_for(legacy_vault, "test-thread")
+    canonical = run_record_for(vault, "test-thread")
     with tempfile.TemporaryDirectory() as outside_raw:
         outside = Path(outside_raw)
         outside_run = outside / canonical.name
         outside_run.write_bytes(canonical.read_bytes())
         canonical.unlink()
         canonical.symlink_to(outside_run)
-        before_vault = snapshot_tree_without_following_symlinks(legacy_vault)
+        before_vault = snapshot_tree_without_following_symlinks(vault)
         before_outside = snapshot_tree_without_following_symlinks(outside)
         arguments = {
             "list": ("run", "list"),
@@ -718,7 +751,7 @@ def test_canonical_run_symlink_entry_fails_closed_without_writes(operation, run_
             assert "noncanonical registry artifact" in result.stdout
         else:
             assert "run registry contains symlink entries" in result.stderr
-        assert before_vault == snapshot_tree_without_following_symlinks(legacy_vault)
+        assert before_vault == snapshot_tree_without_following_symlinks(vault)
         assert before_outside == snapshot_tree_without_following_symlinks(outside)
 
 
@@ -732,10 +765,10 @@ def test_run_audit_reports_clean_registry(run_oaw):
     assert audited.stdout == "Run audit: clean\n"
 
 
-def test_run_audit_reports_id_and_timestamp_inconsistencies(run_oaw, legacy_vault):
+def test_run_audit_reports_id_and_timestamp_inconsistencies(run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
-    run_path = run_record_for(legacy_vault, "test-thread")
+    run_path = run_record_for(vault, "test-thread")
     run_path.write_text(
         run_path.read_text(encoding="utf-8")
         .replace(f"id: {run_path.stem}", "id: AGT-RUN-wrong")
@@ -758,10 +791,10 @@ def test_run_audit_reports_id_and_timestamp_inconsistencies(run_oaw, legacy_vaul
     assert "malformed last_event_at" in audited.stdout
 
 
-def test_run_audit_reports_malformed_schema_and_terminal_metadata(run_oaw, legacy_vault):
+def test_run_audit_reports_malformed_schema_and_terminal_metadata(run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
-    run_path = run_record_for(legacy_vault, "test-thread")
+    run_path = run_record_for(vault, "test-thread")
     run_path.write_text(
         run_path.read_text(encoding="utf-8")
         .replace("type: agent-run", "type: other")
@@ -780,11 +813,11 @@ def test_run_audit_reports_malformed_schema_and_terminal_metadata(run_oaw, legac
     assert "terminal run missing ended_reason" in audited.stdout
 
 
-def test_run_audit_reports_record_under_noncanonical_filename(run_oaw, legacy_vault):
+def test_run_audit_reports_record_under_noncanonical_filename(run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
-    canonical = run_record_for(legacy_vault, "test-thread")
-    write(legacy_vault / "Agents/Runs/misplaced.md", canonical.read_text(encoding="utf-8"))
+    canonical = run_record_for(vault, "test-thread")
+    write(vault / "Agents/Runs/misplaced.md", canonical.read_text(encoding="utf-8"))
 
     audited = run_oaw("run", "audit")
 
@@ -792,8 +825,8 @@ def test_run_audit_reports_record_under_noncanonical_filename(run_oaw, legacy_va
     assert "misplaced.md: noncanonical registry artifact" in audited.stdout
 
 
-def test_run_audit_reports_nested_and_non_markdown_artifacts(run_oaw, legacy_vault):
-    directory = legacy_vault / "Agents/Runs"
+def test_run_audit_reports_nested_and_non_markdown_artifacts(run_oaw, vault):
+    directory = vault / "Agents/Runs"
     write(directory / "README.txt", "not a run\n")
     write(directory / "nested/AGT-RUN-hidden.md", "hidden run\n")
 
@@ -804,7 +837,7 @@ def test_run_audit_reports_nested_and_non_markdown_artifacts(run_oaw, legacy_vau
     assert "nested/AGT-RUN-hidden.md: noncanonical registry artifact" in audited.stdout
 
 
-def test_run_audit_rejects_extra_keys_project_shape_and_end_ordering(run_oaw, legacy_vault):
+def test_run_audit_rejects_extra_keys_project_shape_and_end_ordering(run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.")
     assert started.returncode == 0, started.stderr
     completed = run_oaw(
@@ -817,7 +850,7 @@ def test_run_audit_rejects_extra_keys_project_shape_and_end_ordering(run_oaw, le
         "pytest",
     )
     assert completed.returncode == 0, completed.stderr
-    run_path = run_record_for(legacy_vault, "test-thread")
+    run_path = run_record_for(vault, "test-thread")
     text = run_path.read_text(encoding="utf-8")
     ended_line = next(line for line in text.splitlines() if line.startswith("ended_at:"))
     run_path.write_text(
@@ -842,10 +875,10 @@ def test_task_review_requires_checks(run_oaw):
     assert "--checks" in missing.stderr
 
 
-def test_review_does_not_default_missing_execution(run_oaw, legacy_vault):
+def test_review_does_not_default_missing_execution(run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Established historical run.")
     assert started.returncode == 0, started.stderr
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8").replace("execution: agent\n", ""),
         encoding="utf-8",
@@ -875,17 +908,17 @@ def test_review_does_not_default_missing_execution(run_oaw, legacy_vault):
     ],
 )
 def test_task_review_rejects_blank_note_or_checks_without_writes(
-    note, checks, expected, run_oaw, legacy_vault
+    note, checks, expected, run_oaw, vault
 ):
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
     proc = run_oaw("task", "review", "OAW-TSK-cli", "--note", note, "--checks", checks)
     assert proc.returncode == 1
     assert expected in proc.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_task_review_domain_rejects_blank_values_before_transaction(monkeypatch, legacy_vault):
-    match = resolver.resolve_id("OAW-TSK-cli", legacy_vault)
+def test_task_review_domain_rejects_blank_values_before_transaction(monkeypatch, vault):
+    match = resolver.resolve_id("OAW-TSK-cli", vault)
 
     class UnexpectedTransaction:
         def __init__(self):
@@ -899,13 +932,13 @@ def test_task_review_domain_rejects_blank_values_before_transaction(monkeypatch,
         ("Ready for review.", " \t", "non-empty --checks"),
     ):
         with pytest.raises(OawError, match=expected):
-            lifecycle.update_task(match, legacy_vault, "review", note, checks, allow_missing=True)
+            lifecycle.update_task(match, vault, "review", note, checks, allow_missing=True)
 
 
 @pytest.mark.parametrize("initial_status", ["backlog", "todo", "active", "review", "done"])
-def test_task_review_accepts_every_lifecycle_source_status(initial_status, run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
+def test_task_review_accepts_every_lifecycle_source_status(initial_status, run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
     board_before = board_path.read_bytes()
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Established caller run.")
     assert started.returncode == 0, started.stderr
@@ -934,11 +967,11 @@ def test_task_review_accepts_every_lifecycle_source_status(initial_status, run_o
 
 
 def test_task_review_transaction_failure_restores_task_run_and_legacy_board_bytes(
-    monkeypatch, run_oaw, legacy_vault
+    monkeypatch, run_oaw, vault
 ):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Established caller run.")
     assert started.returncode == 0, started.stderr
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
     original_commit = lifecycle.VaultTransaction.commit
 
     def fail_second_replace(transaction):
@@ -953,7 +986,7 @@ def test_task_review_transaction_failure_restores_task_run_and_legacy_board_byte
 
         return original_commit(transaction, replace=replace)
 
-    monkeypatch.setenv("OAW_VAULT", str(legacy_vault))
+    monkeypatch.setenv("OAW_VAULT", str(vault))
     monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
     monkeypatch.setattr(lifecycle.VaultTransaction, "commit", fail_second_replace)
     stderr = StringIO()
@@ -972,11 +1005,11 @@ def test_task_review_transaction_failure_restores_task_run_and_legacy_board_byte
 
     assert result == 1
     assert "transaction failed and was rolled back" in stderr.getvalue()
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_task_lifecycle_resolves_once_per_write(monkeypatch, legacy_vault):
-    monkeypatch.setenv("OAW_VAULT", str(legacy_vault))
+def test_task_lifecycle_resolves_once_per_write(monkeypatch, vault):
+    monkeypatch.setenv("OAW_VAULT", str(vault))
     monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
     original = cli.resolve_id
     resolved: list[str] = []
@@ -999,8 +1032,9 @@ def test_task_lifecycle_resolves_once_per_write(monkeypatch, legacy_vault):
     assert resolved == ["OAW-TSK-cli"]
 
 
-def test_task_create_from_capture_walks_vault_once(monkeypatch, legacy_vault):
-    monkeypatch.setenv("OAW_VAULT", str(legacy_vault))
+def test_task_create_from_capture_walks_vault_once(monkeypatch, vault):
+    support.add_captures(vault)
+    monkeypatch.setenv("OAW_VAULT", str(vault))
     monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
     original = resolver.iter_markdown
     walks: list[Path] = []
@@ -1014,7 +1048,7 @@ def test_task_create_from_capture_walks_vault_once(monkeypatch, legacy_vault):
     result = cli.main(["task", "create", "--from-capture", "OAW-CAP-active"])
 
     assert result == 0
-    assert walks == [legacy_vault]
+    assert walks == [vault]
 
 
 def test_complete_requires_checks(run_oaw):
@@ -1024,11 +1058,9 @@ def test_complete_requires_checks(run_oaw):
 
 
 @pytest.mark.parametrize("priority", [1, 2, 3])
-def test_task_priority_updates_metadata_trace_and_preserves_task_state(
-    priority, run_oaw, legacy_vault
-):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
+def test_task_priority_updates_metadata_trace_and_preserves_task_state(priority, run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8").replace(
             "status: todo\n",
@@ -1058,7 +1090,7 @@ def test_task_priority_updates_metadata_trace_and_preserves_task_state(
     assert "`CODEX_THREAD_ID=test-thread`" in task
     assert "Re-ranked against the cross-project queue." in task
     assert before_board == board_path.read_bytes()
-    assert not (legacy_vault / "Agents/Runs").exists()
+    assert not (vault / "Agents/Runs").exists()
 
 
 @pytest.mark.parametrize(
@@ -1068,8 +1100,15 @@ def test_task_priority_updates_metadata_trace_and_preserves_task_state(
         "Tasks/Root priority task.md",
     ],
 )
-def test_task_priority_supports_non_project_task_locations(relative_path, run_oaw, legacy_vault):
-    path = legacy_vault / relative_path
+def test_task_priority_supports_non_project_task_locations(relative_path, run_oaw, vault):
+    support.add_agent_task(
+        vault,
+        "Resolve vault-wide Obsidian task IDs.md",
+        "AGT-TSK-obsidian-task-ids",
+        status="open",
+        body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
+    )
+    path = vault / relative_path
     if relative_path.startswith("Tasks/"):
         write(
             path,
@@ -1103,7 +1142,7 @@ aliases:
     assert "Board:" not in proc.stdout
 
 
-def test_task_priority_allows_explicit_missing_session_trace(run_oaw, legacy_vault):
+def test_task_priority_allows_explicit_missing_session_trace(run_oaw, vault):
     cleared = {
         "CODEX_THREAD_ID": "",
         "CLAUDE_SESSION_ID": "",
@@ -1111,7 +1150,7 @@ def test_task_priority_allows_explicit_missing_session_trace(run_oaw, legacy_vau
         "OPENCODE_SESSION_ID": "",
         "GEMINI_SESSION_ID": "",
     }
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
 
     proc = run_oaw(
         "task",
@@ -1149,16 +1188,16 @@ def test_task_priority_allows_explicit_missing_session_trace(run_oaw, legacy_vau
     ],
 )
 def test_task_priority_rejects_malformed_priority_without_writing(
-    replacement, expected, run_oaw, legacy_vault
+    replacement, expected, run_oaw, vault
 ):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8").replace(
             "status: todo\n", "status: todo\n" + replacement
         ),
         encoding="utf-8",
     )
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     proc = run_oaw(
         "task",
@@ -1172,11 +1211,11 @@ def test_task_priority_rejects_malformed_priority_without_writing(
 
     assert proc.returncode == 1
     assert expected in proc.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_task_priority_rejects_unsupported_location_without_writing(run_oaw, legacy_vault):
-    path = legacy_vault / "Projects/Obsidian Agent Workflow/Archive/Tasks/Outside task.md"
+def test_task_priority_rejects_unsupported_location_without_writing(run_oaw, vault):
+    path = vault / "Projects/Obsidian Agent Workflow/Archive/Tasks/Outside task.md"
     write(
         path,
         """---
@@ -1190,7 +1229,7 @@ aliases:
 # Outside task
 """,
     )
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     proc = run_oaw(
         "task",
@@ -1204,19 +1243,17 @@ aliases:
 
     assert proc.returncode == 1
     assert "lifecycle writes are supported" in proc.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_task_priority_domain_rejects_unclosed_frontmatter_before_transaction(
-    monkeypatch, legacy_vault
-):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    match = resolver.resolve_id("OAW-TSK-cli", legacy_vault)
+def test_task_priority_domain_rejects_unclosed_frontmatter_before_transaction(monkeypatch, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    match = resolver.resolve_id("OAW-TSK-cli", vault)
     malformed = task_path.read_text(encoding="utf-8").replace(
         "\n---\n\n# Resolver CLI", "\n\n# Resolver CLI"
     )
     task_path.write_text(malformed, encoding="utf-8")
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     class UnexpectedTransaction:
         def __init__(self):
@@ -1225,17 +1262,17 @@ def test_task_priority_domain_rejects_unclosed_frontmatter_before_transaction(
     monkeypatch.setattr(lifecycle, "VaultTransaction", UnexpectedTransaction)
 
     with pytest.raises(OawError, match="frontmatter is not closed"):
-        lifecycle.update_task_priority(match, legacy_vault, 2, "Must fail.", False)
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+        lifecycle.update_task_priority(match, vault, 2, "Must fail.", False)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_task_priority_rejects_non_task_frontmatter_without_writing(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_task_priority_rejects_non_task_frontmatter_without_writing(run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8").replace("type: task", "type: capture"),
         encoding="utf-8",
     )
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     proc = run_oaw(
         "task",
@@ -1249,11 +1286,11 @@ def test_task_priority_rejects_non_task_frontmatter_without_writing(run_oaw, leg
 
     assert proc.returncode == 1
     assert "requires frontmatter type: task" in proc.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_task_priority_rejects_blank_note_without_writing(run_oaw, legacy_vault):
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+def test_task_priority_rejects_blank_note_without_writing(run_oaw, vault):
+    before = snapshot_tree_without_following_symlinks(vault)
 
     proc = run_oaw(
         "task",
@@ -1267,17 +1304,15 @@ def test_task_priority_rejects_blank_note_without_writing(run_oaw, legacy_vault)
 
     assert proc.returncode == 1
     assert "requires non-empty --note" in proc.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
 @pytest.mark.parametrize("state", ["needs-triage", "needs-design", "prepared"])
-def test_task_preparedness_updates_metadata_trace_without_changing_run(
-    state, run_oaw, legacy_vault
-):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_task_preparedness_updates_metadata_trace_without_changing_run(state, run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Started implementation.")
     assert started.returncode == 0, started.stderr
-    run_path = run_record_for(legacy_vault, "test-thread")
+    run_path = run_record_for(vault, "test-thread")
     before_run = run_path.read_bytes()
 
     proc = run_oaw(
@@ -1300,15 +1335,15 @@ def test_task_preparedness_updates_metadata_trace_without_changing_run(
     assert before_run == run_path.read_bytes()
 
 
-def test_task_preparedness_rejects_malformed_existing_value_without_writing(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_task_preparedness_rejects_malformed_existing_value_without_writing(run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8").replace(
             "status: todo\n", "status: todo\npreparedness:\n  - prepared\n"
         ),
         encoding="utf-8",
     )
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     proc = run_oaw(
         "task",
@@ -1322,12 +1357,21 @@ def test_task_preparedness_rejects_malformed_existing_value_without_writing(run_
 
     assert proc.returncode == 1
     assert "must be a scalar" in proc.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_task_note_appends_session_without_status_or_legacy_board_change(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
+def test_task_note_appends_session_without_status_or_legacy_board_change(run_oaw, vault):
+    support.add_task(
+        vault,
+        "Obsidian Agent Workflow",
+        "Archived task.md",
+        "OAW-TSK-archived",
+        project="obsidian-agent-workflow",
+        status="archived",
+        body="# Archived task\n",
+    )
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
+    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
     before_board = board_path.read_text(encoding="utf-8")
     task_path.write_text(
         task_path.read_text(encoding="utf-8").replace(
@@ -1375,9 +1419,9 @@ def test_task_note_appends_session_without_status_or_legacy_board_change(run_oaw
     assert task.count('  - "test-thread"\n') == 1
 
 
-def test_task_note_ignores_inline_agent_sessions_marker_before_real_heading(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
+def test_task_note_ignores_inline_agent_sessions_marker_before_real_heading(run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
     before_board = board_path.read_text(encoding="utf-8")
     write(
         task_path,
@@ -1430,7 +1474,7 @@ Keep the two concepts separate.
     assert before_board == board_path.read_text(encoding="utf-8")
 
 
-def test_task_note_requires_session_id_unless_allowed(run_oaw, legacy_vault):
+def test_task_note_requires_session_id_unless_allowed(run_oaw, vault):
     env = {
         "CODEX_THREAD_ID": "",
         "CLAUDE_SESSION_ID": "",
@@ -1459,32 +1503,30 @@ def test_task_note_requires_session_id_unless_allowed(run_oaw, legacy_vault):
         env=env,
     )
     assert allowed.returncode == 0, allowed.stderr
-    task = (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+    task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
     assert "session_id=unavailable" in task
     assert "session-ids:" not in task
 
 
-def test_task_backlog_updates_status_and_session_without_touching_legacy_board(
-    run_oaw, legacy_vault
-):
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
+def test_task_backlog_updates_status_and_session_without_touching_legacy_board(run_oaw, vault):
+    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
     board_before = board_path.read_bytes()
     proc = run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later.")
     assert proc.returncode == 0, proc.stderr
-    task = (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+    task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
     assert "status: backlog" in task
     assert "CODEX_THREAD_ID=test-thread" in task
     assert "Board:" not in proc.stdout
     assert board_before == board_path.read_bytes()
 
 
-def test_task_promote_updates_status_without_touching_legacy_board(run_oaw, legacy_vault):
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
+def test_task_promote_updates_status_without_touching_legacy_board(run_oaw, vault):
+    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
     board_before = board_path.read_bytes()
     assert_ok(run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later."))
     proc = run_oaw("task", "promote", "OAW-TSK-cli", "--note", "Selected next.")
     assert proc.returncode == 0, proc.stderr
-    task = (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
+    task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
     assert "status: todo" in task
     assert "Board:" not in proc.stdout
     assert board_before == board_path.read_bytes()

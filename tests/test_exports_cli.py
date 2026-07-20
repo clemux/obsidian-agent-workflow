@@ -8,21 +8,45 @@ from tests import support
 from tests.support import write
 
 
-def test_export_note_requires_safe_marker(run_oaw, legacy_vault):
+@pytest.fixture
+def vault(tmp_path):
+    return support.make_vault(tmp_path)
+
+
+@pytest.fixture
+def base_env(vault):
+    return support.cli_env(vault)
+
+
+@pytest.fixture
+def run_oaw(vault):
+    return support.make_runner(vault)
+
+
+def test_export_note_requires_safe_marker(run_oaw, vault):
+    support.add_task(
+        vault,
+        "Obsidian Agent Workflow",
+        "Resolver CLI.md",
+        "OAW-TSK-cli",
+        project="obsidian-agent-workflow",
+        tags=("projects",),
+        body="# Resolver CLI\n\n## Goal\n\nBuild it.\n",
+    )
     proc = run_oaw(
         "export",
         "note",
         "OAW-TSK-cli",
         "--output-root",
-        str(legacy_vault / "exports"),
+        str(vault / "exports"),
     )
     assert proc.returncode != 0
     assert "export-scope: work" in proc.stderr
 
 
-def test_export_note_writes_bundle_manifest_and_artifacts(run_oaw, legacy_vault):
+def test_export_note_writes_bundle_manifest_and_artifacts(run_oaw, vault):
     write(
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Work export.md",
+        vault / "Projects/Obsidian Agent Workflow/Tasks/Work export.md",
         """---
 type: task
 project: obsidian-agent-workflow
@@ -42,10 +66,10 @@ Run this at work.
 """,
     )
     write(
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/scripts/run.sh",
+        vault / "Projects/Obsidian Agent Workflow/Tasks/scripts/run.sh",
         "#!/bin/sh\necho work\n",
     )
-    output_root = legacy_vault / "exports"
+    output_root = vault / "exports"
     proc = run_oaw(
         "export",
         "note",
@@ -75,9 +99,9 @@ Run this at work.
     assert "Export: valid" in valid.stdout
 
 
-def test_export_validate_rejects_tampered_marker(run_oaw, legacy_vault):
+def test_export_validate_rejects_tampered_marker(run_oaw, vault):
     write(
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Work export.md",
+        vault / "Projects/Obsidian Agent Workflow/Tasks/Work export.md",
         """---
 type: task
 id: OAW-TSK-work-export
@@ -89,7 +113,7 @@ export-scope: work
 # Work export
 """,
     )
-    output_root = legacy_vault / "exports"
+    output_root = vault / "exports"
     proc = run_oaw(
         "export",
         "note",
@@ -116,10 +140,8 @@ export-scope: work
     assert "export-scope: work" in proc.stderr
 
 
-def test_export_note_failure_leaves_no_partial_bundle_and_retry_succeeds(
-    run_oaw, legacy_vault, base_env
-):
-    note = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Retry export.md"
+def test_export_note_failure_leaves_no_partial_bundle_and_retry_succeeds(run_oaw, vault, base_env):
+    note = vault / "Projects/Obsidian Agent Workflow/Tasks/Retry export.md"
     artifact = note.parent / "missing.txt"
     write(
         note,
@@ -134,8 +156,8 @@ export_artifacts:
 # Retry export
 """,
     )
-    output_root = legacy_vault / "exports"
-    before = support.snapshot_tree_without_following_symlinks(legacy_vault)
+    output_root = vault / "exports"
+    before = support.snapshot_tree_without_following_symlinks(vault)
 
     failed = support.run_oaw_subprocess(
         [
@@ -155,7 +177,7 @@ export_artifacts:
     # The only permitted effect of the failed export is the empty output root;
     # the staging directory is cleaned up and nothing else under the vault
     # changes (no partial bundle, no leftover tmp staging entry).
-    assert support.snapshot_tree_without_following_symlinks(legacy_vault) == {
+    assert support.snapshot_tree_without_following_symlinks(vault) == {
         **before,
         "exports": ("directory", None),
     }
@@ -178,9 +200,9 @@ export_artifacts:
     assert (output_root / "OAW-TSK-retry-export/manifest.json").exists()
 
 
-def test_export_note_sanitizes_bundle_name_from_id(run_oaw, legacy_vault):
+def test_export_note_sanitizes_bundle_name_from_id(run_oaw, vault):
     write(
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Escape export.md",
+        vault / "Projects/Obsidian Agent Workflow/Tasks/Escape export.md",
         """---
 type: task
 id: ../escape
@@ -190,7 +212,7 @@ export-scope: work
 # Escape export
 """,
     )
-    output_root = legacy_vault / "exports"
+    output_root = vault / "exports"
 
     proc = run_oaw(
         "export",
@@ -202,7 +224,7 @@ export-scope: work
 
     assert proc.returncode == 0, proc.stderr
     assert (output_root / "escape/manifest.json").exists()
-    assert not (legacy_vault / "escape").exists()
+    assert not (vault / "escape").exists()
 
 
 @pytest.mark.parametrize(
@@ -212,9 +234,9 @@ export-scope: work
         pytest.param("absolute", id="absolute-outside-path"),
     ],
 )
-def test_export_validate_rejects_paths_outside_bundle(run_oaw, legacy_vault, path_kind):
+def test_export_validate_rejects_paths_outside_bundle(run_oaw, vault, path_kind):
     write(
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Path export.md",
+        vault / "Projects/Obsidian Agent Workflow/Tasks/Path export.md",
         """---
 type: task
 id: OAW-TSK-path-export
@@ -224,7 +246,7 @@ export-scope: work
 # Path export
 """,
     )
-    output_root = legacy_vault / "exports"
+    output_root = vault / "exports"
     exported = run_oaw(
         "export",
         "note",
@@ -248,8 +270,8 @@ export-scope: work
     assert re.search(r"manifest path (escapes bundle|must be bundle-relative)", proc.stderr)
 
 
-def test_safe_export_ingest_dry_run_reads_markers_and_leaves_files(run_oaw, legacy_vault):
-    ingestion = legacy_vault / "handoff"
+def test_safe_export_ingest_dry_run_reads_markers_and_leaves_files(run_oaw, vault):
+    ingestion = vault / "handoff"
     safe = ingestion / "safe.md"
     legacy = ingestion / "legacy.md"
     unsafe = ingestion / "unsafe.md"
@@ -306,15 +328,15 @@ project: private
     assert safe.exists()
     assert legacy.exists()
     assert unsafe.exists()
-    assert not (legacy_vault / "Imports/Handoff/safe.md").exists()
+    assert not (vault / "Imports/Handoff/safe.md").exists()
     assert not (ingestion / ".rejected/unsafe.md").exists()
 
 
-def test_safe_export_ingest_write_ingests_safe_and_quarantines_rejected(run_oaw, legacy_vault):
-    ingestion = legacy_vault / "handoff"
+def test_safe_export_ingest_write_ingests_safe_and_quarantines_rejected(run_oaw, vault):
+    ingestion = vault / "handoff"
     safe = ingestion / "nested/safe.md"
     unsafe = ingestion / "unsafe.md"
-    existing = legacy_vault / "Imports/Handoff/nested/safe.md"
+    existing = vault / "Imports/Handoff/nested/safe.md"
     write(
         safe,
         """---
@@ -357,12 +379,12 @@ export-scope: work
     assert not safe.exists()
     assert not unsafe.exists()
     assert existing.read_text(encoding="utf-8") == "existing\n"
-    assert (legacy_vault / "Imports/Handoff/nested/safe-2.md").exists()
+    assert (vault / "Imports/Handoff/nested/safe-2.md").exists()
     assert (ingestion / ".rejected/unsafe.md").exists()
 
 
-def test_safe_export_ingest_rejects_unclosed_frontmatter(run_oaw, legacy_vault):
-    ingestion = legacy_vault / "handoff"
+def test_safe_export_ingest_rejects_unclosed_frontmatter(run_oaw, vault):
+    ingestion = vault / "handoff"
     broken = ingestion / "broken.md"
     write(
         broken,
@@ -384,8 +406,8 @@ Body that should not be trusted.
     assert "REJECT broken.md [frontmatter is not closed:" in proc.stdout
 
 
-def test_safe_export_ingest_refuses_absolute_destination(run_oaw, legacy_vault):
-    ingestion = legacy_vault / "handoff"
+def test_safe_export_ingest_refuses_absolute_destination(run_oaw, vault):
+    ingestion = vault / "handoff"
     write(
         ingestion / "safe.md",
         """---
@@ -402,14 +424,14 @@ export-scope: personal
         "--ingestion-root",
         str(ingestion),
         "--destination",
-        str(legacy_vault / "absolute"),
+        str(vault / "absolute"),
     )
 
     assert proc.returncode != 0
     assert "--destination must be vault-relative" in proc.stderr
 
 
-def test_safe_export_ingest_refuses_conflicting_modes(run_oaw, legacy_vault):
+def test_safe_export_ingest_refuses_conflicting_modes(run_oaw, vault):
     proc = run_oaw(
         "ingest",
         "safe-export",
@@ -422,8 +444,8 @@ def test_safe_export_ingest_refuses_conflicting_modes(run_oaw, legacy_vault):
     assert "not allowed with argument" in proc.stderr
 
 
-def test_safe_export_ingest_refuses_root_that_contains_vault(run_oaw, legacy_vault):
-    ingestion = legacy_vault / "misconfigured"
+def test_safe_export_ingest_refuses_root_that_contains_vault(run_oaw, vault):
+    ingestion = vault / "misconfigured"
     nested_vault = ingestion / "vault"
     note = nested_vault / "Projects/Demo/Tasks/Unsafe.md"
     write(note, "---\nid: DEMO-TSK-unsafe\n---\n\n# Unsafe\n")
@@ -442,8 +464,8 @@ def test_safe_export_ingest_refuses_root_that_contains_vault(run_oaw, legacy_vau
     assert note.exists()
 
 
-def test_safe_export_ingest_refuses_destination_inside_ingestion_root(run_oaw, legacy_vault):
-    ingestion = legacy_vault / "handoff"
+def test_safe_export_ingest_refuses_destination_inside_ingestion_root(run_oaw, vault):
+    ingestion = vault / "handoff"
     write(
         ingestion / "safe.md",
         "---\nexport-scope: personal\n---\n\n# Safe\n",
@@ -462,13 +484,13 @@ def test_safe_export_ingest_refuses_destination_inside_ingestion_root(run_oaw, l
     assert "destination must not be inside the ingestion root" in proc.stderr
 
 
-def test_safe_export_ingest_dry_run_previews_collision_destination(run_oaw, legacy_vault):
-    ingestion = legacy_vault / "handoff"
+def test_safe_export_ingest_dry_run_previews_collision_destination(run_oaw, vault):
+    ingestion = vault / "handoff"
     write(
         ingestion / "safe.md",
         "---\nexport-scope: personal\n---\n\n# Safe\n",
     )
-    write(legacy_vault / "Imports/Handoff/safe.md", "existing\n")
+    write(vault / "Imports/Handoff/safe.md", "existing\n")
 
     proc = run_oaw(
         "ingest",

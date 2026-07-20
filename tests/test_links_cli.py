@@ -10,6 +10,7 @@ import pytest
 
 from oaw import cli, links
 from oaw.errors import OawError
+from tests import support
 from tests.support import (
     run_record_for,
     snapshot_tree_without_following_symlinks,
@@ -17,8 +18,49 @@ from tests.support import (
 )
 
 
+@pytest.fixture
+def vault(tmp_path: Path) -> Path:
+    """Minimal vault for the link/materialization CLI suite.
+
+    Builds the three notes nearly every test here touches: the ``OAW-TSK-cli``
+    project task (with the ``## Agent sessions`` section lifecycle writers append
+    to and the ``tags:`` block one test rewrites), the ``OAW-TSK-archived`` task
+    that ``obs:OAW-TSK-archived`` materializes into, and the project index that
+    ``obs:OAW`` resolves to. Tests needing more (agent task, board, templates)
+    add them inline. Byte-identical to the corresponding notes in the legacy tree.
+    """
+    root = support.make_vault(tmp_path)
+    support.add_task(
+        root,
+        "Obsidian Agent Workflow",
+        "Resolver CLI.md",
+        "OAW-TSK-cli",
+        project="obsidian-agent-workflow",
+        status="todo",
+        tags=("projects",),
+        body="# Resolver CLI\n\n## Goal\n\nBuild it.\n\n## Agent sessions\n\n",
+    )
+    support.add_task(
+        root,
+        "Obsidian Agent Workflow",
+        "Archived task.md",
+        "OAW-TSK-archived",
+        project="obsidian-agent-workflow",
+        status="archived",
+        body="# Archived task\n",
+    )
+    support.add_project_index(root, "Obsidian Agent Workflow", "OAW-index")
+    return root
+
+
+@pytest.fixture
+def run_oaw(vault: Path) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Return ``run(*args, env=None)`` bound to the minimal ``vault``."""
+    return support.make_runner(vault)
+
+
 @pytest.mark.parametrize("writer", ["pause", "priority", "preparedness", "relation"])
-def test_remaining_lifecycle_note_writers_materialize_obs_references(run_oaw, legacy_vault, writer):
+def test_remaining_lifecycle_note_writers_materialize_obs_references(run_oaw, vault, writer):
     if writer == "pause":
         started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Started for pause.")
         assert started.returncode == 0, started.stderr
@@ -62,18 +104,14 @@ def test_remaining_lifecycle_note_writers_materialize_obs_references(run_oaw, le
     durable_note = (
         "Trace [[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]."
     )
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     assert durable_note in task_path.read_text(encoding="utf-8")
     if writer == "pause":
-        assert durable_note in run_record_for(legacy_vault, "test-thread").read_text(
-            encoding="utf-8"
-        )
+        assert durable_note in run_record_for(vault, "test-thread").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("writer", ["pause", "priority", "preparedness", "relation"])
-def test_remaining_lifecycle_note_materialization_fails_before_any_write(
-    run_oaw, legacy_vault, writer
-):
+def test_remaining_lifecycle_note_materialization_fails_before_any_write(run_oaw, vault, writer):
     if writer == "pause":
         started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Started for pause.")
         assert started.returncode == 0, started.stderr
@@ -110,18 +148,18 @@ def test_remaining_lifecycle_note_materialization_fails_before_any_write(
             note,
         ),
     }
-    before = snapshot_tree_without_following_symlinks(legacy_vault)
+    before = snapshot_tree_without_following_symlinks(vault)
 
     result = run_oaw(*arguments[writer])
 
     assert result.returncode == 1
     assert "no note with frontmatter id or alias 'OAW-TSK-does-not-exist'" in result.stderr
-    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_link_check_and_list_handle_escaped_pipe_in_table(run_oaw, legacy_vault):
+def test_link_check_and_list_handle_escaped_pipe_in_table(run_oaw, vault):
     write(
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Linked task.md",
+        vault / "Projects/Obsidian Agent Workflow/Tasks/Linked task.md",
         """---
 type: task
 project: obsidian-agent-workflow
@@ -153,8 +191,8 @@ aliases:
     assert "alias: CLI" in listed.stdout
 
 
-def test_link_ensure_dry_run_and_write_append_only(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_link_ensure_dry_run_and_write_append_only(run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
 
     dry = run_oaw(
         "link",
@@ -213,8 +251,8 @@ def test_link_ensure_dry_run_and_write_append_only(run_oaw, legacy_vault):
     )
 
 
-def test_link_materialize_previews_writes_and_is_idempotent(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_link_materialize_previews_writes_and_is_idempotent(run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     original = task_path.read_text(encoding="utf-8").replace(
         "tags:\n", "materialize-example: obs:DOES-NOT-EXIST\ntags:\n"
     )
@@ -283,10 +321,8 @@ obs:OAW-TSK-cli
     assert task_path.read_text(encoding="utf-8") == materialized
 
 
-def test_link_materialize_errors_without_writing_for_missing_or_ambiguous_ids(
-    run_oaw, legacy_vault
-):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_link_materialize_errors_without_writing_for_missing_or_ambiguous_ids(run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8")
         + "\nValid obs:OAW-TSK-archived then missing obs:OAW-TSK-nope.\n",
@@ -299,7 +335,7 @@ def test_link_materialize_errors_without_writing_for_missing_or_ambiguous_ids(
     assert task_path.read_bytes() == before_missing
 
     write(
-        legacy_vault / "Projects/Other/Tasks/Duplicate.md",
+        vault / "Projects/Other/Tasks/Duplicate.md",
         "---\nid: OAW-TSK-archived\n---\n\n# Duplicate\n",
     )
     task_path.write_text(
@@ -312,10 +348,8 @@ def test_link_materialize_errors_without_writing_for_missing_or_ambiguous_ids(
     assert task_path.read_bytes() == before_ambiguous
 
 
-def test_link_materialize_rejects_malformed_reference_and_rolls_back(
-    run_oaw, legacy_vault, monkeypatch
-):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_link_materialize_rejects_malformed_reference_and_rolls_back(run_oaw, vault, monkeypatch):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8") + "\nMalformed obs: stays literal.\n",
         encoding="utf-8",
@@ -337,7 +371,7 @@ def test_link_materialize_rejects_malformed_reference_and_rolls_back(
     def fail_commit(_self):
         raise OawError("simulated transaction failure")
 
-    monkeypatch.setenv("OAW_VAULT", str(legacy_vault))
+    monkeypatch.setenv("OAW_VAULT", str(vault))
     monkeypatch.setattr(links.VaultTransaction, "commit", fail_commit)
     stderr = StringIO()
     with redirect_stderr(stderr):
@@ -348,8 +382,8 @@ def test_link_materialize_rejects_malformed_reference_and_rolls_back(
     assert task_path.read_bytes() == rollback_before
 
 
-def test_link_materialize_refuses_to_overwrite_a_concurrent_edit(legacy_vault, monkeypatch):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_link_materialize_refuses_to_overwrite_a_concurrent_edit(vault, monkeypatch):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8") + "\nValid obs:OAW-TSK-archived.\n",
         encoding="utf-8",
@@ -361,7 +395,7 @@ def test_link_materialize_refuses_to_overwrite_a_concurrent_edit(legacy_vault, m
         task_path.write_bytes(concurrent)
         original_commit(transaction)
 
-    monkeypatch.setenv("OAW_VAULT", str(legacy_vault))
+    monkeypatch.setenv("OAW_VAULT", str(vault))
     monkeypatch.setattr(links.VaultTransaction, "commit", commit_after_concurrent_edit)
     stderr = StringIO()
     with redirect_stderr(stderr):
@@ -372,8 +406,8 @@ def test_link_materialize_refuses_to_overwrite_a_concurrent_edit(legacy_vault, m
     assert task_path.read_bytes() == concurrent
 
 
-def test_link_materialize_write_preserves_crlf_bytes(run_oaw, legacy_vault):
-    path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/CRLF source.md"
+def test_link_materialize_write_preserves_crlf_bytes(run_oaw, vault):
+    path = vault / "Projects/Obsidian Agent Workflow/Tasks/CRLF source.md"
     path.write_bytes(
         b"---\r\n"
         b"id: OAW-TSK-crlf-source\r\n"
@@ -394,15 +428,13 @@ def test_link_materialize_write_preserves_crlf_bytes(run_oaw, legacy_vault):
     assert b"[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]].\r\n" in written
 
 
-def test_multiline_code_spans_are_protected_by_shared_automatic_materialization(
-    run_oaw, legacy_vault
-):
+def test_multiline_code_spans_are_protected_by_shared_automatic_materialization(run_oaw, vault):
     note = (
         "`single line break\nobs:OAW-TSK-cli\nclosing` then obs:OAW-TSK-cli.\n"
         "``multi line break\nobs:OAW-TSK-archived\nclosing`` then "
         "obs:OAW-TSK-archived."
     )
-    rendered, replacements = links.materialize_obs_references(note, legacy_vault)
+    rendered, replacements = links.materialize_obs_references(note, vault)
 
     assert "`single line break\nobs:OAW-TSK-cli\nclosing` then [[" in rendered
     assert "``multi line break\nobs:OAW-TSK-archived\nclosing`` then [[" in rendered
@@ -420,14 +452,22 @@ def test_multiline_code_spans_are_protected_by_shared_automatic_materialization(
     )
     assert created.returncode == 0, created.stderr
     created_text = (
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Multiline materialization.md"
+        vault / "Projects/Obsidian Agent Workflow/Tasks/Multiline materialization.md"
     ).read_text(encoding="utf-8")
     assert "`single line break\nobs:OAW-TSK-cli\nclosing` then [[" in created_text
     assert "``multi line break\nobs:OAW-TSK-archived\nclosing`` then [[" in created_text
 
 
-def test_automatic_materialization_failures_do_not_partially_write(run_oaw, legacy_vault):
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
+def test_automatic_materialization_failures_do_not_partially_write(run_oaw, vault):
+    support.add_legacy_board(vault)
+    support.add_agent_task(
+        vault,
+        "Resolve vault-wide Obsidian task IDs.md",
+        "AGT-TSK-obsidian-task-ids",
+        status="open",
+        body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
+    )
+    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
     before_board = board_path.read_bytes()
     missing_task = run_oaw(
         "task",
@@ -441,11 +481,11 @@ def test_automatic_materialization_failures_do_not_partially_write(run_oaw, lega
     )
     assert missing_task.returncode == 1
     assert not (
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Missing materialized target.md"
+        vault / "Projects/Obsidian Agent Workflow/Tasks/Missing materialized target.md"
     ).exists()
     assert board_path.read_bytes() == before_board
 
-    target = legacy_vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
+    target = vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
     before_target = target.read_bytes()
     missing_observation = run_oaw(
         "note",
@@ -474,13 +514,13 @@ class DurableProseCase(NamedTuple):
     Adding a new writer means adding a row: name it, describe any prerequisite
     state via ``setup``, give the argv carrying the ``obs:`` reference, point at
     the note that must end up materialized, and list the fragments that must (and
-    must not) appear. Each case runs against its own fresh ``legacy_vault``, so
+    must not) appear. Each case runs against its own fresh ``vault``, so
     ``setup`` arranges every prerequisite from scratch (parametrized cases must be
     independent under xdist).
     """
 
     id: str
-    # setup(run, vault) arranges prerequisite state against a fresh legacy_vault.
+    # setup(run, vault) arranges prerequisite state against a fresh vault.
     setup: Callable[[Runner, Path], None]
     # argv (after the program name) containing the obs: reference under test.
     command: tuple[str, ...]
@@ -675,21 +715,34 @@ DURABLE_PROSE_CASES: tuple[DurableProseCase, ...] = (
 
 
 @pytest.mark.parametrize("case", DURABLE_PROSE_CASES, ids=[case.id for case in DURABLE_PROSE_CASES])
-def test_durable_prose_writes_share_obs_materialization(run_oaw, legacy_vault, case):
-    case.setup(run_oaw, legacy_vault)
+def test_durable_prose_writes_share_obs_materialization(run_oaw, vault, case):
+    # The parametrized rows collectively exercise note session/observe (agent
+    # task), project create (project template), and research scaffold (research
+    # template); provide all three so every case runs against its prerequisites.
+    support.add_agent_task(
+        vault,
+        "Resolve vault-wide Obsidian task IDs.md",
+        "AGT-TSK-obsidian-task-ids",
+        status="open",
+        body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
+    )
+    support.add_project_template(vault)
+    support.add_research_template(vault)
+
+    case.setup(run_oaw, vault)
 
     result = run_oaw(*case.command)
 
     assert result.returncode == 0, result.stderr
-    text = case.target(legacy_vault).read_text(encoding="utf-8")
+    text = case.target(vault).read_text(encoding="utf-8")
     for fragment in case.expected:
         assert fragment in text, fragment
     for fragment in case.forbidden:
         assert fragment not in text, fragment
 
 
-def test_link_materialize_rejects_conflicting_dry_run_and_write(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_link_materialize_rejects_conflicting_dry_run_and_write(run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8") + "\nobs:OAW-TSK-archived\n",
         encoding="utf-8",
@@ -704,8 +757,8 @@ def test_link_materialize_rejects_conflicting_dry_run_and_write(run_oaw, legacy_
     assert task_path.read_bytes() == before
 
 
-def test_link_ensure_rejects_conflicting_dry_run_and_write(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_link_ensure_rejects_conflicting_dry_run_and_write(run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
     before = task_path.read_text(encoding="utf-8")
 
     proc = run_oaw(
@@ -738,9 +791,9 @@ def test_link_ensure_bidirectional_rejects_conflicting_dry_run_and_write(run_oaw
     assert "not allowed with argument" in proc.stderr
 
 
-def test_link_ensure_bidirectional_writes_missing_reciprocal_links(run_oaw, legacy_vault):
+def test_link_ensure_bidirectional_writes_missing_reciprocal_links(run_oaw, vault):
     write(
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Alpha.md",
+        vault / "Projects/Obsidian Agent Workflow/Tasks/Alpha.md",
         """---
 type: task
 project: obsidian-agent-workflow
@@ -754,7 +807,7 @@ aliases:
 """,
     )
     write(
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Beta.md",
+        vault / "Projects/Obsidian Agent Workflow/Tasks/Beta.md",
         """---
 type: task
 project: obsidian-agent-workflow
@@ -777,14 +830,14 @@ aliases:
     )
 
     assert proc.returncode == 0, proc.stderr
-    alpha = (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Alpha.md").read_text()
-    beta = (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Beta.md").read_text()
+    alpha = (vault / "Projects/Obsidian Agent Workflow/Tasks/Alpha.md").read_text()
+    beta = (vault / "Projects/Obsidian Agent Workflow/Tasks/Beta.md").read_text()
     assert "[[Projects/Obsidian Agent Workflow/Tasks/Beta|OAW-TSK-beta]]" in alpha
     assert "[[Projects/Obsidian Agent Workflow/Tasks/Alpha|OAW-TSK-alpha]]" in beta
 
 
-def test_link_lint_suggests_durable_opaque_id_replacements(run_oaw, legacy_vault):
-    task = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
+def test_link_lint_suggests_durable_opaque_id_replacements(run_oaw, vault):
+    task = vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
     task.write_text(
         task.read_text(encoding="utf-8") + "\n## Related\n\n- [[OAW-TSK-cli]]\n- [[PMX-UNKNOWN]]\n",
         encoding="utf-8",
@@ -800,11 +853,11 @@ def test_link_lint_suggests_durable_opaque_id_replacements(run_oaw, legacy_vault
     assert "Archived task.md: [[PMX-UNKNOWN]] -> (unresolved)" in proc.stdout
 
 
-def test_link_lint_skips_non_utf8_notes(run_oaw, legacy_vault):
-    bad = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Binary.md"
+def test_link_lint_skips_non_utf8_notes(run_oaw, vault):
+    bad = vault / "Projects/Obsidian Agent Workflow/Tasks/Binary.md"
     bad.parent.mkdir(parents=True, exist_ok=True)
     bad.write_bytes(b"---\nid: OAW-TSK-binary\n---\n\xff\xfe")
-    task = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
+    task = vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
     task.write_text(
         task.read_text(encoding="utf-8") + "\n- [[OAW-TSK-cli]]\n",
         encoding="utf-8",
@@ -816,8 +869,8 @@ def test_link_lint_skips_non_utf8_notes(run_oaw, legacy_vault):
     assert "Archived task.md: [[OAW-TSK-cli]]" in proc.stdout
 
 
-def test_link_commands_ignore_wikilinks_inside_fenced_code(run_oaw, legacy_vault):
-    task = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
+def test_link_commands_ignore_wikilinks_inside_fenced_code(run_oaw, vault):
+    task = vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
     task.write_text(
         task.read_text(encoding="utf-8") + "\n```markdown\n[[OAW-TSK-cli]]\n```\n",
         encoding="utf-8",

@@ -1,10 +1,38 @@
 import shutil
 
+import pytest
+
+from tests import support
 from tests.support import FIXTURES, write
 
 
-def test_session_lookup_reports_vault_note_hit(run_oaw, legacy_vault):
-    task = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+@pytest.fixture
+def vault(tmp_path):
+    """A bare, empty vault root under tmp_path."""
+    return support.make_vault(tmp_path)
+
+
+@pytest.fixture
+def run_oaw(vault):
+    return support.make_runner(vault)
+
+
+def _add_resolver_cli_task(vault):
+    """Write the 'Resolver CLI' project task most session-lookup tests match against."""
+    return support.add_task(
+        vault,
+        "Obsidian Agent Workflow",
+        "Resolver CLI.md",
+        "OAW-TSK-cli",
+        project="obsidian-agent-workflow",
+        status="todo",
+        tags=("projects",),
+        body="# Resolver CLI\n\n## Goal\n\nBuild it.\n\n## Agent sessions\n\n",
+    )
+
+
+def test_session_lookup_reports_vault_note_hit(run_oaw, vault):
+    task = _add_resolver_cli_task(vault)
     task.write_text(
         task.read_text(encoding="utf-8")
         + "- 2026-07-09 - Codex - `CODEX_THREAD_ID=lookup-thread` - Logged.\n",
@@ -16,9 +44,9 @@ def test_session_lookup_reports_vault_note_hit(run_oaw, legacy_vault):
         "lookup",
         "  lookup-thread  ",
         "--codex-root",
-        str(legacy_vault / "missing-codex"),
+        str(vault / "missing-codex"),
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -30,14 +58,14 @@ def test_session_lookup_reports_vault_note_hit(run_oaw, legacy_vault):
     assert "Harness artifacts:" not in proc.stdout
 
 
-def test_session_lookup_reports_duplicate_note_ids_without_failing(run_oaw, legacy_vault):
-    task = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+def test_session_lookup_reports_duplicate_note_ids_without_failing(run_oaw, vault):
+    task = _add_resolver_cli_task(vault)
     task.write_text(
         task.read_text(encoding="utf-8") + "\nlookup-duplicate-session\n",
         encoding="utf-8",
     )
     write(
-        legacy_vault / "Projects/Other/Tasks/Duplicate CLI.md",
+        vault / "Projects/Other/Tasks/Duplicate CLI.md",
         """---
 type: task
 id: OAW-TSK-cli
@@ -54,9 +82,9 @@ lookup-duplicate-session
         "lookup",
         "lookup-duplicate-session",
         "--codex-root",
-        str(legacy_vault / "missing-codex"),
+        str(vault / "missing-codex"),
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -65,10 +93,10 @@ lookup-duplicate-session
     assert proc.stdout.count("id: OAW-TSK-cli") == 2
 
 
-def test_session_lookup_summarizes_harness_artifacts(run_oaw, legacy_vault):
+def test_session_lookup_summarizes_harness_artifacts(run_oaw, vault):
     session_id = "019f43c9-e93a-7052-bac7-1789a6de1df7"
-    codex_root = legacy_vault / "harness/codex/sessions"
-    claude_root = legacy_vault / "harness/claude/projects"
+    codex_root = vault / "harness/codex/sessions"
+    claude_root = vault / "harness/claude/projects"
     rollout = codex_root / "2026/07/09" / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
     parent = claude_root / "-tmp-project" / f"{session_id}.jsonl"
     subagent = (
@@ -109,9 +137,9 @@ def test_session_lookup_summarizes_harness_artifacts(run_oaw, legacy_vault):
     assert "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md" in proc.stdout
 
 
-def test_session_lookup_verbose_reports_codex_metrics(run_oaw, legacy_vault):
+def test_session_lookup_verbose_reports_codex_metrics(run_oaw, vault):
     session_id = "019f43c9-e93a-7052-bac7-1789a6de1df7"
-    codex_root = legacy_vault / "harness/codex/sessions"
+    codex_root = vault / "harness/codex/sessions"
     rollout = codex_root / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
     rollout.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(FIXTURES / "session_lookup/codex-complete.jsonl", rollout)
@@ -123,7 +151,7 @@ def test_session_lookup_verbose_reports_codex_metrics(run_oaw, legacy_vault):
         "--codex-root",
         str(codex_root),
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
     )
     verbose_proc = run_oaw(
         "session",
@@ -133,7 +161,7 @@ def test_session_lookup_verbose_reports_codex_metrics(run_oaw, legacy_vault):
         "--codex-root",
         str(codex_root),
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
     )
 
     assert default_proc.returncode == 0, default_proc.stderr
@@ -148,9 +176,9 @@ def test_session_lookup_verbose_reports_codex_metrics(run_oaw, legacy_vault):
     assert "Tokens: input=250, output=80, cached=75, total=330" in verbose_proc.stdout
 
 
-def test_session_lookup_verbose_reports_vault_and_codex_matches(run_oaw, legacy_vault):
+def test_session_lookup_verbose_reports_vault_and_codex_matches(run_oaw, vault):
     session_id = "019f43c9-e93a-7052-bac7-1789a6de1df7"
-    task = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    task = _add_resolver_cli_task(vault)
     task.write_text(
         task.read_text(encoding="utf-8").replace(
             "---\n\n# Resolver CLI",
@@ -158,7 +186,7 @@ def test_session_lookup_verbose_reports_vault_and_codex_matches(run_oaw, legacy_
         ),
         encoding="utf-8",
     )
-    codex_root = legacy_vault / "harness/codex/sessions"
+    codex_root = vault / "harness/codex/sessions"
     rollout = codex_root / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
     rollout.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(FIXTURES / "session_lookup/codex-complete.jsonl", rollout)
@@ -170,7 +198,7 @@ def test_session_lookup_verbose_reports_vault_and_codex_matches(run_oaw, legacy_
         "--codex-root",
         str(codex_root),
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
     )
     verbose_proc = run_oaw(
         "session",
@@ -180,7 +208,7 @@ def test_session_lookup_verbose_reports_vault_and_codex_matches(run_oaw, legacy_
         "--codex-root",
         str(codex_root),
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
     )
 
     assert default_proc.returncode == 0, default_proc.stderr
@@ -199,12 +227,10 @@ def test_session_lookup_verbose_reports_vault_and_codex_matches(run_oaw, legacy_
     assert "Tokens: input=250, output=80, cached=75, total=330" in verbose_proc.stdout
 
 
-def test_session_lookup_verbose_marks_missing_and_unsupported_metrics_unavailable(
-    run_oaw, legacy_vault
-):
+def test_session_lookup_verbose_marks_missing_and_unsupported_metrics_unavailable(run_oaw, vault):
     session_id = "019f43c9-e93a-7052-bac7-1789a6de1df7"
-    codex_root = legacy_vault / "harness/codex/sessions"
-    claude_root = legacy_vault / "harness/claude/projects"
+    codex_root = vault / "harness/codex/sessions"
+    claude_root = vault / "harness/claude/projects"
     rollout = codex_root / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
     rollout.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(FIXTURES / "session_lookup/codex-missing.jsonl", rollout)
@@ -234,15 +260,15 @@ def test_session_lookup_verbose_marks_missing_and_unsupported_metrics_unavailabl
     )
 
 
-def test_session_lookup_unknown_exits_successfully(run_oaw, legacy_vault):
+def test_session_lookup_unknown_exits_successfully(run_oaw, vault):
     proc = run_oaw(
         "session",
         "lookup",
         "not-logged-session",
         "--codex-root",
-        str(legacy_vault / "missing-codex"),
+        str(vault / "missing-codex"),
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -250,9 +276,9 @@ def test_session_lookup_unknown_exits_successfully(run_oaw, legacy_vault):
     assert "Status: not logged" in proc.stdout
 
 
-def test_session_lookup_treats_glob_metacharacters_literally(run_oaw, legacy_vault):
+def test_session_lookup_treats_glob_metacharacters_literally(run_oaw, vault):
     session_id = "abc[1]"
-    codex_root = legacy_vault / "harness/codex/sessions"
+    codex_root = vault / "harness/codex/sessions"
     rollout = codex_root / f"rollout-2026-07-09T12-00-00-{session_id}.jsonl"
     write(rollout, '{"type":"session_meta","cwd":"/workspace/example"}\n')
 
@@ -263,16 +289,16 @@ def test_session_lookup_treats_glob_metacharacters_literally(run_oaw, legacy_vau
         "--codex-root",
         str(codex_root),
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
     )
 
     assert proc.returncode == 0, proc.stderr
     assert f"- codex-rollout: {rollout}" in proc.stdout
 
 
-def test_session_lookup_default_finds_archived_codex_rollout(run_oaw, legacy_vault):
+def test_session_lookup_default_finds_archived_codex_rollout(run_oaw, vault):
     session_id = "019f5001-0000-7111-8222-b15aa4c27782"
-    codex_home = legacy_vault / "harness/codex"
+    codex_home = vault / "harness/codex"
     archived = codex_home / "archived_sessions" / f"rollout-2026-07-11T10-00-00-{session_id}.jsonl"
     archived.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(FIXTURES / "session_lookup/codex-complete.jsonl", archived)
@@ -282,7 +308,7 @@ def test_session_lookup_default_finds_archived_codex_rollout(run_oaw, legacy_vau
         "lookup",
         session_id,
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
         env={"CODEX_HOME": str(codex_home)},
     )
 
@@ -296,7 +322,7 @@ def test_session_lookup_default_finds_archived_codex_rollout(run_oaw, legacy_vau
         "--codex-root",
         str(codex_home / "sessions"),
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
         env={"CODEX_HOME": str(codex_home)},
     )
     env_override = run_oaw(
@@ -304,7 +330,7 @@ def test_session_lookup_default_finds_archived_codex_rollout(run_oaw, legacy_vau
         "lookup",
         session_id,
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
         env={
             "CODEX_HOME": str(codex_home),
             "OAW_CODEX_SESSIONS_ROOT": str(codex_home / "sessions"),
@@ -316,9 +342,9 @@ def test_session_lookup_default_finds_archived_codex_rollout(run_oaw, legacy_vau
         assert str(archived) not in overridden.stdout
 
 
-def test_session_lookup_prefers_active_duplicate_rollout(run_oaw, legacy_vault):
+def test_session_lookup_prefers_active_duplicate_rollout(run_oaw, vault):
     session_id = "019f5004-3333-7444-8555-e48cc7f6bb15"
-    codex_home = legacy_vault / "harness/codex"
+    codex_home = vault / "harness/codex"
     filename = f"rollout-2026-07-11T11-00-00-{session_id}.jsonl"
     active = codex_home / "sessions/2026/07/11" / filename
     archived = codex_home / "archived_sessions" / filename
@@ -330,7 +356,7 @@ def test_session_lookup_prefers_active_duplicate_rollout(run_oaw, legacy_vault):
         "lookup",
         session_id,
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
         env={"CODEX_HOME": str(codex_home)},
     )
 
@@ -341,9 +367,9 @@ def test_session_lookup_prefers_active_duplicate_rollout(run_oaw, legacy_vault):
     assert proc.stdout.count("- codex-rollout:") == 1
 
 
-def test_session_lookup_keeps_duplicate_rollouts_within_one_root(run_oaw, legacy_vault):
+def test_session_lookup_keeps_duplicate_rollouts_within_one_root(run_oaw, vault):
     session_id = "019f5005-4444-7555-8666-f59dd806cc26"
-    codex_root = legacy_vault / "harness/codex/sessions"
+    codex_root = vault / "harness/codex/sessions"
     filename = f"rollout-2026-07-11T12-00-00-{session_id}.jsonl"
     first = codex_root / "2026/07/11" / filename
     second = codex_root / "restored" / filename
@@ -357,7 +383,7 @@ def test_session_lookup_keeps_duplicate_rollouts_within_one_root(run_oaw, legacy
         "--codex-root",
         str(codex_root),
         "--claude-root",
-        str(legacy_vault / "missing-claude"),
+        str(vault / "missing-claude"),
     )
 
     assert proc.returncode == 0, proc.stderr

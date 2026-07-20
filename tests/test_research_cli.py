@@ -1,7 +1,27 @@
+import pytest
+
+from tests import support
 from tests.support import write
 
 
-def test_research_scaffold_renders_template_with_audience_boundary(run_oaw, legacy_vault):
+@pytest.fixture
+def vault(tmp_path):
+    """Minimal vault: the OAW project index (obs:OAW + folder resolution) plus the
+    research packet template that every ``research scaffold``/``research start``
+    call in this file depends on.
+    """
+    root = support.make_vault(tmp_path)
+    support.add_project_index(root, "Obsidian Agent Workflow", "OAW-index")
+    support.add_research_template(root)
+    return root
+
+
+@pytest.fixture
+def run_oaw(vault):
+    return support.make_runner(vault)
+
+
+def test_research_scaffold_renders_template_with_audience_boundary(run_oaw, vault):
     proc = run_oaw(
         "research",
         "scaffold",
@@ -27,8 +47,7 @@ def test_research_scaffold_renders_template_with_audience_boundary(run_oaw, lega
     assert "Template: Templates/Research packet.md" in proc.stdout
     assert "Deep research prompt: self-contained provider-visible body" in proc.stdout
     prompt = (
-        legacy_vault
-        / "Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Prompt.md"
+        vault / "Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Prompt.md"
     ).read_text(encoding="utf-8")
     local, provider = prompt.split("## Deep research prompt", 1)
     assert "project: obsidian-agent-workflow" in local
@@ -40,16 +59,16 @@ def test_research_scaffold_renders_template_with_audience_boundary(run_oaw, lega
     assert "architecture/provider-choice" not in provider
     assert "```text\nResearch Provider choice" in provider
     synthesis = (
-        legacy_vault
+        vault
         / "Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Synthesis.md"
     )
     synthesis_text = synthesis.read_text(encoding="utf-8")
     assert "type: research-synthesis" in synthesis_text
     assert "![[Bases/Research packet.base#Source reports]]" in synthesis_text
-    assert (legacy_vault / "Bases/Research packet.base").is_file()
+    assert (vault / "Bases/Research packet.base").is_file()
 
 
-def test_research_scaffold_refuses_existing_prompt_without_force(run_oaw, legacy_vault):
+def test_research_scaffold_refuses_existing_prompt_without_force(run_oaw, vault):
     args = (
         "research",
         "scaffold",
@@ -66,8 +85,8 @@ def test_research_scaffold_refuses_existing_prompt_without_force(run_oaw, legacy
     assert "research prompt already exists" in proc.stderr
 
 
-def test_research_scaffold_rejects_template_that_leaks_local_metadata(run_oaw, legacy_vault):
-    template = legacy_vault / "Templates/Research packet.md"
+def test_research_scaffold_rejects_template_that_leaks_local_metadata(run_oaw, vault):
+    template = vault / "Templates/Research packet.md"
     template.write_text(
         template.read_text(encoding="utf-8") + "\nLocal track: {{track}}\n",
         encoding="utf-8",
@@ -86,8 +105,8 @@ def test_research_scaffold_rejects_template_that_leaks_local_metadata(run_oaw, l
     assert "places local-only fields" in proc.stderr
 
 
-def test_research_scaffold_requires_exact_provider_boundary_heading(run_oaw, legacy_vault):
-    template = legacy_vault / "Templates/Research packet.md"
+def test_research_scaffold_requires_exact_provider_boundary_heading(run_oaw, vault):
+    template = vault / "Templates/Research packet.md"
     template.write_text(
         template.read_text(encoding="utf-8").replace(
             "## Deep research prompt", "### Deep research prompt"
@@ -108,8 +127,8 @@ def test_research_scaffold_requires_exact_provider_boundary_heading(run_oaw, leg
     assert "must contain exactly one '## Deep research prompt' heading" in proc.stderr
 
 
-def test_research_scaffold_rejects_rendered_metadata_after_boundary(run_oaw, legacy_vault):
-    template = legacy_vault / "Templates/Research packet.md"
+def test_research_scaffold_rejects_rendered_metadata_after_boundary(run_oaw, vault):
+    template = vault / "Templates/Research packet.md"
     template.write_text(
         template.read_text(encoding="utf-8").replace(
             "Research {{title}}", "Research obsidian-agent-workflow"
@@ -131,9 +150,9 @@ def test_research_scaffold_rejects_rendered_metadata_after_boundary(run_oaw, leg
     assert "project" in proc.stderr
 
 
-def test_research_scaffold_allows_short_metadata_characters_inside_words(run_oaw, legacy_vault):
+def test_research_scaffold_allows_short_metadata_characters_inside_words(run_oaw, vault):
     write(
-        legacy_vault / "Projects/X/Index.md",
+        vault / "Projects/X/Index.md",
         """---
 type: project
 id: X-index
@@ -155,12 +174,12 @@ id: X-index
         "2026-07-12",
     )
     assert proc.returncode == 0, proc.stderr
-    prompt = legacy_vault / "Projects/X/Research/a/b/Prompt.md"
+    prompt = vault / "Projects/X/Research/a/b/Prompt.md"
     assert prompt.is_file()
     assert "expected output format" in prompt.read_text(encoding="utf-8")
 
 
-def test_research_scaffold_force_preserves_existing_synthesis(run_oaw, legacy_vault):
+def test_research_scaffold_force_preserves_existing_synthesis(run_oaw, vault):
     args = (
         "research",
         "scaffold",
@@ -174,14 +193,14 @@ def test_research_scaffold_force_preserves_existing_synthesis(run_oaw, legacy_va
         "2026-07-12",
     )
     assert run_oaw(*args).returncode == 0
-    synthesis = legacy_vault / "Projects/Obsidian Agent Workflow/Research/topic/Synthesis.md"
+    synthesis = vault / "Projects/Obsidian Agent Workflow/Research/topic/Synthesis.md"
     synthesis.write_text("irreplaceable synthesis\n", encoding="utf-8")
     proc = run_oaw(*args, "--force")
     assert proc.returncode == 0, proc.stderr
     assert synthesis.read_text(encoding="utf-8") == "irreplaceable synthesis\n"
 
 
-def test_research_start_creates_one_running_result_and_updates_prompt(run_oaw, legacy_vault):
+def test_research_start_creates_one_running_result_and_updates_prompt(run_oaw, vault):
     scaffold = run_oaw(
         "research",
         "scaffold",
@@ -208,7 +227,7 @@ def test_research_start_creates_one_running_result_and_updates_prompt(run_oaw, l
         "https://chatgpt.com/share/example",
     )
     assert proc.returncode == 0, proc.stderr
-    packet = legacy_vault / "Projects/Obsidian Agent Workflow/Research/topic"
+    packet = vault / "Projects/Obsidian Agent Workflow/Research/topic"
     results = sorted(packet.glob("Results - *.md"))
     assert [path.name for path in results] == ["Results - ChatGPT Pro.md"]
     result = results[0].read_text(encoding="utf-8")
@@ -219,7 +238,7 @@ def test_research_start_creates_one_running_result_and_updates_prompt(run_oaw, l
     assert "- ChatGPT Pro: [running](https://chatgpt.com/share/example)" in prompt
 
 
-def test_research_start_rejects_unsafe_duplicate_and_non_http_sources(run_oaw, legacy_vault):
+def test_research_start_rejects_unsafe_duplicate_and_non_http_sources(run_oaw, vault):
     assert (
         run_oaw(
             "research",
@@ -250,8 +269,8 @@ def test_research_start_rejects_unsafe_duplicate_and_non_http_sources(run_oaw, l
     assert "source already exists" in duplicate.stderr
 
 
-def test_research_start_rejects_malformed_packet_without_partial_write(run_oaw, legacy_vault):
-    packet = legacy_vault / "Projects/Obsidian Agent Workflow/Research/topic"
+def test_research_start_rejects_malformed_packet_without_partial_write(run_oaw, vault):
+    packet = vault / "Projects/Obsidian Agent Workflow/Research/topic"
     write(packet / "Prompt.md", "---\ntitle: Topic\n---\n\n## Running research sessions\n")
     proc = run_oaw(
         "research",
