@@ -196,6 +196,53 @@ def test_note_file_dash_reads_stdin(tmp_path: Path) -> None:
     assert body in note
 
 
+@pytest.mark.parametrize("source", ["file", "stdin"])
+def test_multiline_task_note_headings_stay_with_entry_after_second_append(
+    tmp_path: Path, source: str
+) -> None:
+    task_path = write_task(tmp_path)
+    body = "Summary.\n\n## Evidence\n\nDetails."
+    first_arguments = ["task", "note", "EXP-TSK-example"]
+    input_text = None
+    if source == "file":
+        body_file = tmp_path / "session-note.md"
+        body_file.write_text(body, encoding="utf-8")
+        first_arguments.extend(["--note-file", str(body_file)])
+    else:
+        first_arguments.extend(["--note-file", "-"])
+        input_text = body
+    first_arguments.append("--allow-missing-session-id")
+
+    first = CliRunner().invoke(
+        cli.app,
+        first_arguments,
+        input=input_text,
+        env={**NO_SESSION_ENV, "OAW_VAULT": str(tmp_path)},
+    )
+    second = CliRunner().invoke(
+        cli.app,
+        [
+            "task",
+            "note",
+            "EXP-TSK-example",
+            "--note",
+            "Second entry.",
+            "--allow-missing-session-id",
+        ],
+        env={**NO_SESSION_ENV, "OAW_VAULT": str(tmp_path)},
+    )
+
+    assert first.exit_code == 0, first.stderr
+    assert second.exit_code == 0, second.stderr
+    note = task_path.read_text(encoding="utf-8")
+    first_entry = note.index(" - Summary.")
+    nested_heading = note.index("  ## Evidence")
+    details = note.index("  Details.")
+    second_entry = note.index(" - Second entry.")
+    assert first_entry < nested_heading < details < second_entry
+    assert "\n## Evidence\n" not in note
+
+
 def test_note_file_preserves_newlines_exactly(tmp_path: Path) -> None:
     write_project_index(tmp_path)
     body = "First line.\r\n\r\nSecond line after a blank line.\r\n\r\n"
