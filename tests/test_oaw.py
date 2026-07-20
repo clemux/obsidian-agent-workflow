@@ -3831,6 +3831,29 @@ obs:OAW-TSK-cli
         self.assertIn("simulated transaction failure", stderr.getvalue())
         self.assertEqual(task_path.read_bytes(), rollback_before)
 
+    def test_link_materialize_refuses_to_overwrite_a_concurrent_edit(self, monkeypatch):
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        task_path.write_text(
+            task_path.read_text(encoding="utf-8") + "\nValid obs:OAW-TSK-archived.\n",
+            encoding="utf-8",
+        )
+        concurrent = task_path.read_bytes() + b"Concurrent edit remains.\n"
+        original_commit = links.VaultTransaction.commit
+
+        def commit_after_concurrent_edit(transaction):
+            task_path.write_bytes(concurrent)
+            original_commit(transaction)
+
+        monkeypatch.setenv("OAW_VAULT", str(self.vault))
+        monkeypatch.setattr(links.VaultTransaction, "commit", commit_after_concurrent_edit)
+        stderr = StringIO()
+        with redirect_stderr(stderr):
+            returncode = cli.main(["link", "materialize", "OAW-TSK-cli", "--write"])
+
+        self.assertEqual(returncode, 1)
+        self.assertIn("note changed on disk since it was read", stderr.getvalue())
+        self.assertEqual(task_path.read_bytes(), concurrent)
+
     def test_obs_materialization_caches_repeated_resolution(self, monkeypatch):
         references = resolver.scan_note_references(self.vault)
         original = links.resolve_id_from_references

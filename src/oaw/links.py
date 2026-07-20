@@ -903,7 +903,8 @@ def link_materialize(root: Path, source_value: str, write: bool) -> None:
     """Preview or commit safe obs-reference materialization for one note."""
     source = resolve_note_arg(source_value, root)
     try:
-        text = source.path.read_bytes().decode("utf-8")
+        original = source.path.read_bytes()
+        text = original.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise OawError(f"note is not valid UTF-8: {source.relpath}") from exc
     before, _, body = split_note(text)
@@ -919,7 +920,7 @@ def link_materialize(root: Path, source_value: str, write: bool) -> None:
         print(f"- {replacement.reference} -> {replacement.link}")
     if write:
         transaction = VaultTransaction()
-        transaction.stage(source.path, updated)
+        transaction.stage(source.path, updated, expected=original)
         transaction.commit()
         print(f"Updated: {source.relpath}")
     else:
