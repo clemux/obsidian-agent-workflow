@@ -11,6 +11,11 @@ review.
 
 ## Destination and CLI ownership
 
+Before any real-vault operation, read and follow `obsidian-personal`. It owns vault
+targeting, preflight/retry policy, and shell-safe command guidance. Use installed
+`oaw` for real-vault capture writes; use `uv run python bin/oaw ...` only while
+developing OAW against a temporary `OAW_VAULT`.
+
 Create one capture note per idea with the `oaw` CLI. It owns the schema: it generates
 the `CAP-YYYYMMDD-<slug>` ID and aliases, stamps a full timezone-aware `created`
 timestamp, sets `status: inbox`, records real session provenance automatically, and
