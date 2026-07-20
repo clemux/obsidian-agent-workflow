@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
+from typer._click import core as click_core
 from typer._click import exceptions as click_exceptions
 from typer._click import globals as click_globals
 from typer._click import types as click_types
@@ -1406,10 +1407,27 @@ def capture_triage(
     )
 
 
+_command: click_core.Command | None = None
+
+
+def _built_command() -> click_core.Command:
+    """Build the Click command tree once per process.
+
+    A CLI process invokes main exactly once, so caching changes nothing there;
+    it keeps repeated in-process invocations (tests, embedding) from paying the
+    full Typer-to-Click conversion on every call. Invocation state lives in
+    per-call Context objects, not on the command tree.
+    """
+    global _command
+    if _command is None:
+        _command = get_command(app)
+    return _command
+
+
 def main(argv: list[str] | None = None) -> int:
     """Invoke the Typer app while preserving the stable integer-return contract."""
     try:
-        get_command(app).main(args=argv, prog_name="oaw")
+        _built_command().main(args=argv, prog_name="oaw")
     except SystemExit as exc:
         if exc.code is None:
             return 0
