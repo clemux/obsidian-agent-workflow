@@ -133,6 +133,37 @@ def test_parse_wikilinks_ignores_links_inside_info_string_closed_fence():
     assert parse_wikilinks(text) == []
 
 
+def test_invalid_backtick_fence_info_string_does_not_hide_section_boundary():
+    text = "## Notes\n\n```python`invalid\n## Next\n\nKeep.\n"
+
+    located = locate_section(text, "## Notes")
+
+    assert located is not None
+    assert located[2] == 3
+
+
+def test_invalid_backtick_fence_info_string_does_not_hide_wikilink():
+    links = parse_wikilinks("```python`invalid\n[[Visible]]\n")
+
+    assert [link.target for link in links] == ["Visible"]
+
+
+@pytest.mark.parametrize(
+    ("opening", "closing"),
+    [("```python", "```"), ("~~~python`allowed", "~~~")],
+    ids=["backtick", "tilde-with-backtick-info"],
+)
+def test_valid_fences_still_hide_sections_and_wikilinks(opening, closing):
+    text = f"## Notes\n\n{opening}\n## Hidden\n[[Hidden]]\n{closing}\n## Next\n\n[[Visible]]\n"
+
+    located = locate_section(text, "## Notes")
+    links = parse_wikilinks(text)
+
+    assert located is not None
+    assert located[2] == 6
+    assert [link.target for link in links] == ["Visible"]
+
+
 def test_locate_section_tolerates_trailing_heading_whitespace():
     text = "## Agent sessions   \n\n- entry\n"
     located = locate_section(text, "## Agent sessions")
