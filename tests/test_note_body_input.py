@@ -5,31 +5,11 @@ import pytest
 from typer.testing import CliRunner
 
 from oaw import cli
-from oaw.sessions import SESSION_ENV
-
-# Unset every supported harness session variable so test outcomes do not depend
-# on which agent harness (if any) happens to be running the suite.
-NO_SESSION_ENV: dict[str, str | None] = {env_name: None for _, env_name in SESSION_ENV}
-
-
-def write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+from tests.support import NO_SESSION_ENV, add_project_index, file_state, write
 
 
 def write_project_index(vault: Path, name: str = "Example", alias: str = "EXP") -> None:
-    write(
-        vault / f"Projects/{name}/Index.md",
-        f"""---
-type: project
-id: {alias}-index
-aliases:
-  - {alias}-index
----
-
-# {name}
-""",
-    )
+    add_project_index(vault, name, f"{alias}-index")
 
 
 def write_task(vault: Path, note_id: str = "EXP-TSK-example", status: str = "todo") -> Path:
@@ -67,14 +47,6 @@ aliases:
 """,
     )
     return path
-
-
-def vault_state(vault: Path) -> dict[str, bytes]:
-    return {
-        path.relative_to(vault).as_posix(): path.read_bytes()
-        for path in sorted(vault.rglob("*"))
-        if path.is_file()
-    }
 
 
 def test_task_note_accepts_note_file(tmp_path: Path) -> None:
@@ -290,7 +262,7 @@ def test_note_file_preserves_newlines_exactly(tmp_path: Path) -> None:
 def test_note_and_note_file_conflict_errors(tmp_path: Path, arguments: list[str]) -> None:
     write_task(tmp_path)
     write_note(tmp_path)
-    before = vault_state(tmp_path)
+    before = file_state(tmp_path)
 
     result = CliRunner().invoke(
         cli.app,
@@ -302,7 +274,7 @@ def test_note_and_note_file_conflict_errors(tmp_path: Path, arguments: list[str]
     assert result.exit_code == 2
     assert result.stdout == ""
     assert "not allowed with argument" in result.stderr
-    assert vault_state(tmp_path) == before
+    assert file_state(tmp_path) == before
 
 
 def test_missing_note_file_errors_clearly(tmp_path: Path) -> None:
