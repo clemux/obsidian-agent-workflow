@@ -28,6 +28,34 @@ def write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def run_oaw_in_process(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """Run the CLI via cli.main in this process, emulating the subprocess contract.
+
+    The merged mapping replaces os.environ wholesale for the duration of the call,
+    matching subprocess.run(env=...). Environment swapping assumes tests within one
+    xdist worker run on a single thread. An exception cli.main does not translate is
+    a programmer error, not CLI behavior: it propagates and fails the test instead
+    of being downgraded to a subprocess-style nonzero exit.
+    """
+    stdout = StringIO()
+    stderr = StringIO()
+    saved_environ = os.environ.copy()
+    os.environ.clear()
+    os.environ.update(env)
+    try:
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            returncode = cli.main(args)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_environ)
+    return subprocess.CompletedProcess(
+        args=["oaw", *args],
+        returncode=returncode,
+        stdout=stdout.getvalue(),
+        stderr=stderr.getvalue(),
+    )
+
+
 def snapshot_tree_without_following_symlinks(
     root: Path,
 ) -> dict[str, tuple[str, bytes | str | None]]:
@@ -248,22 +276,37 @@ aliases:
         self.tmp.cleanup()
 
     def run_oaw(self, *args, env=None):
-        merged = self.env.copy()
-        if env:
-            merged.update(env)
+        return run_oaw_in_process([str(arg) for arg in args], self.merged_env(env))
+
+    def run_oaw_subprocess(self, *args, env=None):
         return subprocess.run(
             [sys.executable, str(BIN), *args],
-            env=merged,
+            env=self.merged_env(env),
             text=True,
             capture_output=True,
             check=False,
         )
+
+    def merged_env(self, env=None):
+        merged = self.env.copy()
+        if env:
+            merged.update(env)
+        return merged
 
     def run_record_for(self, session_id: str) -> Path:
         for path in (self.vault / "Agents/Runs").glob("*.md"):
             if f'agent_session_id: "{session_id}"' in path.read_text(encoding="utf-8"):
                 return path
         raise AssertionError(f"run record not found for {session_id}")
+
+    def test_bin_launcher_resolves_in_real_subprocess(self):
+        result = self.run_oaw_subprocess("resolve", "--path", "OAW-TSK-cli")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout,
+            f"{self.vault / 'Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md'}\n",
+        )
 
     def test_cli_main_accepts_argv_and_returns_status_code(self, monkeypatch):
         monkeypatch.setenv("OAW_VAULT", str(self.vault))
@@ -887,8 +930,8 @@ aliases:
         self.assertEqual(board_before, board_path.read_bytes())
 
     def test_task_start_is_idempotent_for_same_identity(self):
-        first = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "First start.")
-        second = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Refresh start.")
+        first = self.run_oaw_subprocess("task", "start", "OAW-TSK-cli", "--note", "First start.")
+        second = self.run_oaw_subprocess("task", "start", "OAW-TSK-cli", "--note", "Refresh start.")
 
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(second.returncode, 0, second.stderr)
@@ -908,7 +951,7 @@ aliases:
             "OPENCODE_SESSION_ID": "",
             "GEMINI_SESSION_ID": "",
         }
-        first = self.run_oaw(
+        first = self.run_oaw_subprocess(
             "task",
             "start",
             "OAW-TSK-cli",
@@ -916,7 +959,7 @@ aliases:
             "Claude Code env start.",
             env={**cleared, "CLAUDE_CODE_SESSION_ID": "shared-claude-session"},
         )
-        second = self.run_oaw(
+        second = self.run_oaw_subprocess(
             "task",
             "start",
             "OAW-TSK-cli",
@@ -2888,7 +2931,7 @@ Later.
         self.assertIn("requires a non-empty --id", proc.stderr)
 
     def test_retro_create_normalizes_accented_title_slug(self):
-        proc = self.run_oaw(
+        proc = self.run_oaw_subprocess(
             "retro",
             "create",
             "--title",
@@ -3031,7 +3074,7 @@ export_artifacts:
         )
         output_root = self.vault / "exports"
 
-        failed = self.run_oaw(
+        failed = self.run_oaw_subprocess(
             "export",
             "note",
             "OAW-TSK-retry-export",
@@ -3044,7 +3087,7 @@ export_artifacts:
         self.assertEqual(list(output_root.glob(".OAW-TSK-retry-export.tmp-*")), [])
 
         write(artifact, "ready\n")
-        retried = self.run_oaw(
+        retried = self.run_oaw_subprocess(
             "export",
             "note",
             "OAW-TSK-retry-export",
@@ -4971,7 +5014,7 @@ aliases:
             "--plugin-data-root",
             str(self.vault / "missing-plugin"),
         )
-        first = self.run_oaw(*base_args)
+        first = self.run_oaw_subprocess(*base_args)
         self.assertEqual(first.returncode, 0, first.stderr)
         snapshot = output_root / "2026-07-08-refresh-test"
         nested_copy = snapshot / "claude/subagents/nested/agent-nested.jsonl"
@@ -5002,7 +5045,7 @@ aliases:
             claude_root / "-tmp-project" / session_id / "subagents/agent-new.jsonl",
             '{"content":"new subagent"}\n',
         )
-        second = self.run_oaw(*base_args)
+        second = self.run_oaw_subprocess(*base_args)
         self.assertEqual(second.returncode, 0, second.stderr)
 
         parent_copy = snapshot / "claude/parent-019f3ed8-PARTIAL.jsonl"
