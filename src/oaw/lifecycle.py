@@ -127,6 +127,14 @@ def append_session_entry(
         return append_markdown_block_to_section(text, heading, entry)
 
     lines, heading_idx, section_end = located
+    source_lines = text.splitlines(keepends=True)
+    line_ending = "\n"
+    for source_line in source_lines:
+        if source_line.endswith("\r\n"):
+            line_ending = "\r\n"
+            break
+        if source_line.endswith("\n"):
+            break
     section_lines = lines[heading_idx + 1 : section_end]
     last_idx = len(section_lines) - 1
     while last_idx >= 0 and section_lines[last_idx] == "":
@@ -141,11 +149,11 @@ def append_session_entry(
         new_section = [*trimmed_section, "", entry]
 
     before = lines[: heading_idx + 1]
-    after = lines[section_end:]
-    new_lines = [*before, *new_section, ""]
-    if after:
-        new_lines.extend(after)
-    return "\n".join(new_lines).rstrip() + "\n"
+    rendered_section = line_ending.join([*before, *new_section])
+    suffix = "".join(source_lines[section_end:])
+    if suffix:
+        return f"{rendered_section}{line_ending}{line_ending}{suffix}"
+    return f"{rendered_section}{line_ending}"
 
 
 def append_note_session(
