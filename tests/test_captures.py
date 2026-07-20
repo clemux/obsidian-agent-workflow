@@ -160,6 +160,31 @@ def test_create_project_links_without_index_alias(tmp_path: Path):
     assert f"[[{CANONICAL}/{note_id}|{note_id}]]" in index_text
 
 
+def test_create_project_index_conflict_preserves_concurrent_edit_and_removes_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    write_project_index(tmp_path, "Demo", "DEMO-index")
+    index_path = tmp_path / "Projects/Demo/Index.md"
+    original_index = index_path.read_text(encoding="utf-8")
+    concurrent_index = original_index + "\nCONCURRENT EDIT\n"
+    original_commit = notes.VaultTransaction.commit
+
+    def mutating_commit(self, replace=os.replace):
+        index_path.write_text(concurrent_index, encoding="utf-8")
+        return original_commit(self, replace=replace)
+
+    monkeypatch.setattr(notes.VaultTransaction, "commit", mutating_commit)
+
+    result = run(tmp_path, ["capture", "create", "--title", "Index race", "--project", "obs:DEMO"])
+
+    assert result.exit_code == 1
+    assert "changed on disk" in result.stderr
+    assert result.stdout == ""
+    assert index_path.read_text(encoding="utf-8") == concurrent_index
+    note_id = f"CAP-{local_date()}-index-race"
+    assert not (tmp_path / CANONICAL / f"{note_id}.md").exists()
+
+
 def test_create_url_validation_and_dedup(tmp_path: Path):
     result = run(
         tmp_path,

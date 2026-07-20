@@ -213,13 +213,14 @@ def create_capture(
             rendered_body,
             related_link,
         )
+        index_original: str | None = None
         index_new: str | None = None
         if related_link is not None and index_path is not None:
-            index_text = index_path.read_text(encoding="utf-8")
+            index_original = index_path.read_text(encoding="utf-8")
             capture_link = f"[[{rel.with_suffix('').as_posix()}|{note_id}]]"
-            if capture_link not in index_text:
+            if capture_link not in index_original:
                 index_new = append_markdown_block_to_section(
-                    index_text, "Captures", f"- {capture_link}"
+                    index_original, "Captures", f"- {capture_link}"
                 )
         try:
             write_new_note_atomic(path, text)
@@ -229,8 +230,9 @@ def create_capture(
             raise OawError(f"could not create capture note: {rel.as_posix()}: {exc}") from exc
         if index_new is not None and index_path is not None:
             try:
+                assert index_original is not None
                 transaction = VaultTransaction()
-                transaction.stage(index_path, index_new)
+                transaction.stage(index_path, index_new, expected=index_original)
                 transaction.commit()
             except Exception as exc:
                 path.unlink(missing_ok=True)
