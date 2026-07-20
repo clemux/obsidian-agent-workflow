@@ -106,6 +106,24 @@ def command_paths() -> set[tuple[str, ...]]:
     return paths
 
 
+@pytest.mark.parametrize(
+    ("args", "error"),
+    [
+        ([], "the following arguments are required: command"),
+        (["not-a-command"], "argument command: invalid choice: 'not-a-command'"),
+    ],
+)
+def test_top_level_usage_contract_lists_registered_commands(args: list[str], error: str) -> None:
+    command_surface = ",".join(getattr(get_command(cli.app), "commands", {}))
+
+    result = CliRunner().invoke(cli.app, args)
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert f"usage: oaw [-h]\n           {{{command_surface}}} ...\n" in result.stderr
+    assert error in result.stderr
+
+
 def write_project_index(vault: Path) -> None:
     write(
         vault / "Projects/Parity/Index.md",

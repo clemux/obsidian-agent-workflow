@@ -64,7 +64,7 @@ from .snapshot import session_snapshot
 
 USAGE_BY_COMMAND = {
     "oaw": "usage: oaw [-h]\n"
-    "           {resolve,list,project,research,task,run,note,ingest,link,export,session,retro,feedback} ...\n",
+    "           {resolve,list,project,research,task,run,note,ingest,link,export,session,retro,feedback,capture} ...\n",
     "oaw resolve": "usage: oaw resolve [-h] [--full] [--path] [--meta] [--outline] [--json] id\n",
     "oaw list": "usage: oaw list [-h] --project PROJECT [--type TYPE] [--status STATUS]\n"
     "                [--include-archived] [--sort {priority,effort,title}]\n"
