@@ -75,16 +75,21 @@ class VaultTransaction:
 
     def __init__(self) -> None:
         self.changes: dict[Path, str] = {}
-        self.expected: dict[Path, str] = {}
+        self.expected: dict[Path, str | bytes] = {}
 
-    def stage(self, path: Path, text: str, expected: str | None = None) -> None:
+    def stage(self, path: Path, text: str, expected: str | bytes | None = None) -> None:
         self.changes[path] = text
         if expected is not None:
             self.expected[path] = expected
 
     def commit(self, replace: Callable[[str, str], None] = os.replace) -> None:
         for path, expected in self.expected.items():
-            current = path.read_text(encoding="utf-8") if path.exists() else None
+            if not path.exists():
+                current: str | bytes | None = None
+            elif isinstance(expected, bytes):
+                current = path.read_bytes()
+            else:
+                current = path.read_text(encoding="utf-8")
             if current != expected:
                 raise OawError(f"note changed on disk since it was read: {path}")
         originals = {path: path.read_bytes() if path.exists() else None for path in self.changes}
