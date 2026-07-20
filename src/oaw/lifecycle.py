@@ -119,12 +119,16 @@ def append_session_entry(
     detail = note.strip()
     if checks:
         detail = f"{detail}; checks: {checks.strip()}"
-    entry = f"- {today} - {provider} - `{session_ref}` - {detail}"
+    detail_lines = detail.splitlines()
+    entry_lines = [
+        f"- {today} - {provider} - `{session_ref}` - {detail_lines[0]}",
+        *(f"  {line}" if line else "" for line in detail_lines[1:]),
+    ]
     heading = "## Agent sessions"
 
     located = locate_section(text, heading)
     if located is None:
-        return append_markdown_block_to_section(text, heading, entry)
+        return append_markdown_block_to_section(text, heading, "\n".join(entry_lines))
 
     lines, heading_idx, section_end = located
     source_lines = text.splitlines(keepends=True)
@@ -140,13 +144,13 @@ def append_session_entry(
     while last_idx >= 0 and section_lines[last_idx] == "":
         last_idx -= 1
     if last_idx < 0:
-        return append_markdown_block_to_section(text, heading, entry)
+        return append_markdown_block_to_section(text, heading, "\n".join(entry_lines))
 
     trimmed_section = section_lines[: last_idx + 1]
     if _is_session_entry_line(trimmed_section[-1]):
-        new_section = [*trimmed_section, entry]
+        new_section = [*trimmed_section, *entry_lines]
     else:
-        new_section = [*trimmed_section, "", entry]
+        new_section = [*trimmed_section, "", *entry_lines]
 
     before = lines[: heading_idx + 1]
     rendered_section = line_ending.join([*before, *new_section])
