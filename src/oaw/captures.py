@@ -580,6 +580,8 @@ def triage_capture(
         match = resolve_id_from_references(dest, root, references)
         if not match.note_id:
             raise OawError(f"destination has no stable frontmatter id: {match.relpath}")
+        if match.path == capture.path:
+            raise OawError(f"capture cannot be its own destination: {capture.note_id}")
         dest_matches.append(match)
 
     existing_destinations = _list_values(capture.frontmatter, "destinations")

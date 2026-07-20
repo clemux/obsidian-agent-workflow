@@ -684,6 +684,32 @@ def test_triage_triaged_requires_destination(tmp_path: Path):
     assert dest_text.count("[[Captures/Entries/CAP-route|CAP-route]]") == 1
 
 
+def test_triage_rejects_capture_as_its_own_destination_without_writing(tmp_path: Path):
+    make_canonical_capture(tmp_path, "CAP-self")
+    before = vault_state(tmp_path)
+
+    result = run(
+        tmp_path,
+        [
+            "capture",
+            "triage",
+            "CAP-self",
+            "--status",
+            "triaged",
+            "--reason",
+            "route",
+            "--destination",
+            "CAP-self",
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "cannot be its own destination" in result.stderr
+    assert result.stdout == ""
+    assert vault_state(tmp_path) == before
+
+
 def test_triage_reason_contract(tmp_path: Path):
     for bad_args in (["--reason", "x", "--no-reason"], [], ["--reason", "   "]):
         make_canonical_capture(tmp_path, "CAP-reason")
