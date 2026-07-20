@@ -83,7 +83,7 @@ Prefer `pathlib.Path`, UTF-8 file reads/writes, and `json.dumps` for machine-rea
 
 ## Testing Guidelines
 
-Tests are pytest-style: newer per-module suites use `tmp_path`, `monkeypatch`, and `pytest.mark.parametrize`, while `tests/test_oaw.py` keeps class-based tests with `tempfile.TemporaryDirectory` vault fixtures and the unittest-style assertion helpers in `tests/assertions.py`. Name new tests `test_<behavior>` and verify return codes plus important stdout/stderr text. For lifecycle changes, assert task-note and agent-run contents, not only command success. Retired legacy board fixtures may be used only to prove lifecycle commands leave them untouched.
+Tests are pytest-style, using plain `assert` statements, `tmp_path`, `monkeypatch`, and `pytest.mark.parametrize`. Name new tests `test_<behavior>` and verify return codes plus important stdout/stderr text. For lifecycle changes, assert task-note and agent-run contents, not only command success. Retired legacy board fixtures may be used only to prove lifecycle commands leave them untouched.
 
 The package requires Python 3.13 or newer. Run `mise run check` before submitting
 changes. Use the individual Mise tasks or their underlying `uv run` commands for
