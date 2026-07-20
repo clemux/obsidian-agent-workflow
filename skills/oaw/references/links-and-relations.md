@@ -46,8 +46,9 @@ oaw link materialize OAW-TSK-cli --write
   or reference-style `[text][label]`) links and embeds, autolinks (`<obs:...>`),
   inline code spans and fenced code blocks, backslash-escaped occurrences
   (`\obs:OAW-TSK-cli`), reference-style link-definition lines and labels, and
-  references embedded inside a larger word or path form (`file/obs:OAW-TSK-cli.md`,
-  `obs:OAW-TSK-cli.md`, `obs:OAW-TSK-cli#Heading`, `obs:OAW-TSK-cli^block`).
+  references embedded inside a bare URI/query value or larger word/path form
+  (`?ref=obs:OAW-TSK-cli`, `file/obs:OAW-TSK-cli.md`, `obs:OAW-TSK-cli.md`,
+  `obs:OAW-TSK-cli#Heading`, `obs:OAW-TSK-cli^block`).
 - The same engine runs at write time for `oaw task create`, task lifecycle notes
   (`task backlog|start|review|complete`, `task note`), `oaw project create`
   (`--goal`), `oaw note session`, `oaw note observe`, `oaw feedback create`, and

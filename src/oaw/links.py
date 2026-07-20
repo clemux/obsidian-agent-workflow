@@ -73,6 +73,8 @@ class ContainerPrefix:
 OBS_REFERENCE_RE = re.compile(r"obs:([A-Za-z0-9][A-Za-z0-9_-]*)")
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\r\n]*)")
 LIST_MARKER_RE = re.compile(r"(?:[-+*]|\d{1,9}[.)])(?=[ \t])")
+URI_SCHEME_IN_TOKEN_RE = re.compile(r"(?:^|[([{<'\"])[A-Za-z][A-Za-z0-9+.-]*:")
+URI_QUERY_VALUE_RE = re.compile(r"[?&][^#\s]*=[^#\s]*$")
 
 
 def note_from_path(path: Path, root: Path, matched_by: str = "path") -> NoteMatch:
@@ -130,6 +132,15 @@ def _is_escaped(text: str, index: int) -> bool:
         escapes += 1
         index -= 1
     return escapes % 2 == 1
+
+
+def _inside_bare_uri(line: str, index: int) -> bool:
+    """Return whether ``index`` is inside a bare URI or query-value token."""
+    token_start = index
+    while token_start > 0 and not line[token_start - 1].isspace():
+        token_start -= 1
+    prefix = line[token_start:index]
+    return bool(URI_SCHEME_IN_TOKEN_RE.search(prefix) or URI_QUERY_VALUE_RE.search(prefix))
 
 
 def _container_prefix(line: str) -> ContainerPrefix:
@@ -745,7 +756,12 @@ def _materialize_line(
         match = OBS_REFERENCE_RE.match(line, index) if starts_reference else None
         before = line[index - 1] if index else ""
         eligible_start = not before or not (before.isalnum() or before in "_./\\:-")
-        if starts_reference and eligible_start and not _is_escaped(line, index):
+        if (
+            starts_reference
+            and eligible_start
+            and not _is_escaped(line, index)
+            and not _inside_bare_uri(line, index)
+        ):
             if match is None:
                 raise OawError("malformed obs reference: expected obs:<ID>")
             after = line[match.end() :]
