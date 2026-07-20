@@ -54,8 +54,25 @@ class ReferenceDefinition:
     end: int
 
 
+@dataclass(frozen=True)
+class ContainerPart:
+    """One explicit Markdown block-container marker."""
+
+    kind: str
+    continuation_width: int
+
+
+@dataclass(frozen=True)
+class ContainerPrefix:
+    """Physical-line prefix contributed by Markdown block containers."""
+
+    content_start: int
+    parts: tuple[ContainerPart, ...]
+
+
 OBS_REFERENCE_RE = re.compile(r"obs:([A-Za-z0-9][A-Za-z0-9_-]*)")
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\r\n]*)")
+LIST_MARKER_RE = re.compile(r"(?:[-+*]|\d{1,9}[.)])(?=[ \t])")
 
 
 def note_from_path(path: Path, root: Path, matched_by: str = "path") -> NoteMatch:
@@ -113,6 +130,65 @@ def _is_escaped(text: str, index: int) -> bool:
         escapes += 1
         index -= 1
     return escapes % 2 == 1
+
+
+def _container_prefix(line: str) -> ContainerPrefix:
+    """Locate content after explicit blockquote and list-container markers."""
+    index = 0
+    parts: list[ContainerPart] = []
+    while index < len(line):
+        prefix_start = index
+        probe = index
+        spaces = 0
+        while probe < len(line) and line[probe] == " " and spaces < 3:
+            probe += 1
+            spaces += 1
+        if probe < len(line) and line[probe] == ">":
+            index = probe + 1
+            if index < len(line) and line[index] in " \t":
+                index += 1
+            parts.append(ContainerPart("quote", 0))
+            continue
+        marker = LIST_MARKER_RE.match(line, probe)
+        if marker is not None:
+            index = marker.end() + 1
+            parts.append(ContainerPart("list", index - prefix_start))
+            continue
+        break
+    return ContainerPrefix(index if parts else 0, tuple(parts))
+
+
+def _matching_container_content_start(line: str, parts: tuple[ContainerPart, ...]) -> int | None:
+    """Match one continuation line against the containers that opened a fence."""
+    index = 0
+    for part in parts:
+        if part.kind == "quote":
+            probe = index
+            spaces = 0
+            while probe < len(line) and line[probe] == " " and spaces < 3:
+                probe += 1
+                spaces += 1
+            if probe >= len(line) or line[probe] != ">":
+                return None
+            index = probe + 1
+            if index < len(line) and line[index] in " \t":
+                index += 1
+        else:
+            end = index + part.continuation_width
+            indentation = line[index:end]
+            if len(indentation) != part.continuation_width or indentation.strip(" \t"):
+                return None
+            index = end
+    return index
+
+
+def _mask_container_prefixes(text: str) -> str:
+    """Mask container syntax without changing offsets used by protected spans."""
+    masked: list[str] = []
+    for line in text.splitlines(keepends=True):
+        content_start = _container_prefix(line).content_start
+        masked.append(" " * content_start + line[content_start:])
+    return "".join(masked)
 
 
 def _starts_inline_block_boundary(text: str, start: int) -> bool:
@@ -380,10 +456,11 @@ def _inline_states_after_line(
 
 def _reference_definition_info(text: str) -> tuple[set[str], list[ReferenceDefinition]]:
     """Collect normalized labels and their complete protected definition spans."""
+    masked_text = _mask_container_prefixes(text)
     labels: set[str] = set()
     definitions: list[ReferenceDefinition] = []
     offset = 0
-    active_fence: tuple[str, int] | None = None
+    active_fence: tuple[str, int, tuple[ContainerPart, ...]] | None = None
     active_code_ticks: int | None = None
     active_link_end: int | None = None
     active_indented_code = False
@@ -414,7 +491,7 @@ def _reference_definition_info(text: str) -> tuple[set[str], list[ReferenceDefin
             previous_blank = False
             offset += len(line)
             continue
-        marker = _fence_marker(line)
+        marker = _fence_marker(line, active_fence[2] if active_fence is not None else None)
         if active_fence is not None:
             if (
                 marker is not None
@@ -424,12 +501,14 @@ def _reference_definition_info(text: str) -> tuple[set[str], list[ReferenceDefin
             ):
                 active_fence = None
         elif marker is not None:
-            active_fence = marker[0], marker[1]
+            active_fence = marker[0], marker[1], marker[3]
         else:
-            indent = len(line) - len(line.lstrip(" "))
-            if indent <= 3 and indent < len(line) and line[indent] == "[":
-                start = offset + indent
-                definition = _reference_definition_at(text, start)
+            content_start = _container_prefix(line).content_start
+            content = line[content_start:]
+            indent = len(content) - len(content.lstrip(" "))
+            if indent <= 3 and indent < len(content) and content[indent] == "[":
+                start = offset + content_start + indent
+                definition = _reference_definition_at(masked_text, start)
                 if definition is not None:
                     labels.add(definition.label)
                     definitions.append(definition)
@@ -542,25 +621,39 @@ def _line_uses_table_pipes(
     return False
 
 
-def _fence_marker(line: str) -> tuple[str, int, str] | None:
-    """Return a CommonMark-style fence character, length, and trailing text."""
-    match = FENCE_RE.match(line)
+def _fence_marker(
+    line: str, active_parts: tuple[ContainerPart, ...] | None = None
+) -> tuple[str, int, str, tuple[ContainerPart, ...]] | None:
+    """Return a CommonMark-style fence marker and its container context."""
+    if active_parts is None:
+        prefix = _container_prefix(line)
+        start = prefix.content_start
+        parts = prefix.parts
+    else:
+        start = _matching_container_content_start(line, active_parts)
+        if start is None:
+            return None
+        parts = active_parts
+    match = FENCE_RE.match(line[start:])
     if not match:
         return None
     fence = match.group(1)
     trailing = match.group(2)
     if fence[0] == "`" and "`" in trailing:
         return None
-    return fence[0], len(fence), trailing
+    return fence[0], len(fence), trailing, parts
 
 
 def _is_blank_line(line: str) -> bool:
-    return not line.strip(" \t\r\n")
+    content_start = _container_prefix(line).content_start
+    return not line[content_start:].strip(" \t\r\n")
 
 
 def _is_indented_code_line(line: str) -> bool:
     """Return whether a line has the indentation required for a code block."""
-    return line.startswith("\t") or line.startswith("    ")
+    content_start = _container_prefix(line).content_start
+    content = line[content_start:]
+    return content.startswith("\t") or content.startswith("    ")
 
 
 def _materialize_line(
@@ -691,7 +784,7 @@ def materialize_obs_references(
     replacements: list[ObsReferenceReplacement] = []
     resolved: dict[str, NoteMatch] = {}
     reference_labels, definitions = _reference_definition_info(text)
-    active_fence: tuple[str, int] | None = None
+    active_fence: tuple[str, int, tuple[ContainerPart, ...]] | None = None
     active_code_ticks: int | None = None
     active_link_end: int | None = None
     active_indented_code = False
@@ -734,10 +827,10 @@ def materialize_obs_references(
             previous_blank = False
             line_offset += len(line)
             continue
-        marker = _fence_marker(line)
+        marker = _fence_marker(line, active_fence[2] if active_fence is not None else None)
         if active_fence is None and marker is not None:
-            character, length, _ = marker
-            active_fence = character, length
+            character, length, _, container_parts = marker
+            active_fence = character, length, container_parts
             rendered.append(line)
         elif active_fence is not None:
             if (

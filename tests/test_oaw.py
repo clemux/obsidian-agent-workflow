@@ -3905,6 +3905,62 @@ obs:OAW-TSK-cli
             [item.reference for item in replacements], ["obs:OAW-TSK-legacy_v2", "obs:OAW-TSK-cli"]
         )
 
+    def test_obs_materialization_protects_container_nested_fenced_code(self):
+        source = (
+            "> ~~~text\n"
+            "> obs:OAW-TSK-cli\n"
+            "> ~~~\n"
+            "\n"
+            "- ~~~text\n"
+            "  obs:OAW-TSK-archived\n"
+            "  ~~~\n"
+            "\n"
+            "> ```text\n"
+            "> literal ``` here\n"
+            "> obs:OAW-TSK-cli\n"
+            "> ```\n"
+            "\n"
+            "```text\n"
+            "- ```\n"
+            "> ```\n"
+            "obs:OAW-TSK-archived\n"
+            "```\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertEqual(rendered, source)
+        self.assertEqual(replacements, [])
+
+    def test_obs_materialization_protects_container_nested_indented_code(self):
+        sources = (
+            ">     obs:OAW-TSK-cli\n",
+            "-     obs:OAW-TSK-archived\n",
+            "- item\n\n      obs:OAW-TSK-cli\n",
+        )
+
+        for source in sources:
+            with self.subTest(source=source):
+                rendered, replacements = links.materialize_obs_references(source, self.vault)
+                self.assertEqual(rendered, source)
+                self.assertEqual(replacements, [])
+
+    def test_obs_materialization_protects_container_nested_reference_definitions(self):
+        source = (
+            "> [quoted obs:OAW-TSK-cli]: /quote\n"
+            ">\n"
+            "> [quoted obs:OAW-TSK-cli]\n"
+            "\n"
+            "- [listed obs:OAW-TSK-archived]: /list\n"
+            "\n"
+            "  [listed obs:OAW-TSK-archived]\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertEqual(rendered, source)
+        self.assertEqual(replacements, [])
+
     def test_obs_materialization_protects_commonmark_indented_code_blocks(self):
         source = (
             "    obs:OAW-TSK-cli\n"
