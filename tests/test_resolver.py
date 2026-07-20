@@ -5,7 +5,12 @@ import pytest
 from oaw import resolver
 from oaw.errors import OawError
 from oaw.frontmatter import FRONTMATTER_READ_LIMIT
-from oaw.resolver import resolve_id, resolve_project_root_from_references, scan_note_references
+from oaw.resolver import (
+    resolve_id,
+    resolve_project_root,
+    resolve_project_root_from_references,
+    scan_note_references,
+)
 
 
 @pytest.mark.parametrize("configured", [None, "", "   "])
@@ -99,6 +104,36 @@ def test_scanned_project_alias_ignores_nested_projects_directory(tmp_path: Path)
     assert resolve_project_root_from_references("REAL", tmp_path, references) == (
         real.parent,
         "REAL",
+    )
+
+
+def test_exact_project_folder_precedes_bare_alias_collision(tmp_path: Path):
+    exact = tmp_path / "Projects/DUP"
+    exact.mkdir(parents=True)
+    alias_index = tmp_path / "Projects/Alias Target/Index.md"
+    alias_index.parent.mkdir(parents=True)
+    alias_index.write_text("---\nid: DUP-index\n---\n\n# Alias target\n", encoding="utf-8")
+    references = scan_note_references(tmp_path)
+
+    assert resolve_project_root("DUP", tmp_path) == (exact, None)
+    assert resolve_project_root_from_references("DUP", tmp_path, references) == (exact, None)
+    assert resolve_project_root("obs:DUP", tmp_path) == (alias_index.parent, "DUP")
+    assert resolve_project_root_from_references("obs:DUP", tmp_path, references) == (
+        alias_index.parent,
+        "DUP",
+    )
+
+
+def test_project_alias_resolves_without_exact_folder(tmp_path: Path):
+    index = tmp_path / "Projects/Long Project Name/Index.md"
+    index.parent.mkdir(parents=True)
+    index.write_text("---\nid: SHORT-index\n---\n\n# Long project name\n", encoding="utf-8")
+    references = scan_note_references(tmp_path)
+
+    assert resolve_project_root("SHORT", tmp_path) == (index.parent, "SHORT")
+    assert resolve_project_root_from_references("SHORT", tmp_path, references) == (
+        index.parent,
+        "SHORT",
     )
 
 
