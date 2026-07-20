@@ -7,7 +7,7 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 - `src/oaw/` contains the CLI implementation as domain modules (`resolver.py`, `notes.py`, `lifecycle.py`, `frontmatter.py`, `cli.py`, ...) for resolving Obsidian IDs and updating task lifecycle state.
 - `bin/oaw` is a thin launcher that runs the checkout copy of `src/oaw/` without installing it.
 - `tests/` holds the pytest suite: domain-level suites such as `tests/test_resolver.py`, `tests/test_notes.py`, and `tests/test_links.py`; per-domain CLI suites such as `tests/test_task_lifecycle_cli.py` and `tests/test_links_cli.py`; command-contract coverage in `tests/test_typer_cli.py`; and shared vault factories, runners, and snapshot/assertion helpers in `tests/support.py`, from which each test file composes its own minimal vault fixtures.
-- `docs/architecture.md` records the package-layout rationale; `docs/linting.md` explains the maintained Ruff and Pyrefly policy; `docs/claude-code.md` documents the Claude Code session-title hook shipped in `scripts/`.
+- `docs/architecture.md` records the package-layout rationale; `docs/linting.md` explains the maintained Ruff and Pyrefly policy; `docs/testing-mistakes.md` tracks reusable test-bloat mistakes and prevention ideas; `docs/claude-code.md` documents the Claude Code session-title hook shipped in `scripts/`.
 - `skills/oaw/` documents the agent-facing workflow for using the CLI.
 - `skills/obsidian-capture/` preserves side observations in the vault capture workflow.
 - `skills/oaw-task-execution/` provides safe repository execution for OAW-owned tasks.
@@ -87,6 +87,10 @@ Prefer `pathlib.Path`, UTF-8 file reads/writes, and `json.dumps` for machine-rea
 ## Testing Guidelines
 
 Tests are pytest-style, using plain `assert` statements, `tmp_path`, `monkeypatch`, and `pytest.mark.parametrize`. Name new tests `test_<behavior>` and verify return codes plus important stdout/stderr text. For lifecycle changes, assert task-note and agent-run contents, not only command success.
+
+When test cleanup reveals a reusable anti-pattern, record it in
+`docs/testing-mistakes.md` with evidence, rationale, and a candidate
+cross-project prevention rule.
 
 The package requires Python 3.13 or newer. Run `mise run check` before submitting
 changes. Use the individual Mise tasks or their underlying `uv run` commands for
