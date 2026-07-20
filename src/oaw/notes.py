@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import tempfile
 from collections.abc import Callable
 from contextlib import suppress
@@ -93,6 +94,10 @@ class VaultTransaction:
             if current != expected:
                 raise OawError(f"note changed on disk since it was read: {path}")
         originals = {path: path.read_bytes() if path.exists() else None for path in self.changes}
+        original_modes = {
+            path: stat.S_IMODE(path.stat().st_mode) if path.exists() else None
+            for path in self.changes
+        }
         written: list[Path] = []
         temps: list[Path] = []
         try:
@@ -103,6 +108,9 @@ class VaultTransaction:
                 ) as handle:
                     handle.write(text)
                     handle.flush()
+                    original_mode = original_modes[path]
+                    if original_mode is not None:
+                        os.fchmod(handle.fileno(), original_mode)
                     os.fsync(handle.fileno())
                     temp = Path(handle.name)
                 temps.append(temp)
