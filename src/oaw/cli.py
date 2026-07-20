@@ -1414,9 +1414,12 @@ def _built_command() -> click_core.Command:
     """Build the Click command tree once per process.
 
     A CLI process invokes main exactly once, so caching changes nothing there;
-    it keeps repeated in-process invocations (tests, embedding) from paying the
-    full Typer-to-Click conversion on every call. Invocation state lives in
-    per-call Context objects, not on the command tree.
+    it keeps repeated sequential in-process invocations (tests, embedding) from
+    paying the full Typer-to-Click conversion on every call. Sequential reuse is
+    safe because parse results live in per-call Context objects. Concurrent
+    same-process calls are not: Typer's generated callbacks share a mutable
+    per-command params dict, so in-process invocation is single-threaded by
+    design.
     """
     global _command
     if _command is None:
