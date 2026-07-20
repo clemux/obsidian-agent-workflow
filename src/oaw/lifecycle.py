@@ -141,7 +141,7 @@ def append_session_entry(
             break
     section_lines = lines[heading_idx + 1 : section_end]
     last_idx = len(section_lines) - 1
-    while last_idx >= 0 and section_lines[last_idx] == "":
+    while last_idx >= 0 and not section_lines[last_idx].strip():
         last_idx -= 1
     if last_idx < 0:
         return append_markdown_block_to_section(text, heading, "\n".join(entry_lines))
