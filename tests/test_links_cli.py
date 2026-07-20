@@ -1,6 +1,10 @@
 import stat
+import subprocess
+from collections.abc import Callable
 from contextlib import redirect_stderr
 from io import StringIO
+from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -456,8 +460,45 @@ def test_automatic_materialization_failures_do_not_partially_write(run_oaw, lega
     assert target.read_bytes() == before_target
 
 
-def test_durable_prose_writes_share_obs_materialization(run_oaw, legacy_vault):
-    created = run_oaw(
+# The durable wikilink that ``obs:OAW-TSK-cli`` materializes into. Shared by most
+# rows in the capability table below, so it is named once here.
+DURABLE = "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]"
+
+
+Runner = Callable[..., "subprocess.CompletedProcess[str]"]
+
+
+class DurableProseCase(NamedTuple):
+    """One prose-writing command and its cross-command materialization guarantee.
+
+    Adding a new writer means adding a row: name it, describe any prerequisite
+    state via ``setup``, give the argv carrying the ``obs:`` reference, point at
+    the note that must end up materialized, and list the fragments that must (and
+    must not) appear. Each case runs against its own fresh ``legacy_vault``, so
+    ``setup`` arranges every prerequisite from scratch (parametrized cases must be
+    independent under xdist).
+    """
+
+    id: str
+    # setup(run, vault) arranges prerequisite state against a fresh legacy_vault.
+    setup: Callable[[Runner, Path], None]
+    # argv (after the program name) containing the obs: reference under test.
+    command: tuple[str, ...]
+    # target(vault) -> the note whose materialized content is inspected.
+    target: Callable[[Path], Path]
+    # Fragments that must appear in the target: the materialized wikilink plus any
+    # arguments that deliberately stay literal (checks, titles, command metadata).
+    expected: tuple[str, ...]
+    # Fragments that must NOT appear in the target.
+    forbidden: tuple[str, ...] = ()
+
+
+def _no_setup(run: Runner, vault: Path) -> None:
+    """Row has no prerequisite state."""
+
+
+def _create_materialized_prose_task(run: Runner, vault: Path) -> None:
+    created = run(
         "task",
         "create",
         "--project",
@@ -468,127 +509,183 @@ def test_durable_prose_writes_share_obs_materialization(run_oaw, legacy_vault):
         "Start from obs:OAW-TSK-cli.",
     )
     assert created.returncode == 0, created.stderr
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Materialized prose.md"
-    task = task_path.read_text(encoding="utf-8")
-    durable = "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]"
-    assert f"Start from {durable}." in task
 
-    transitioned = run_oaw(
+
+def _create_and_start_materialized_prose_task(run: Runner, vault: Path) -> None:
+    _create_materialized_prose_task(run, vault)
+    started = run(
         "task",
         "start",
         "OAW-TSK-materialized-prose",
         "--note",
         "Continue with obs:OAW-TSK-archived.",
     )
-    assert transitioned.returncode == 0, transitioned.stderr
-    task = task_path.read_text(encoding="utf-8")
-    assert (
-        "Continue with [[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]."
-        in task
-    )
+    assert started.returncode == 0, started.stderr
 
-    noted = run_oaw(
-        "task",
-        "note",
-        "OAW-TSK-materialized-prose",
-        "--note",
-        "Task note obs:OAW-TSK-cli.",
-        "--checks",
-        "obs:OAW-TSK-archived",
-    )
-    assert noted.returncode == 0, noted.stderr
-    task_text = task_path.read_text(encoding="utf-8")
-    assert f"Task note {durable}." in task_text
-    assert "checks: obs:OAW-TSK-archived" in task_text
 
-    project = run_oaw(
-        "project",
-        "create",
-        "--name",
-        "Materialized Project",
-        "--alias",
-        "MAT",
-        "--goal",
-        "Build from obs:OAW-TSK-cli.",
-    )
-    assert project.returncode == 0, project.stderr
-    project_index = legacy_vault / "Projects/Materialized Project/Index.md"
-    assert f"Build from {durable}." in project_index.read_text(encoding="utf-8")
+DURABLE_PROSE_CASES: tuple[DurableProseCase, ...] = (
+    DurableProseCase(
+        id="task-create",
+        setup=_no_setup,
+        command=(
+            "task",
+            "create",
+            "--project",
+            "obs:OAW",
+            "--title",
+            "Materialized prose",
+            "--note",
+            "Start from obs:OAW-TSK-cli.",
+        ),
+        target=lambda v: v / "Projects/Obsidian Agent Workflow/Tasks/Materialized prose.md",
+        expected=(f"Start from {DURABLE}.",),
+    ),
+    DurableProseCase(
+        id="task-start",
+        setup=_create_materialized_prose_task,
+        command=(
+            "task",
+            "start",
+            "OAW-TSK-materialized-prose",
+            "--note",
+            "Continue with obs:OAW-TSK-archived.",
+        ),
+        target=lambda v: v / "Projects/Obsidian Agent Workflow/Tasks/Materialized prose.md",
+        expected=(
+            "Continue with "
+            "[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]].",
+        ),
+    ),
+    DurableProseCase(
+        id="task-note",
+        setup=_create_and_start_materialized_prose_task,
+        command=(
+            "task",
+            "note",
+            "OAW-TSK-materialized-prose",
+            "--note",
+            "Task note obs:OAW-TSK-cli.",
+            "--checks",
+            "obs:OAW-TSK-archived",
+        ),
+        target=lambda v: v / "Projects/Obsidian Agent Workflow/Tasks/Materialized prose.md",
+        # --checks stays literal; only the prose --note materializes.
+        expected=(f"Task note {DURABLE}.", "checks: obs:OAW-TSK-archived"),
+    ),
+    DurableProseCase(
+        id="project-create",
+        setup=_no_setup,
+        command=(
+            "project",
+            "create",
+            "--name",
+            "Materialized Project",
+            "--alias",
+            "MAT",
+            "--goal",
+            "Build from obs:OAW-TSK-cli.",
+        ),
+        target=lambda v: v / "Projects/Materialized Project/Index.md",
+        expected=(f"Build from {DURABLE}.",),
+    ),
+    DurableProseCase(
+        id="note-session",
+        setup=_no_setup,
+        command=(
+            "note",
+            "session",
+            "AGT-TSK-obsidian-task-ids",
+            "--note",
+            "Session note obs:OAW-TSK-cli.",
+        ),
+        target=lambda v: v / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md",
+        expected=(f"Session note {DURABLE}.",),
+    ),
+    DurableProseCase(
+        id="note-observe",
+        setup=_no_setup,
+        command=(
+            "note",
+            "observe",
+            "AGT-TSK-obsidian-task-ids",
+            "--title",
+            "Literal title obs:OAW-TSK-cli",
+            "--body",
+            "Observation body obs:OAW-TSK-cli.",
+        ),
+        target=lambda v: v / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md",
+        # --title stays literal; only the --body materializes.
+        expected=("Literal title obs:OAW-TSK-cli", f"Observation body {DURABLE}."),
+    ),
+    DurableProseCase(
+        id="feedback-create",
+        setup=_no_setup,
+        command=(
+            "feedback",
+            "create",
+            "--title",
+            "Materialized feedback",
+            "--type",
+            "verified",
+            "--scope",
+            "materialization",
+            "--body",
+            "Feedback body obs:OAW-TSK-cli.",
+            "--command",
+            "obs:OAW-TSK-archived",
+        ),
+        target=lambda v: next((v / "Agents/Feedback").glob("*Materialized feedback.md")),
+        # --command metadata stays literal; only the --body materializes.
+        expected=(f"Feedback body {DURABLE}.", 'command: "obs:OAW-TSK-archived"'),
+    ),
+    DurableProseCase(
+        id="retro-create",
+        setup=_no_setup,
+        command=(
+            "retro",
+            "create",
+            "--title",
+            "Materialized retrospective",
+            "--summary",
+            "Summary obs:OAW-TSK-cli.",
+        ),
+        target=lambda v: next((v / "Agents/Retrospectives").glob("*materialized retrospective.md")),
+        expected=(f"Summary {DURABLE}.",),
+    ),
+    DurableProseCase(
+        id="research-scaffold",
+        setup=_no_setup,
+        command=(
+            "research",
+            "scaffold",
+            "--project",
+            "obs:OAW",
+            "--track",
+            "materialization-exclusion",
+            "--title",
+            "Research obs:OAW-TSK-cli",
+        ),
+        target=lambda v: (
+            v / "Projects/Obsidian Agent Workflow/Research/materialization-exclusion/Prompt.md"
+        ),
+        # The research title deliberately stays literal.
+        expected=("Research obs:OAW-TSK-cli",),
+    ),
+)
 
-    session = run_oaw(
-        "note",
-        "session",
-        "AGT-TSK-obsidian-task-ids",
-        "--note",
-        "Session note obs:OAW-TSK-cli.",
-    )
-    assert session.returncode == 0, session.stderr
-    agent_task = legacy_vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
-    assert f"Session note {durable}." in agent_task.read_text(encoding="utf-8")
 
-    observation = run_oaw(
-        "note",
-        "observe",
-        "AGT-TSK-obsidian-task-ids",
-        "--title",
-        "Literal title obs:OAW-TSK-cli",
-        "--body",
-        "Observation body obs:OAW-TSK-cli.",
-    )
-    assert observation.returncode == 0, observation.stderr
-    agent_text = agent_task.read_text(encoding="utf-8")
-    assert "Literal title obs:OAW-TSK-cli" in agent_text
-    assert f"Observation body {durable}." in agent_text
+@pytest.mark.parametrize("case", DURABLE_PROSE_CASES, ids=[case.id for case in DURABLE_PROSE_CASES])
+def test_durable_prose_writes_share_obs_materialization(run_oaw, legacy_vault, case):
+    case.setup(run_oaw, legacy_vault)
 
-    feedback = run_oaw(
-        "feedback",
-        "create",
-        "--title",
-        "Materialized feedback",
-        "--type",
-        "verified",
-        "--scope",
-        "materialization",
-        "--body",
-        "Feedback body obs:OAW-TSK-cli.",
-        "--command",
-        "obs:OAW-TSK-archived",
-    )
-    assert feedback.returncode == 0, feedback.stderr
-    feedback_note = next((legacy_vault / "Agents/Feedback").glob("*Materialized feedback.md"))
-    feedback_text = feedback_note.read_text(encoding="utf-8")
-    assert f"Feedback body {durable}." in feedback_text
-    assert 'command: "obs:OAW-TSK-archived"' in feedback_text
+    result = run_oaw(*case.command)
 
-    retro = run_oaw(
-        "retro",
-        "create",
-        "--title",
-        "Materialized retrospective",
-        "--summary",
-        "Summary obs:OAW-TSK-cli.",
-    )
-    assert retro.returncode == 0, retro.stderr
-    retro_note = next(
-        (legacy_vault / "Agents/Retrospectives").glob("*materialized retrospective.md")
-    )
-    assert f"Summary {durable}." in retro_note.read_text(encoding="utf-8")
-
-    research = run_oaw(
-        "research",
-        "scaffold",
-        "--project",
-        "obs:OAW",
-        "--track",
-        "materialization-exclusion",
-        "--title",
-        "Research obs:OAW-TSK-cli",
-    )
-    assert research.returncode == 0, research.stderr
-    prompt = legacy_vault / (
-        "Projects/Obsidian Agent Workflow/Research/materialization-exclusion/Prompt.md"
-    )
-    assert "Research obs:OAW-TSK-cli" in prompt.read_text(encoding="utf-8")
+    assert result.returncode == 0, result.stderr
+    text = case.target(legacy_vault).read_text(encoding="utf-8")
+    for fragment in case.expected:
+        assert fragment in text, fragment
+    for fragment in case.forbidden:
+        assert fragment not in text, fragment
 
 
 def test_link_materialize_rejects_conflicting_dry_run_and_write(run_oaw, legacy_vault):
