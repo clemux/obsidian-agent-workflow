@@ -1,5 +1,7 @@
 import re
 
+import pytest
+
 from tests import support
 
 
@@ -79,28 +81,35 @@ Keep this decision.
     assert before_heading == "\n\n"
 
 
-def test_note_session_refuses_unsupported_session_ids_without_writing(run_oaw, legacy_vault):
+@pytest.mark.parametrize(
+    "session_ids",
+    [
+        pytest.param(
+            'session-ids: ["old,with-comma", earlier-thread]\n', id="flow-sequence-with-comma"
+        ),
+        pytest.param("session-ids:\n  owner: earlier-thread\n", id="mapping-instead-of-sequence"),
+        pytest.param("session-ids:\n  - null\n", id="null-entry"),
+    ],
+)
+def test_note_session_refuses_unsupported_session_ids_without_writing(
+    run_oaw, legacy_vault, session_ids
+):
     path = legacy_vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
     baseline = path.read_text(encoding="utf-8")
-    for session_ids in (
-        'session-ids: ["old,with-comma", earlier-thread]\n',
-        "session-ids:\n  owner: earlier-thread\n",
-        "session-ids:\n  - null\n",
-    ):
-        before = baseline.replace("status: open\n", "status: open\n" + session_ids)
-        path.write_text(before, encoding="utf-8")
+    before = baseline.replace("status: open\n", "status: open\n" + session_ids)
+    path.write_text(before, encoding="utf-8")
 
-        proc = run_oaw(
-            "note",
-            "session",
-            "AGT-TSK-obsidian-task-ids",
-            "--note",
-            "Must not corrupt session metadata.",
-        )
+    proc = run_oaw(
+        "note",
+        "session",
+        "AGT-TSK-obsidian-task-ids",
+        "--note",
+        "Must not corrupt session metadata.",
+    )
 
-        assert proc.returncode != 0
-        assert "session-ids must" in proc.stderr
-        assert path.read_text(encoding="utf-8") == before
+    assert proc.returncode != 0
+    assert "session-ids must" in proc.stderr
+    assert path.read_text(encoding="utf-8") == before
 
 
 def test_note_observe_appends_block_under_target_section(run_oaw, legacy_vault):

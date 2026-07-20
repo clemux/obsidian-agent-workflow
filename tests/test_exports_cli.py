@@ -2,6 +2,8 @@ import hashlib
 import json
 import re
 
+import pytest
+
 from tests import support
 from tests.support import write
 
@@ -197,7 +199,14 @@ export-scope: work
     assert not (legacy_vault / "escape").exists()
 
 
-def test_export_validate_rejects_paths_outside_bundle(run_oaw, legacy_vault):
+@pytest.mark.parametrize(
+    "path_kind",
+    [
+        pytest.param("relative", id="relative-parent-escape"),
+        pytest.param("absolute", id="absolute-outside-path"),
+    ],
+)
+def test_export_validate_rejects_paths_outside_bundle(run_oaw, legacy_vault, path_kind):
     write(
         legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Path export.md",
         """---
@@ -225,12 +234,12 @@ export-scope: work
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["note"]["sha256"] = hashlib.sha256(outside.read_bytes()).hexdigest()
 
-    for escaped_path in ("../stolen.md", str(outside)):
-        manifest["note"]["path"] = escaped_path
-        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-        proc = run_oaw("export", "validate", str(bundle))
-        assert proc.returncode != 0
-        assert re.search(r"manifest path (escapes bundle|must be bundle-relative)", proc.stderr)
+    escaped_path = "../stolen.md" if path_kind == "relative" else str(outside)
+    manifest["note"]["path"] = escaped_path
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    proc = run_oaw("export", "validate", str(bundle))
+    assert proc.returncode != 0
+    assert re.search(r"manifest path (escapes bundle|must be bundle-relative)", proc.stderr)
 
 
 def test_safe_export_ingest_dry_run_reads_markers_and_leaves_files(run_oaw, legacy_vault):

@@ -1,5 +1,7 @@
 import re
 
+import pytest
+
 from oaw import cli, lifecycle
 from oaw.errors import OawError
 from tests.support import write
@@ -111,12 +113,25 @@ Retained.
     assert "{{date}}" not in note
 
 
-def test_project_create_rejects_unsafe_inputs_without_writing(run_oaw, legacy_vault):
-    cases = [
-        (("--name", "../Unsafe", "--alias", "OK", "--goal", "Goal"), "--name"),
-        (("--name", "Unsafe", "--alias", "bad", "--goal", "Goal"), "--alias"),
-        (("--name", "Unsafe", "--alias", "OK", "--goal", "line\nbreak"), "--goal"),
-        (
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        pytest.param(
+            ("--name", "../Unsafe", "--alias", "OK", "--goal", "Goal"),
+            "--name",
+            id="unsafe-name",
+        ),
+        pytest.param(
+            ("--name", "Unsafe", "--alias", "bad", "--goal", "Goal"),
+            "--alias",
+            id="unsafe-alias",
+        ),
+        pytest.param(
+            ("--name", "Unsafe", "--alias", "OK", "--goal", "line\nbreak"),
+            "--goal",
+            id="unsafe-goal",
+        ),
+        pytest.param(
             (
                 "--name",
                 "Unsafe",
@@ -128,38 +143,51 @@ def test_project_create_rejects_unsafe_inputs_without_writing(run_oaw, legacy_va
                 "bad tag",
             ),
             "--tag",
+            id="unsafe-tag",
         ),
-    ]
-    for arguments, expected in cases:
-        proc = run_oaw("project", "create", *arguments)
-        assert proc.returncode == 1
-        assert expected in proc.stderr
-        assert not (legacy_vault / "Projects/Unsafe").exists()
+    ],
+)
+def test_project_create_rejects_unsafe_inputs_without_writing(
+    run_oaw, legacy_vault, arguments, expected
+):
+    proc = run_oaw("project", "create", *arguments)
+    assert proc.returncode == 1
+    assert expected in proc.stderr
+    assert not (legacy_vault / "Projects/Unsafe").exists()
 
 
-def test_project_create_rejects_malformed_or_unresolved_templates(run_oaw, legacy_vault):
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        pytest.param("# {{title}}", "# No title token", "exactly one H1", id="missing-h1-title"),
+        pytest.param("## Goal", "### Goal", "exactly one '## Goal'", id="wrong-goal-heading-level"),
+        pytest.param(
+            "## Agent notes",
+            "## Agent notes\n\n{{unknown}}",
+            "unresolved template",
+            id="unresolved-template-token",
+        ),
+    ],
+)
+def test_project_create_rejects_malformed_or_unresolved_templates(
+    run_oaw, legacy_vault, old, new, expected
+):
     template = legacy_vault / "Templates/Small project index.md"
-    variants = [
-        ("# {{title}}", "# No title token", "exactly one H1"),
-        ("## Goal", "### Goal", "exactly one '## Goal'"),
-        ("## Agent notes", "## Agent notes\n\n{{unknown}}", "unresolved template"),
-    ]
     original = template.read_text(encoding="utf-8")
-    for old, new, expected in variants:
-        template.write_text(original.replace(old, new), encoding="utf-8")
-        proc = run_oaw(
-            "project",
-            "create",
-            "--name",
-            "Broken Project",
-            "--alias",
-            "BP",
-            "--goal",
-            "Goal",
-        )
-        assert proc.returncode == 1
-        assert expected in proc.stderr
-        assert not (legacy_vault / "Projects/Broken Project").exists()
+    template.write_text(original.replace(old, new), encoding="utf-8")
+    proc = run_oaw(
+        "project",
+        "create",
+        "--name",
+        "Broken Project",
+        "--alias",
+        "BP",
+        "--goal",
+        "Goal",
+    )
+    assert proc.returncode == 1
+    assert expected in proc.stderr
+    assert not (legacy_vault / "Projects/Broken Project").exists()
     template.write_text(original, encoding="utf-8")
 
 

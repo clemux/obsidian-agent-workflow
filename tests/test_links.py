@@ -1,3 +1,5 @@
+import pytest
+
 from oaw import links, resolver
 from tests.support import write
 
@@ -108,17 +110,18 @@ def test_obs_materialization_protects_container_nested_fenced_code(legacy_vault)
     assert replacements == []
 
 
-def test_obs_materialization_protects_container_nested_indented_code(legacy_vault):
-    sources = (
-        ">     obs:OAW-TSK-cli\n",
-        "-     obs:OAW-TSK-archived\n",
-        "- item\n\n      obs:OAW-TSK-cli\n",
-    )
-
-    for source in sources:
-        rendered, replacements = links.materialize_obs_references(source, legacy_vault)
-        assert rendered == source
-        assert replacements == []
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(">     obs:OAW-TSK-cli\n", id="blockquote-indented-code"),
+        pytest.param("-     obs:OAW-TSK-archived\n", id="list-item-indented-code"),
+        pytest.param("- item\n\n      obs:OAW-TSK-cli\n", id="list-item-nested-indented-code"),
+    ],
+)
+def test_obs_materialization_protects_container_nested_indented_code(legacy_vault, source):
+    rendered, replacements = links.materialize_obs_references(source, legacy_vault)
+    assert rendered == source
+    assert replacements == []
 
 
 def test_obs_materialization_protects_container_nested_reference_definitions(legacy_vault):

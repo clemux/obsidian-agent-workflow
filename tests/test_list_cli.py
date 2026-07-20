@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.support import write
 
 
@@ -176,13 +178,19 @@ def test_list_invalid_sort_choice_is_usage_error(run_oaw, legacy_vault):
     assert "invalid choice: 'nope'" in proc.stderr
 
 
-def test_list_accepts_project_aliases(run_oaw, legacy_vault):
+@pytest.mark.parametrize(
+    "alias",
+    [
+        pytest.param("OAW", id="bare-alias"),
+        pytest.param("obs:OAW", id="obs-prefixed-alias"),
+    ],
+)
+def test_list_accepts_project_aliases(run_oaw, legacy_vault, alias):
     expected = run_oaw("list", "--project", "Obsidian Agent Workflow")
     assert expected.returncode == 0, expected.stderr
-    for alias in ["OAW", "obs:OAW"]:
-        proc = run_oaw("list", "--project", alias)
-        assert proc.returncode == 0, proc.stderr
-        assert proc.stdout == expected.stdout
+    proc = run_oaw("list", "--project", alias)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == expected.stdout
 
 
 def test_list_prefers_exact_project_folder_over_bare_alias(run_oaw, legacy_vault):
