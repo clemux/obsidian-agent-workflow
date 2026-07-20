@@ -11,6 +11,7 @@ from oaw import cli, lifecycle, resolver
 from oaw.errors import OawError
 from tests import support
 from tests.support import (
+    assert_ok,
     run_record_for,
     snapshot_tree_without_following_symlinks,
     write,
@@ -1528,7 +1529,7 @@ def test_task_backlog_updates_status_and_session_without_touching_legacy_board(
 def test_task_promote_updates_status_without_touching_legacy_board(run_oaw, legacy_vault):
     board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
     board_before = board_path.read_bytes()
-    run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later.")
+    assert_ok(run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later."))
     proc = run_oaw("task", "promote", "OAW-TSK-cli", "--note", "Selected next.")
     assert proc.returncode == 0, proc.stderr
     task = (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
