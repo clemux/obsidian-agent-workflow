@@ -96,8 +96,9 @@ def test_note_session_refuses_unsupported_session_ids_without_writing(
 ):
     path = legacy_vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
     baseline = path.read_text(encoding="utf-8")
-    before = baseline.replace("status: open\n", "status: open\n" + session_ids)
-    path.write_text(before, encoding="utf-8")
+    seeded = baseline.replace("status: open\n", "status: open\n" + session_ids)
+    path.write_text(seeded, encoding="utf-8")
+    before = support.snapshot_tree_without_following_symlinks(legacy_vault)
 
     proc = run_oaw(
         "note",
@@ -109,7 +110,7 @@ def test_note_session_refuses_unsupported_session_ids_without_writing(
 
     assert proc.returncode != 0
     assert "session-ids must" in proc.stderr
-    assert path.read_text(encoding="utf-8") == before
+    assert support.snapshot_tree_without_following_symlinks(legacy_vault) == before
 
 
 def test_note_observe_appends_block_under_target_section(run_oaw, legacy_vault):

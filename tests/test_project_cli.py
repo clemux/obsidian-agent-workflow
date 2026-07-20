@@ -4,7 +4,7 @@ import pytest
 
 from oaw import cli, lifecycle
 from oaw.errors import OawError
-from tests.support import write
+from tests.support import snapshot_tree_without_following_symlinks, write
 
 
 def test_project_create_renders_native_template_and_frontmatter(run_oaw, legacy_vault):
@@ -150,10 +150,11 @@ Retained.
 def test_project_create_rejects_unsafe_inputs_without_writing(
     run_oaw, legacy_vault, arguments, expected
 ):
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
     proc = run_oaw("project", "create", *arguments)
     assert proc.returncode == 1
     assert expected in proc.stderr
-    assert not (legacy_vault / "Projects/Unsafe").exists()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 @pytest.mark.parametrize(

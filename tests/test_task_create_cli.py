@@ -1,7 +1,11 @@
 import datetime as dt
 from pathlib import Path
 
-from tests.support import run_record_for, write
+from tests.support import (
+    run_record_for,
+    snapshot_tree_without_following_symlinks,
+    write,
+)
 
 
 def write_canonical_capture(vault: Path, note_id: str, project_line: str) -> Path:
@@ -236,8 +240,7 @@ def test_task_create_start_is_atomic_without_capture(run_oaw, legacy_vault):
 
 
 def test_task_create_rejects_start_with_human_execution_without_writes(run_oaw, legacy_vault):
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
-    before = board_path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     proc = run_oaw(
         "task",
@@ -253,14 +256,11 @@ def test_task_create_rejects_start_with_human_execution_without_writes(run_oaw, 
 
     assert proc.returncode == 1
     assert "cannot --start a task with human execution" in proc.stderr
-    assert before == board_path.read_bytes()
-    assert not (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Human task.md").exists()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_create_duplicate_id_fails_without_writes(run_oaw, legacy_vault):
-    before_board = (legacy_vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
-        encoding="utf-8"
-    )
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
     proc = run_oaw(
         "task",
         "create",
@@ -273,11 +273,7 @@ def test_task_create_duplicate_id_fails_without_writes(run_oaw, legacy_vault):
     )
     assert proc.returncode == 1
     assert "already in use" in proc.stderr
-    assert not (legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Fresh title.md").exists()
-    after_board = (legacy_vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(
-        encoding="utf-8"
-    )
-    assert before_board == after_board
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_create_existing_path_fails(run_oaw, legacy_vault):
@@ -427,8 +423,7 @@ def test_task_create_from_capture_start_creates_active_task(run_oaw, legacy_vaul
 
 
 def test_task_create_from_capture_start_requires_real_session_provenance(run_oaw, legacy_vault):
-    capture_path = legacy_vault / "Projects/Obsidian Agent Workflow/Inbox/Active capture.md"
-    before = capture_path.read_text(encoding="utf-8")
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
     env = {
         "CODEX_THREAD_ID": "",
         "CLAUDE_SESSION_ID": "",
@@ -448,10 +443,7 @@ def test_task_create_from_capture_start_requires_real_session_provenance(run_oaw
     )
     assert proc.returncode == 1
     assert "no stable session ID" in proc.stderr
-    assert before == capture_path.read_text(encoding="utf-8")
-    assert not (
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Start without provenance.md"
-    ).exists()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_create_rejects_conflicting_capture_intents(run_oaw, legacy_vault):
@@ -471,10 +463,7 @@ def test_task_create_rejects_conflicting_capture_intents(run_oaw, legacy_vault):
 
 
 def test_task_create_from_capture_creation_failure_leaves_capture_unchanged(run_oaw, legacy_vault):
-    capture_path = legacy_vault / "Projects/Obsidian Agent Workflow/Inbox/Active capture.md"
-    before = capture_path.read_text(encoding="utf-8")
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
-    board_before = board_path.read_text(encoding="utf-8")
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
     proc = run_oaw(
         "task",
         "create",
@@ -487,8 +476,7 @@ def test_task_create_from_capture_creation_failure_leaves_capture_unchanged(run_
     )
     assert proc.returncode == 1
     assert "already in use" in proc.stderr
-    assert before == capture_path.read_text(encoding="utf-8")
-    assert board_before == board_path.read_text(encoding="utf-8")
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_create_from_capture_link_failure_leaves_capture_unchanged(run_oaw, legacy_vault):
@@ -508,7 +496,7 @@ aliases:
 Routing-regression evidence.
 """,
     )
-    before = capture_path.read_text(encoding="utf-8")
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
     proc = run_oaw(
         "task",
         "create",
@@ -519,10 +507,7 @@ Routing-regression evidence.
     )
     assert proc.returncode == 1
     assert "stable frontmatter id" in proc.stderr
-    assert before == capture_path.read_text(encoding="utf-8")
-    assert not (
-        legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Must not be created.md"
-    ).exists()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_create_from_canonical_capture_metadata(run_oaw, legacy_vault):

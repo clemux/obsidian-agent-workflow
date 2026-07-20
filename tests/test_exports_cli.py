@@ -135,6 +135,7 @@ export_artifacts:
 """,
     )
     output_root = legacy_vault / "exports"
+    before = support.snapshot_tree_without_following_symlinks(legacy_vault)
 
     failed = support.run_oaw_subprocess(
         [
@@ -151,8 +152,13 @@ export_artifacts:
     )
 
     assert failed.returncode != 0
-    assert not (output_root / "OAW-TSK-retry-export").exists()
-    assert list(output_root.glob(".OAW-TSK-retry-export.tmp-*")) == []
+    # The only permitted effect of the failed export is the empty output root;
+    # the staging directory is cleaned up and nothing else under the vault
+    # changes (no partial bundle, no leftover tmp staging entry).
+    assert support.snapshot_tree_without_following_symlinks(legacy_vault) == {
+        **before,
+        "exports": ("directory", None),
+    }
 
     write(artifact, "ready\n")
     retried = support.run_oaw_subprocess(

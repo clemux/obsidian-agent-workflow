@@ -118,11 +118,7 @@ def test_lifecycle_rejects_corrupt_deterministic_run_before_writing(
         ),
         encoding="utf-8",
     )
-    before = {
-        path.relative_to(legacy_vault): path.read_bytes()
-        for path in legacy_vault.rglob("*")
-        if path.is_file()
-    }
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     result = run_oaw(
         "task",
@@ -136,12 +132,7 @@ def test_lifecycle_rejects_corrupt_deterministic_run_before_writing(
     assert result.returncode == 1
     assert "run record validation failed" in result.stderr
     assert "unsupported provider/session environment" in result.stderr
-    after = {
-        path.relative_to(legacy_vault): path.read_bytes()
-        for path in legacy_vault.rglob("*")
-        if path.is_file()
-    }
-    assert before == after
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 @pytest.mark.parametrize(
@@ -166,13 +157,13 @@ def test_refresh_rejects_misplaced_deterministic_task_scope(
     assert started.returncode == 0, started.stderr
     run_path = run_record_for(legacy_vault, "test-thread")
     run_path.write_text(run_path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
-    before = run_path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     refreshed = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Must not refresh.")
 
     assert refreshed.returncode == 1
     assert expected in refreshed.stderr
-    assert before == run_path.read_bytes()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_multiple_sessions_run_same_task_and_review_conflicts_even_when_stale(
@@ -345,11 +336,7 @@ def test_transition_fails_closed_on_corrupt_sibling_record(
         sibling_path.read_text(encoding="utf-8").replace(old, new, 1),
         encoding="utf-8",
     )
-    before = {
-        path.relative_to(legacy_vault): path.read_bytes()
-        for path in legacy_vault.rglob("*")
-        if path.is_file()
-    }
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     result = run_oaw(
         "task",
@@ -363,12 +350,7 @@ def test_transition_fails_closed_on_corrupt_sibling_record(
 
     assert result.returncode == 1
     assert expected in result.stderr
-    after = {
-        path.relative_to(legacy_vault): path.read_bytes()
-        for path in legacy_vault.rglob("*")
-        if path.is_file()
-    }
-    assert before == after
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_legacy_direct_complete_refuses_another_running_session(run_oaw, legacy_vault):
@@ -381,11 +363,7 @@ def test_legacy_direct_complete_refuses_another_running_session(run_oaw, legacy_
         env={"CODEX_THREAD_ID": "other-thread"},
     )
     assert started.returncode == 0, started.stderr
-    before = {
-        path.relative_to(legacy_vault): path.read_bytes()
-        for path in legacy_vault.rglob("*")
-        if path.is_file()
-    }
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
     completed = run_oaw(
         "task",
         "complete",
@@ -397,12 +375,7 @@ def test_legacy_direct_complete_refuses_another_running_session(run_oaw, legacy_
     )
     assert completed.returncode == 1
     assert "another session remains running" in completed.stderr
-    after = {
-        path.relative_to(legacy_vault): path.read_bytes()
-        for path in legacy_vault.rglob("*")
-        if path.is_file()
-    }
-    assert before == after
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_cross_task_run_does_not_block_one_shot_completion(run_oaw, legacy_vault):
@@ -475,11 +448,11 @@ def test_pause_requires_explicit_agent_or_hybrid_execution(execution, run_oaw, l
             ),
             encoding="utf-8",
         )
-    before = task_path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
     paused = run_oaw("task", "pause", "OAW-TSK-cli", "--note", "No run.")
     assert paused.returncode == 1
     assert "requires execution: agent or hybrid" in paused.stderr
-    assert before == task_path.read_bytes()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_human_task_refuses_agent_start_before_any_write(run_oaw, legacy_vault):
@@ -490,29 +463,24 @@ def test_human_task_refuses_agent_start_before_any_write(run_oaw, legacy_vault):
         ),
         encoding="utf-8",
     )
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
-    before = (task_path.read_bytes(), board_path.read_bytes())
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Must refuse.")
     assert started.returncode == 1
     assert "managed in Obsidian UI" in started.stderr
-    assert before == (task_path.read_bytes(), board_path.read_bytes())
-    assert not (legacy_vault / "Agents/Runs").exists()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 @pytest.mark.parametrize("command", ["backlog", "promote"])
 def test_queue_transition_refuses_while_any_run_is_running(command, run_oaw, legacy_vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Run remains active.")
     assert started.returncode == 0, started.stderr
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
-    run_path = run_record_for(legacy_vault, "test-thread")
-    before = (task_path.read_bytes(), board_path.read_bytes(), run_path.read_bytes())
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     moved = run_oaw("task", command, "OAW-TSK-cli", "--note", "Must wait.")
 
     assert moved.returncode == 1
     assert "while an agent run is running" in moved.stderr
-    assert before == (task_path.read_bytes(), board_path.read_bytes(), run_path.read_bytes())
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_note_refreshes_only_existing_matching_running_run(run_oaw, legacy_vault):
@@ -570,8 +538,7 @@ def test_run_close_records_closer_without_changing_task(run_oaw, legacy_vault):
 
 
 def test_run_close_rejects_an_unsafe_run_id_without_writes(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    before = task_path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     closed = run_oaw(
         "run",
@@ -583,7 +550,7 @@ def test_run_close_rejects_an_unsafe_run_id_without_writes(run_oaw, legacy_vault
 
     assert closed.returncode == 1
     assert "invalid run id" in closed.stderr
-    assert before == task_path.read_bytes()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 @pytest.mark.parametrize(
@@ -606,7 +573,7 @@ def test_run_close_rejects_forged_identity_or_task_scope(old, new, expected, run
     assert started.returncode == 0, started.stderr
     run_path = run_record_for(legacy_vault, "test-thread")
     run_path.write_text(run_path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
-    before = run_path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     closed = run_oaw(
         "run",
@@ -619,7 +586,7 @@ def test_run_close_rejects_forged_identity_or_task_scope(old, new, expected, run
 
     assert closed.returncode == 1
     assert expected in closed.stderr
-    assert before == run_path.read_bytes()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 @pytest.mark.parametrize(
@@ -645,11 +612,7 @@ def test_run_close_rejects_malformed_mutable_schema_without_writes(
     assert started.returncode == 0, started.stderr
     run_path = run_record_for(legacy_vault, "test-thread")
     run_path.write_text(run_path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
-    before = {
-        path.relative_to(legacy_vault): path.read_bytes()
-        for path in legacy_vault.rglob("*")
-        if path.is_file()
-    }
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     closed = run_oaw(
         "run",
@@ -663,12 +626,7 @@ def test_run_close_rejects_malformed_mutable_schema_without_writes(
     assert closed.returncode == 1
     assert "run record validation failed" in closed.stderr
     assert expected in closed.stderr
-    after = {
-        path.relative_to(legacy_vault): path.read_bytes()
-        for path in legacy_vault.rglob("*")
-        if path.is_file()
-    }
-    assert before == after
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 @pytest.mark.parametrize("operation", ["list", "audit", "close", "start", "create-start"])
@@ -919,13 +877,11 @@ def test_review_does_not_default_missing_execution(run_oaw, legacy_vault):
 def test_task_review_rejects_blank_note_or_checks_without_writes(
     note, checks, expected, run_oaw, legacy_vault
 ):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
-    before = (task_path.read_bytes(), board_path.read_bytes())
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
     proc = run_oaw("task", "review", "OAW-TSK-cli", "--note", note, "--checks", checks)
     assert proc.returncode == 1
     assert expected in proc.stderr
-    assert before == (task_path.read_bytes(), board_path.read_bytes())
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_review_domain_rejects_blank_values_before_transaction(monkeypatch, legacy_vault):
@@ -980,12 +936,9 @@ def test_task_review_accepts_every_lifecycle_source_status(initial_status, run_o
 def test_task_review_transaction_failure_restores_task_run_and_legacy_board_bytes(
     monkeypatch, run_oaw, legacy_vault
 ):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    board_path = legacy_vault / "Projects/Obsidian Agent Workflow/Board.md"
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Established caller run.")
     assert started.returncode == 0, started.stderr
-    run_path = next((legacy_vault / "Agents/Runs").glob("*.md"))
-    before = (task_path.read_bytes(), board_path.read_bytes(), run_path.read_bytes())
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
     original_commit = lifecycle.VaultTransaction.commit
 
     def fail_second_replace(transaction):
@@ -1019,7 +972,7 @@ def test_task_review_transaction_failure_restores_task_run_and_legacy_board_byte
 
     assert result == 1
     assert "transaction failed and was rolled back" in stderr.getvalue()
-    assert before == (task_path.read_bytes(), board_path.read_bytes(), run_path.read_bytes())
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_lifecycle_resolves_once_per_write(monkeypatch, legacy_vault):
@@ -1205,7 +1158,7 @@ def test_task_priority_rejects_malformed_priority_without_writing(
         ),
         encoding="utf-8",
     )
-    before = task_path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     proc = run_oaw(
         "task",
@@ -1219,7 +1172,7 @@ def test_task_priority_rejects_malformed_priority_without_writing(
 
     assert proc.returncode == 1
     assert expected in proc.stderr
-    assert before == task_path.read_bytes()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_priority_rejects_unsupported_location_without_writing(run_oaw, legacy_vault):
@@ -1237,7 +1190,7 @@ aliases:
 # Outside task
 """,
     )
-    before = path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     proc = run_oaw(
         "task",
@@ -1251,7 +1204,7 @@ aliases:
 
     assert proc.returncode == 1
     assert "lifecycle writes are supported" in proc.stderr
-    assert before == path.read_bytes()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_priority_domain_rejects_unclosed_frontmatter_before_transaction(
@@ -1263,7 +1216,7 @@ def test_task_priority_domain_rejects_unclosed_frontmatter_before_transaction(
         "\n---\n\n# Resolver CLI", "\n\n# Resolver CLI"
     )
     task_path.write_text(malformed, encoding="utf-8")
-    before = task_path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     class UnexpectedTransaction:
         def __init__(self):
@@ -1273,7 +1226,7 @@ def test_task_priority_domain_rejects_unclosed_frontmatter_before_transaction(
 
     with pytest.raises(OawError, match="frontmatter is not closed"):
         lifecycle.update_task_priority(match, legacy_vault, 2, "Must fail.", False)
-    assert before == task_path.read_bytes()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_priority_rejects_non_task_frontmatter_without_writing(run_oaw, legacy_vault):
@@ -1282,7 +1235,7 @@ def test_task_priority_rejects_non_task_frontmatter_without_writing(run_oaw, leg
         task_path.read_text(encoding="utf-8").replace("type: task", "type: capture"),
         encoding="utf-8",
     )
-    before = task_path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     proc = run_oaw(
         "task",
@@ -1296,12 +1249,11 @@ def test_task_priority_rejects_non_task_frontmatter_without_writing(run_oaw, leg
 
     assert proc.returncode == 1
     assert "requires frontmatter type: task" in proc.stderr
-    assert before == task_path.read_bytes()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_priority_rejects_blank_note_without_writing(run_oaw, legacy_vault):
-    task_path = legacy_vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    before = task_path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     proc = run_oaw(
         "task",
@@ -1315,7 +1267,7 @@ def test_task_priority_rejects_blank_note_without_writing(run_oaw, legacy_vault)
 
     assert proc.returncode == 1
     assert "requires non-empty --note" in proc.stderr
-    assert before == task_path.read_bytes()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 @pytest.mark.parametrize("state", ["needs-triage", "needs-design", "prepared"])
@@ -1356,7 +1308,7 @@ def test_task_preparedness_rejects_malformed_existing_value_without_writing(run_
         ),
         encoding="utf-8",
     )
-    before = task_path.read_bytes()
+    before = snapshot_tree_without_following_symlinks(legacy_vault)
 
     proc = run_oaw(
         "task",
@@ -1370,7 +1322,7 @@ def test_task_preparedness_rejects_malformed_existing_value_without_writing(run_
 
     assert proc.returncode == 1
     assert "must be a scalar" in proc.stderr
-    assert before == task_path.read_bytes()
+    assert before == snapshot_tree_without_following_symlinks(legacy_vault)
 
 
 def test_task_note_appends_session_without_status_or_legacy_board_change(run_oaw, legacy_vault):
