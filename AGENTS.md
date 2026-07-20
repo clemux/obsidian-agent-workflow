@@ -6,7 +6,7 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 
 - `src/oaw/` contains the CLI implementation as domain modules (`resolver.py`, `notes.py`, `lifecycle.py`, `frontmatter.py`, `cli.py`, ...) for resolving Obsidian IDs and updating task lifecycle state.
 - `bin/oaw` is a thin launcher that runs the checkout copy of `src/oaw/` without installing it.
-- `tests/` holds the pytest suite: per-module files such as `tests/test_resolver.py` and `tests/test_notes.py`, CLI-level coverage in `tests/test_oaw.py`, and command-contract coverage in `tests/test_typer_cli.py`.
+- `tests/` holds the pytest suite: domain-level suites such as `tests/test_resolver.py`, `tests/test_notes.py`, and `tests/test_links.py`; per-domain CLI suites such as `tests/test_task_lifecycle_cli.py` and `tests/test_links_cli.py`; command-contract coverage in `tests/test_typer_cli.py`; and shared vault factories, runners, and snapshot/assertion helpers in `tests/support.py` with thin fixtures in `tests/conftest.py`.
 - `docs/architecture.md` records the package-layout rationale; `docs/claude-code.md` documents the Claude Code session-title hook shipped in `scripts/`.
 - `skills/oaw/` documents the agent-facing workflow for using the CLI.
 - `skills/obsidian-capture/` preserves side observations in the vault capture workflow.
@@ -49,7 +49,7 @@ snapshot against the checkout's help surfaces and source bytes.
 - `mise run hooks-install` installs the Prek-managed pre-commit and pre-push shims;
   `mise run hooks-check` runs every configured hook against all files.
 - `uv run pytest` runs the full test suite.
-- `uv run pytest tests/test_oaw.py` runs only the CLI-level tests.
+- `uv run pytest tests/test_task_lifecycle_cli.py` (or any other `tests/test_*_cli.py` file) runs one per-domain CLI suite.
 - `uv run pytest tests/test_typer_cli.py tests/test_cli_parity.py` runs focused
   native Typer contracts and the installed-vs-checkout staleness check tests.
 - `uv run python bin/oaw --help` shows top-level CLI commands.
