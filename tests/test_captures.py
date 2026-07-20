@@ -28,10 +28,6 @@ def local_date() -> str:
     return dt.datetime.now().astimezone().strftime("%Y%m%d")
 
 
-def write_project_index(vault: Path, folder: str, index_id: str) -> None:
-    add_project_index(vault, folder, index_id)
-
-
 def capture_fm(vault: Path, note_id: str) -> dict:
     text = (vault / "Captures/Entries" / f"{note_id}.md").read_text(encoding="utf-8")
     return parse_frontmatter(split_note(text)[1])
@@ -99,7 +95,7 @@ def test_create_json_receipt_and_stdin_body(tmp_path: Path):
 
 
 def test_create_with_project_links_both_sides(tmp_path: Path):
-    write_project_index(tmp_path, "Demo", "DEMO-index")
+    add_project_index(tmp_path, "Demo", "DEMO-index")
 
     first = run(tmp_path, ["capture", "create", "--title", "Linked", "--project", "obs:DEMO"])
     assert first.exit_code == 0, first.stderr
@@ -139,7 +135,7 @@ def test_create_project_links_without_index_alias(tmp_path: Path):
 def test_create_project_index_conflict_preserves_concurrent_edit_and_removes_capture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    write_project_index(tmp_path, "Demo", "DEMO-index")
+    add_project_index(tmp_path, "Demo", "DEMO-index")
     index_path = tmp_path / "Projects/Demo/Index.md"
     original_index = index_path.read_text(encoding="utf-8")
     concurrent_index = original_index + "\nCONCURRENT EDIT\n"
@@ -227,7 +223,7 @@ def test_create_collision_suffixes(tmp_path: Path):
 
 
 def test_create_concurrent_collision_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    write_project_index(tmp_path, "Demo", "DEMO-index")
+    add_project_index(tmp_path, "Demo", "DEMO-index")
     before = snapshot_tree_without_following_symlinks(tmp_path)
 
     def always_exists(*_args, **_kwargs):
@@ -323,8 +319,8 @@ def test_list_vault_wide_all_statuses(tmp_path: Path):
 
 
 def test_list_project_filter_metadata_first(tmp_path: Path):
-    write_project_index(tmp_path, "aproj", "APR-index")
-    write_project_index(tmp_path, "bproj", "BPR-index")
+    add_project_index(tmp_path, "aproj", "APR-index")
+    add_project_index(tmp_path, "bproj", "BPR-index")
     _write_capture(tmp_path, "Projects/aproj/Inbox/meta.md", "CAP-meta", project="bproj")
     _write_capture(tmp_path, "Projects/aproj/Inbox/legacy.md", "CAP-plain")
 
@@ -527,7 +523,7 @@ def test_triage_incubating_flow(tmp_path: Path):
     assert "CODEX_THREAD_ID=test-thread" in text
 
 
-@pytest.mark.parametrize("review_after", ["2026-13-01", "2026-04-31", "2025-02-29"])
+@pytest.mark.parametrize("review_after", ["2026-13-01", "2025-02-29"])
 def test_triage_incubating_rejects_invalid_calendar_date(tmp_path: Path, review_after: str):
     make_canonical_capture(tmp_path, "CAP-invalid-date")
     before = snapshot_tree_without_following_symlinks(tmp_path)

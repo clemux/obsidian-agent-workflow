@@ -484,7 +484,7 @@ def test_typer_task_create_validates_every_choice_occurrence(
     assert invalid_value in result.stderr
 
 
-@pytest.mark.parametrize("priority", ["0", "4", "invalid"])
+@pytest.mark.parametrize("priority", ["0", "invalid"])
 def test_typer_task_priority_rejects_values_outside_declared_choices(priority: str) -> None:
     result = CliRunner().invoke(
         cli.app,

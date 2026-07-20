@@ -12,10 +12,6 @@ from tests.support import (
 )
 
 
-def write_project_index(vault: Path, name: str = "Example", alias: str = "EXP") -> None:
-    add_project_index(vault, name, f"{alias}-index")
-
-
 def write_task(vault: Path, note_id: str = "EXP-TSK-example", status: str = "todo") -> Path:
     path = vault / "Projects/Example/Tasks/Example.md"
     write(
@@ -104,7 +100,7 @@ def test_task_promote_accepts_note_file(tmp_path: Path) -> None:
 
 
 def test_task_create_accepts_note_file(tmp_path: Path) -> None:
-    write_project_index(tmp_path)
+    add_project_index(tmp_path, "Example", "EXP-index")
     body = "Initial problem via file with `code` and $VALUE.\n"
     body_file = tmp_path / "problem.md"
     body_file.write_text(body, encoding="utf-8")
@@ -220,7 +216,7 @@ def test_multiline_task_note_headings_stay_with_entry_after_second_append(
 
 
 def test_note_file_preserves_newlines_exactly(tmp_path: Path) -> None:
-    write_project_index(tmp_path)
+    add_project_index(tmp_path, "Example", "EXP-index")
     body = "First line.\r\n\r\nSecond line after a blank line.\r\n\r\n"
     body_file = tmp_path / "problem.md"
     body_file.write_bytes(body.encode("utf-8"))

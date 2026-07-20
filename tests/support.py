@@ -172,43 +172,6 @@ NO_SESSION_ENV: dict[str, str | None] = {
 
 
 # --------------------------------------------------------------------------- #
-# Outcome assertion helpers
-# --------------------------------------------------------------------------- #
-
-
-def _outcome(result: object) -> tuple[int, str, str]:
-    """Normalize a click Result or subprocess.CompletedProcess to (code, out, err)."""
-    if hasattr(result, "returncode"):
-        return (
-            result.returncode,  # type: ignore[attr-defined]
-            result.stdout,  # type: ignore[attr-defined]
-            result.stderr,  # type: ignore[attr-defined]
-        )
-    return (
-        result.exit_code,  # type: ignore[attr-defined]
-        result.stdout,  # type: ignore[attr-defined]
-        result.stderr,  # type: ignore[attr-defined]
-    )
-
-
-def _streams(stdout: str, stderr: str) -> str:
-    return f"\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}"
-
-
-def assert_ok(result: object, *, allow_stderr: bool = False) -> None:
-    """Assert a successful invocation: exit code 0 and (by default) empty stderr.
-
-    Pass ``allow_stderr=True`` for commands whose success contract includes
-    stderr warnings (for example ``capture list`` reporting malformed notes).
-    """
-    code, stdout, stderr = _outcome(result)
-    if code != 0:
-        raise AssertionError(f"expected exit 0, got {code}{_streams(stdout, stderr)}")
-    if not allow_stderr and stderr != "":
-        raise AssertionError(f"expected empty stderr on success{_streams(stdout, stderr)}")
-
-
-# --------------------------------------------------------------------------- #
 # Filesystem helper
 # --------------------------------------------------------------------------- #
 

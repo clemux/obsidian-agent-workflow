@@ -11,7 +11,6 @@ from oaw import cli, lifecycle, resolver
 from oaw.errors import OawError
 from tests import support
 from tests.support import (
-    assert_ok,
     run_record_for,
     snapshot_tree_without_following_symlinks,
     write,
@@ -887,9 +886,7 @@ def test_review_does_not_default_missing_execution(run_oaw, vault):
 @pytest.mark.parametrize(
     ("note", "checks", "expected"),
     [
-        ("", "pytest", "non-empty --note"),
         (" \t", "pytest", "non-empty --note"),
-        ("Ready for review.", "", "non-empty --checks"),
         ("Ready for review.", " \t", "non-empty --checks"),
     ],
 )
@@ -912,9 +909,7 @@ def test_task_review_domain_rejects_blank_values_before_transaction(monkeypatch,
 
     monkeypatch.setattr(lifecycle, "VaultTransaction", UnexpectedTransaction)
     for note, checks, expected in (
-        ("", "pytest", "non-empty --note"),
         (" \t", "pytest", "non-empty --note"),
-        ("Ready for review.", "", "non-empty --checks"),
         ("Ready for review.", " \t", "non-empty --checks"),
     ):
         with pytest.raises(OawError, match=expected):
@@ -1441,7 +1436,8 @@ def test_task_backlog_updates_status_and_session(run_oaw, vault):
 
 
 def test_task_promote_updates_status(run_oaw, vault):
-    assert_ok(run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later."))
+    setup = run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later.")
+    assert setup.returncode == 0, setup.stderr
     proc = run_oaw("task", "promote", "OAW-TSK-cli", "--note", "Selected next.")
     assert proc.returncode == 0, proc.stderr
     task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()

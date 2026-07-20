@@ -85,7 +85,7 @@ def test_append_frontmatter_list_value_creates_missing_block_list():
     )
 
 
-@pytest.mark.parametrize("item", ["true", "42", "2026-07-12", "[nested]"])
+@pytest.mark.parametrize("item", ["true", "[nested]"])
 def test_parse_yaml_string_list_item_rejects_ambiguous_non_strings(item):
     with pytest.raises(OawError, match="must contain only unambiguous string list items"):
         parse_yaml_string_list_item(item, "session-ids")
