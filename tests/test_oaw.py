@@ -2172,6 +2172,108 @@ aliases:
         self.assertIn("must be a scalar", proc.stderr)
         self.assertEqual(before, task_path.read_bytes())
 
+    @pytest.mark.parametrize("writer", ["pause", "priority", "preparedness", "relation"])
+    def test_remaining_lifecycle_note_writers_materialize_obs_references(self, writer):
+        if writer == "pause":
+            started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Started for pause.")
+            self.assertEqual(started.returncode, 0, started.stderr)
+
+        note = "Trace obs:OAW-TSK-archived."
+        arguments = {
+            "pause": ("task", "pause", "OAW-TSK-cli", "--note", note),
+            "priority": (
+                "task",
+                "priority",
+                "OAW-TSK-cli",
+                "--priority",
+                "2",
+                "--note",
+                note,
+            ),
+            "preparedness": (
+                "task",
+                "preparedness",
+                "OAW-TSK-cli",
+                "--state",
+                "prepared",
+                "--note",
+                note,
+            ),
+            "relation": (
+                "task",
+                "relation",
+                "add",
+                "OAW-TSK-cli",
+                "follows",
+                "OAW-TSK-archived",
+                "--note",
+                note,
+            ),
+        }
+
+        result = self.run_oaw(*arguments[writer])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        durable_note = (
+            "Trace [[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]."
+        )
+        task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+        self.assertIn(durable_note, task_path.read_text(encoding="utf-8"))
+        if writer == "pause":
+            self.assertIn(
+                durable_note,
+                self.run_record_for("test-thread").read_text(encoding="utf-8"),
+            )
+
+    @pytest.mark.parametrize("writer", ["pause", "priority", "preparedness", "relation"])
+    def test_remaining_lifecycle_note_materialization_fails_before_any_write(self, writer):
+        if writer == "pause":
+            started = self.run_oaw("task", "start", "OAW-TSK-cli", "--note", "Started for pause.")
+            self.assertEqual(started.returncode, 0, started.stderr)
+
+        note = "Trace obs:OAW-TSK-does-not-exist."
+        arguments = {
+            "pause": ("task", "pause", "OAW-TSK-cli", "--note", note),
+            "priority": (
+                "task",
+                "priority",
+                "OAW-TSK-cli",
+                "--priority",
+                "2",
+                "--note",
+                note,
+            ),
+            "preparedness": (
+                "task",
+                "preparedness",
+                "OAW-TSK-cli",
+                "--state",
+                "prepared",
+                "--note",
+                note,
+            ),
+            "relation": (
+                "task",
+                "relation",
+                "add",
+                "OAW-TSK-cli",
+                "follows",
+                "OAW-TSK-archived",
+                "--note",
+                note,
+            ),
+        }
+        before = snapshot_tree_without_following_symlinks(self.vault)
+
+        result = self.run_oaw(*arguments[writer])
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "no note with frontmatter id or alias 'OAW-TSK-does-not-exist'",
+            result.stderr,
+        )
+        self.assertEqual(before, snapshot_tree_without_following_symlinks(self.vault))
+
     def test_task_note_appends_session_without_status_or_legacy_board_change(self):
         task_path = self.vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
         board_path = self.vault / "Projects/Obsidian Agent Workflow/Board.md"

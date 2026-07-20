@@ -331,6 +331,7 @@ def pause_task(match: NoteMatch, root: Path, note: str) -> None:
     current = matching_run(root, task_id, identity, match.path)
     if current is None or current.state != "running":
         raise OawError("pause requires the caller's running record")
+    note, _ = materialize_obs_references(note, root)
     now = utc_now()
     session_ref = f"{identity.env}={identity.session_id}"
     task_text = append_session_id_frontmatter(match.path.read_text(encoding="utf-8"), session_ref)
@@ -475,6 +476,7 @@ def update_task_priority(
     if not note.strip():
         raise OawError("task priority requires non-empty --note")
 
+    note, _ = materialize_obs_references(note, root)
     text = match.path.read_text(encoding="utf-8")
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
@@ -512,6 +514,7 @@ def update_task_preparedness(
     if not note.strip():
         raise OawError("task preparedness requires non-empty --note")
 
+    note, _ = materialize_obs_references(note, root)
     text = match.path.read_text(encoding="utf-8")
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
@@ -563,6 +566,7 @@ def update_task_relation(
         print("State: present")
         return
 
+    note, _ = materialize_obs_references(note, root)
     provider, session_ref = detect_session(allow_missing)
     verb = "Removed" if remove else "Added"
     detail = f"{verb} {relation_type} relationship to {mutation.target.note_id}. {note.strip()}"
