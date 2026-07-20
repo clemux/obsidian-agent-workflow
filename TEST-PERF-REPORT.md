@@ -1,7 +1,9 @@
 # Test Suite Performance: Analysis & Fixes
 
 **Date:** 2026-07-20
-**Result:** 44.14s → 44.14s (no committed changes — see Recommendations for a measured 6.6x lever that is out of scope for this run)
+**Result:** 44.14s → 6.48–6.62s (~6.7x faster)
+
+*Update 2026-07-20: the xdist recommendation below was approved and applied after the initial profiling run — see Fix 1.*
 
 ## Baseline
 
@@ -45,7 +47,18 @@
 
 ## Fixes
 
-**No fixes were applied.**
+### Fix 1: Parallelize the suite with pytest-xdist by default
+
+**Commit:** `perf(tests): parallelize the suite with pytest-xdist by default`
+**File:** `pyproject.toml` (dev dependency + `addopts = ["-n", "auto"]`)
+**Time saved:** 44.14s → 6.48–6.62s (**-37.6s, ~6.7x**)
+
+The dominant cost is subprocess-spawn *wait*, not CPU, so it scales almost
+linearly with workers. Each test owns its temp vault and subprocess — no shared
+state. Verified with identical pass counts (472) across two full parallel runs.
+`-n 0` restores serial runs for profiling/debugging.
+
+**No other fixes were applied** — from the initial profiling pass:
 
 This suite does not exhibit any of the profiling skill's common hotspots: no `--cov` in `addopts`, no `bcrypt`/RSA key generation, no database `TRUNCATE`/`create_all`, no web-framework `TestClient`, no slow module-level imports beyond the CLI's own unavoidable `typer` import, and no widenable function-scoped fixture (the `setup_method` vault-fixture cost is 0.00s in aggregate across all 472 tests — file writes to a tmpfs-backed tempdir are essentially free).
 
@@ -59,8 +72,7 @@ The dominant cost (≈75–80% of wall time) is ~280 `subprocess.run([sys.execut
 | State | Wall time | Delta |
 |---|---|---|
 | Baseline | 44.14s | — |
-| No fixes applied (final state) | 44.14s | — |
-| *xdist, measured but not applied (blocked by scope)* | *6.63s / 6.70s* | *~-37.5s (≈6.6x)* |
+| + Fix 1: pytest-xdist `-n auto` (final state) | 6.48–6.62s | **-37.6s (~6.7x)** |
 
 ## Remaining Slow Tests
 
@@ -82,7 +94,7 @@ Consolidation candidates were sought by grouping the 250 `run_oaw()` call sites 
 
 No "same setup, different assertions" or "one atomic function, many tests" duplication was found in the sampled groups. Shared-prefix tests consistently diverge in fixture state or exercise distinct validation branches (test names carry `_rejects_`, `_refuses_`, `_requires_` — each a separate guard clause). **No consolidation is recommended** for this suite as profiled. (No tests were deleted or merged, per task constraints.)
 
-## Recommendations (not applied — out of scope for this run)
+## Recommendations
 
-1. **Adopt pytest-xdist.** Add as a dev dependency and run local/CI iterations with `-n auto` (or the worker count CI actually has). Measured 6.6x speedup (44.14s → 6.63s/6.70s across two independent runs, same 472 passed) with zero test-code changes — the single highest-leverage change available for this suite. Before adopting: confirm no two tests share global state (they don't appear to — each gets its own `tempfile.TemporaryDirectory()` vault and subprocess), and re-profile without `-n` if `--durations`/`pyinstrument` output is needed again later.
-2. **Reconsider subprocess-vs-in-process architecture for CLI tests.** `tests/test_oaw.py` has ~250 tests paying a fixed ~90ms Python-interpreter + `typer`/`oaw.cli` import cost per subprocess spawn (confirmed via `pyinstrument` and `-X importtime`), and several tests spawn 3–7 subprocesses each. Only a handful of tests in `test_cli_parity.py` specifically target launcher/shebang-level concerns that require a real subprocess; if most of `test_oaw.py`'s coverage doesn't require process-level isolation, converting a subset to in-process `cli.main()` calls (as `test_cli_main_accepts_argv_and_returns_status_code` already does) would cut wall time further. This changes what each converted test verifies, so it needs per-test review and maintainer sign-off — not a mechanical fix.
+1. **Adopt pytest-xdist.** ✅ **Applied as Fix 1** (approved by maintainer after the initial run).
+2. **Reconsider subprocess-vs-in-process architecture for CLI tests** *(not applied — needs per-test maintainer review)*. `tests/test_oaw.py` has ~250 tests paying a fixed ~90ms Python-interpreter + `typer`/`oaw.cli` import cost per subprocess spawn (confirmed via `pyinstrument` and `-X importtime`), and several tests spawn 3–7 subprocesses each. Only a handful of tests in `test_cli_parity.py` specifically target launcher/shebang-level concerns that require a real subprocess; if most of `test_oaw.py`'s coverage doesn't require process-level isolation, converting a subset to in-process `cli.main()` calls (as `test_cli_main_accepts_argv_and_returns_status_code` already does) would cut wall time further. This changes what each converted test verifies, so it needs per-test review and maintainer sign-off — not a mechanical fix.
