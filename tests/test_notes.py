@@ -1,4 +1,5 @@
 import os
+import stat
 import threading
 from pathlib import Path
 from typing import IO
@@ -159,3 +160,18 @@ def test_vault_transaction_conflict_on_expected_mismatch(tmp_path: Path):
     matching.commit()
     assert stable.read_text(encoding="utf-8") == "stable next\n"
     assert drifted.read_text(encoding="utf-8") == "drifted next\n"
+
+
+def test_vault_transaction_preserves_existing_mode_and_keeps_new_files_private(tmp_path: Path):
+    existing = tmp_path / "existing.md"
+    created = tmp_path / "created.md"
+    existing.write_text("original\n", encoding="utf-8")
+    existing.chmod(0o644)
+
+    transaction = VaultTransaction()
+    transaction.stage(existing, "updated\n")
+    transaction.stage(created, "created\n")
+    transaction.commit()
+
+    assert stat.S_IMODE(existing.stat().st_mode) == 0o644
+    assert stat.S_IMODE(created.stat().st_mode) == 0o600

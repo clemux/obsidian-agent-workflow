@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -3944,10 +3945,12 @@ obs:OAW-TSK-cli
             b"# CRLF source\r\n\r\n"
             b"See obs:OAW-TSK-cli.\r\n"
         )
+        path.chmod(0o644)
 
         proc = self.run_oaw("link", "materialize", "OAW-TSK-crlf-source", "--write")
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
         written = path.read_bytes()
         self.assertNotIn(b"\n", written.replace(b"\r\n", b""))
         self.assertIn(
