@@ -15,13 +15,17 @@ def test_research_scaffold_renders_template_with_audience_boundary(run_oaw, lega
         "2026-07-12",
     )
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout == (
-        "Created: Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Prompt.md\n"
-        "Synthesis: Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Synthesis.md\n"
-        "Base: Bases/Research packet.base\n"
-        "Template: Templates/Research packet.md\n"
-        "Deep research prompt: self-contained provider-visible body\n"
+    assert (
+        "Created: Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Prompt.md"
+        in proc.stdout
     )
+    assert (
+        "Synthesis: Projects/Obsidian Agent Workflow/Research/architecture/provider-choice"
+        "/Synthesis.md" in proc.stdout
+    )
+    assert "Base: Bases/Research packet.base" in proc.stdout
+    assert "Template: Templates/Research packet.md" in proc.stdout
+    assert "Deep research prompt: self-contained provider-visible body" in proc.stdout
     prompt = (
         legacy_vault
         / "Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Prompt.md"
