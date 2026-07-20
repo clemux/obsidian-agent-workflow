@@ -27,7 +27,7 @@ def vault(tmp_path: Path) -> Path:
     to and the ``tags:`` block one test rewrites), the ``OAW-TSK-archived`` task
     that ``obs:OAW-TSK-archived`` materializes into, and the project index that
     ``obs:OAW`` resolves to. Tests needing more (agent task or templates)
-    add them inline. Byte-identical to the corresponding notes in the legacy tree.
+    add them inline.
     """
     root = support.make_vault(tmp_path)
     support.add_task(

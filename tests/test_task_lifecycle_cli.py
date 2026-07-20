@@ -372,7 +372,7 @@ def test_transition_fails_closed_on_corrupt_sibling_record(
     assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_legacy_direct_complete_refuses_another_running_session(run_oaw, vault):
+def test_one_shot_complete_refuses_another_running_session(run_oaw, vault):
     started = run_oaw(
         "task",
         "start",

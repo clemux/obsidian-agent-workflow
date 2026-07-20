@@ -52,12 +52,12 @@ def test_obs_materialization_caches_repeated_resolution(vault, monkeypatch):
 
 def test_obs_materialization_preserves_bytes_and_complex_protected_spans(vault):
     write(
-        vault / "Projects/Legacy/Tasks/Underscore.md",
-        "---\nid: OAW-TSK-legacy_v2\n---\n\n# Legacy\n",
+        vault / "Projects/References/Tasks/Underscore.md",
+        "---\nid: OAW-TSK-version_2\n---\n\n# Version 2\n",
     )
-    durable = "[[Projects/Legacy/Tasks/Underscore|OAW-TSK-legacy_v2]]"
+    durable = "[[Projects/References/Tasks/Underscore|OAW-TSK-version_2]]"
     source = (
-        "  obs:OAW-TSK-legacy_v2  \r\n"
+        "  obs:OAW-TSK-version_2  \r\n"
         "[[Existing|alias]] and obs:OAW-TSK-cli\r\n"
         "````text\r\n"
         "obs:OAW-TSK-cli\r\n"
@@ -75,7 +75,7 @@ def test_obs_materialization_preserves_bytes_and_complex_protected_spans(vault):
     ) in rendered
     assert ("````text\r\nobs:OAW-TSK-cli\r\n```\r\nobs:OAW-TSK-archived\r\n````\r\n") in rendered
     assert [item.reference for item in replacements] == [
-        "obs:OAW-TSK-legacy_v2",
+        "obs:OAW-TSK-version_2",
         "obs:OAW-TSK-cli",
     ]
 

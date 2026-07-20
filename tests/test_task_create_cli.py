@@ -31,7 +31,7 @@ def run_oaw(vault: Path):
 
 
 def add_resolver_cli_task(vault: Path) -> Path:
-    """Add the legacy OAW-TSK-cli task note (id/path collision fixture)."""
+    """Add the OAW-TSK-cli task note used for ID/path collision tests."""
     return support.add_task(
         vault,
         "Obsidian Agent Workflow",
