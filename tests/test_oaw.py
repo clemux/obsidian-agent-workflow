@@ -3721,6 +3721,30 @@ lookup-duplicate-session
         self.assertNotIn(str(archived), proc.stdout)
         self.assertEqual(proc.stdout.count("- codex-rollout:"), 1)
 
+    def test_session_lookup_keeps_duplicate_rollouts_within_one_root(self):
+        session_id = "019f5005-4444-7555-8666-f59dd806cc26"
+        codex_root = self.vault / "harness/codex/sessions"
+        filename = f"rollout-2026-07-11T12-00-00-{session_id}.jsonl"
+        first = codex_root / "2026/07/11" / filename
+        second = codex_root / "restored" / filename
+        write(first, '{"type":"session_meta","cwd":"/first"}\n')
+        write(second, '{"type":"session_meta","cwd":"/second"}\n')
+
+        proc = self.run_oaw(
+            "session",
+            "lookup",
+            session_id,
+            "--codex-root",
+            str(codex_root),
+            "--claude-root",
+            str(self.vault / "missing-claude"),
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"- codex-rollout: {first}", proc.stdout)
+        self.assertIn(f"- codex-rollout: {second}", proc.stdout)
+        self.assertEqual(proc.stdout.count("- codex-rollout:"), 2)
+
     def test_link_check_and_list_handle_escaped_pipe_in_table(self):
         write(
             self.vault / "Projects/Obsidian Agent Workflow/Tasks/Linked task.md",
@@ -5135,6 +5159,8 @@ aliases:
             "snapshot",
             thread_id,
             "--codex-only",
+            "--codex-rollout",
+            filename,
             "--slug",
             "active precedence",
             "--output-root",
@@ -5152,6 +5178,39 @@ aliases:
         ]
         self.assertEqual(sources, [str(active)])
         self.assertNotIn(str(archived), sources)
+
+    def test_session_snapshot_rejects_duplicate_rollout_filename_within_one_root(self):
+        session_id = "019f5005-4444-7555-8666-f59dd806cc26"
+        claude_root = self.vault / "harness/claude/projects"
+        codex_root = self.vault / "harness/codex/sessions"
+        filename = "rollout-2026-07-11T12-00-00-019f5006-5555-7666-8777-a60ee917dd37.jsonl"
+        write(
+            claude_root / "-tmp-project" / f"{session_id}.jsonl",
+            f'{{"timestamp":"2026-07-11T12:00:00.000Z","sessionId":"{session_id}"}}\n',
+        )
+        first = codex_root / "2026/07/11" / filename
+        second = codex_root / "restored" / filename
+        write(first, '{"content":"first"}\n')
+        write(second, '{"content":"second"}\n')
+
+        proc = self.run_oaw(
+            "session",
+            "snapshot",
+            session_id,
+            "--codex-rollout",
+            filename,
+            "--output-root",
+            str(self.vault / "attachments"),
+            "--claude-root",
+            str(claude_root),
+            "--codex-root",
+            str(codex_root),
+        )
+
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn(f"Codex rollout '{filename}' is not unique", proc.stderr)
+        self.assertIn(str(first), proc.stderr)
+        self.assertIn(str(second), proc.stderr)
 
     def test_session_snapshot_codex_only_requires_the_primary_rollout(self):
         thread_id = "019f48d7-39c2-7043-9c19-5a3565995898"
