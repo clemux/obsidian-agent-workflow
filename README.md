@@ -722,7 +722,7 @@ exact IDs, aliases, and short project aliases: one missing, ambiguous, or
 malformed eligible reference aborts the entire operation before a write,
 without guessing a filename or creating a stub. Frontmatter, existing
 wiki/Markdown links and embeds, autolinks, inline/fenced code, backslash-escaped
-examples, and embedded word/path forms stay byte-for-byte unchanged. See
+examples, bare URI/query values, and embedded word/path forms stay byte-for-byte unchanged. See
 `skills/oaw/references/links-and-relations.md` for the full command reference
 and parser semantics.
 

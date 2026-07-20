@@ -3905,6 +3905,42 @@ obs:OAW-TSK-cli
             [item.reference for item in replacements], ["obs:OAW-TSK-legacy_v2", "obs:OAW-TSK-cli"]
         )
 
+    def test_obs_materialization_protects_bare_uri_and_query_values(self):
+        source = (
+            "https://example.test/?ref=obs:OAW-TSK-cli\n"
+            "mailto:agent@example.test?subject=obs:OAW-TSK-archived\n"
+            "obsidian://open?vault=example&file=obs:OAW-TSK-cli\n"
+            "urn:example:item?related=obs:OAW-TSK-archived\n"
+            "/relative/path?ref=obs:OAW-TSK-cli\n"
+            "data:text/plain,obs:OAW-TSK-archived\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertEqual(rendered, source)
+        self.assertEqual(replacements, [])
+
+    def test_obs_materialization_keeps_standalone_prose_references_eligible(self):
+        source = (
+            "See obs:OAW-TSK-cli, (obs:OAW-TSK-archived), and value=obs:OAW-TSK-cli in prose.\n"
+        )
+
+        rendered, replacements = links.materialize_obs_references(source, self.vault)
+
+        self.assertEqual(len(replacements), 3)
+        self.assertIn(
+            "See [[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]",
+            rendered,
+        )
+        self.assertIn(
+            "([[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]])",
+            rendered,
+        )
+        self.assertIn(
+            "value=[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI|OAW-TSK-cli]]",
+            rendered,
+        )
+
     def test_obs_materialization_protects_container_nested_fenced_code(self):
         source = (
             "> ~~~text\n"
