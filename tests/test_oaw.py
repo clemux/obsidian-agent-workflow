@@ -2623,6 +2623,22 @@ Work that has no priority or effort assigned yet.
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 self.assertEqual(proc.stdout, expected.stdout)
 
+    def test_list_prefers_exact_project_folder_over_bare_alias(self):
+        task = self.vault / "Projects/OAW/Tasks/Exact folder task.md"
+        write(
+            task,
+            "---\nid: EXACT-TSK-folder\nstatus: todo\ntype: task\n---\n\n# Exact folder task\n",
+        )
+
+        exact = self.run_oaw("list", "--project", "OAW", "--fields", "id")
+        explicit_alias = self.run_oaw("list", "--project", "obs:OAW", "--fields", "id")
+
+        self.assertEqual(exact.returncode, 0, exact.stderr)
+        self.assertEqual(exact.stdout.splitlines(), ["EXACT-TSK-folder"])
+        self.assertEqual(explicit_alias.returncode, 0, explicit_alias.stderr)
+        self.assertIn("OAW-TSK-cli", explicit_alias.stdout.splitlines())
+        self.assertNotIn("EXACT-TSK-folder", explicit_alias.stdout.splitlines())
+
     def test_list_accepts_project_folder_without_index_note(self):
         task = self.vault / "Projects/No Index/Tasks/Loose task.md"
         write(

@@ -242,27 +242,37 @@ def project_alias_matches(target: str, root: Path, matcher=note_match) -> list[N
     return matches
 
 
+def _project_folder(target: str, root: Path) -> tuple[Path, str | None] | None:
+    candidate = root / "Projects" / target
+    if not candidate.is_dir():
+        return None
+    prefix = None
+    index = candidate / "Index.md"
+    if index.exists():
+        _, data = read_frontmatter_only(index)
+        index_id = str(data.get("id") or "")
+        if index_id.endswith("-index"):
+            prefix = index_id.removesuffix("-index")
+    return candidate, prefix
+
+
 def resolve_project_root(raw: str, root: Path) -> tuple[Path, str | None]:
-    """Resolve a project alias or folder name to its folder and alias prefix."""
-    target = strip_obs_prefix(raw.strip())
+    """Resolve a project folder or alias, with ``obs:`` explicitly preferring aliases."""
+    value = raw.strip()
+    target = strip_obs_prefix(value)
     if not target:
         raise OawError("task create requires a non-empty --project")
+    folder = _project_folder(target, root)
+    if folder is not None and not value.startswith("obs:"):
+        return folder
     matches = project_alias_matches(target, root)
     if len(matches) > 1:
         paths = "\n".join(f"  {match.relpath}" for match in matches)
         raise OawError(f"project alias '{target}' is ambiguous:\n{paths}")
     if matches:
         return matches[0].path.parent, target
-    candidate = root / "Projects" / target
-    if candidate.is_dir():
-        prefix = None
-        index = candidate / "Index.md"
-        if index.exists():
-            _, data = read_frontmatter_only(index)
-            index_id = str(data.get("id") or "")
-            if index_id.endswith("-index"):
-                prefix = index_id.removesuffix("-index")
-        return candidate, prefix
+    if folder is not None:
+        return folder
     raise OawError(f"project not found: {raw}")
 
 
@@ -331,26 +341,22 @@ def output_resolve(
 def resolve_project_root_from_references(
     raw: str, root: Path, references: Sequence[NoteReference]
 ) -> tuple[Path, str | None]:
-    """Resolve a project without introducing another vault traversal."""
-    target = strip_obs_prefix(raw.strip())
+    """Resolve a project with the same folder/explicit-alias policy without another walk."""
+    value = raw.strip()
+    target = strip_obs_prefix(value)
     if not target:
         raise OawError("task create requires a non-empty --project")
+    folder = _project_folder(target, root)
+    if folder is not None and not value.startswith("obs:"):
+        return folder
     matches = project_alias_matches_from_references(target, references)
     if len(matches) > 1:
         paths = "\n".join(f"  {match.relpath}" for match in matches)
         raise OawError(f"project alias '{target}' is ambiguous:\n{paths}")
     if matches:
         return matches[0].path.parent, target
-    candidate = root / "Projects" / target
-    if candidate.is_dir():
-        prefix = None
-        index = candidate / "Index.md"
-        if index.exists():
-            _, data = read_frontmatter_only(index)
-            index_id = str(data.get("id") or "")
-            if index_id.endswith("-index"):
-                prefix = index_id.removesuffix("-index")
-        return candidate, prefix
+    if folder is not None:
+        return folder
     raise OawError(f"project not found: {raw}")
 
 
