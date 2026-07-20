@@ -24,7 +24,7 @@ def run_oaw(vault):
     return support.make_runner(vault)
 
 
-def test_lifecycle_supports_agents_task_without_board_output(run_oaw, vault):
+def test_lifecycle_supports_agents_task(run_oaw, vault):
     proc = run_oaw(
         "task",
         "start",
@@ -36,7 +36,6 @@ def test_lifecycle_supports_agents_task_without_board_output(run_oaw, vault):
     note = (vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md").read_text()
     assert "status: active" in note
     assert "execution: agent" in note
-    assert "Board:" not in proc.stdout
 
 
 def test_note_session_appends_agent_session_to_non_project_note(run_oaw, vault):

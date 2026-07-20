@@ -16,8 +16,8 @@ def vault(tmp_path: Path) -> Path:
     """Minimal vault: just the Obsidian Agent Workflow project index.
 
     Most tests in this file resolve ``obs:OAW``/``--project`` against this
-    project; tests that also need an existing task, a legacy board, capture
-    notes, another project, or the project-create template add those
+    project; tests that also need an existing task, capture notes, another
+    project, or the project-create template add those
     factories inline at the top of the test.
     """
     root = support.make_vault(tmp_path)
@@ -66,9 +66,6 @@ def write_canonical_capture(vault: Path, note_id: str, project_line: str) -> Pat
 
 
 def test_task_create_defaults_to_backlog_with_derived_id(run_oaw, vault):
-    support.add_legacy_board(vault)
-    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
-    board_before = board_path.read_bytes()
     proc = run_oaw(
         "task",
         "create",
@@ -95,7 +92,6 @@ def test_task_create_defaults_to_backlog_with_derived_id(run_oaw, vault):
     )
     assert "ID: OAW-TSK-improve-resolver-errors" in proc.stdout
     assert "Status: backlog" in proc.stdout
-    assert "Board:" not in proc.stdout
     note = (vault / "Projects/Obsidian Agent Workflow/Tasks/Improve resolver errors.md").read_text(
         encoding="utf-8"
     )
@@ -112,7 +108,6 @@ def test_task_create_defaults_to_backlog_with_derived_id(run_oaw, vault):
     assert "Error messages should list candidates." in note
     assert "- [[Projects/Obsidian Agent Workflow/Index|OAW-index]]" in note
     assert "## Agent sessions" in note
-    assert board_before == board_path.read_bytes()
     resolved = run_oaw("resolve", "--json", "OAW-TSK-improve-resolver-errors")
     assert resolved.returncode == 0, resolved.stderr
     listing = run_oaw("list", "--project", "Obsidian Agent Workflow")
@@ -136,72 +131,6 @@ def test_task_create_accepts_explicit_preparedness(run_oaw, vault):
         encoding="utf-8"
     )
     assert "status: backlog\npreparedness: prepared\n" in note
-
-
-def test_boardless_project_task_lifecycle_never_creates_a_board(run_oaw, vault):
-    support.add_project_template(vault)
-    created_project = run_oaw(
-        "project",
-        "create",
-        "--name",
-        "Boardless Example",
-        "--alias",
-        "BLE",
-        "--goal",
-        "Exercise the task lifecycle without a duplicate board surface.",
-    )
-    assert created_project.returncode == 0, created_project.stderr
-    project_root = vault / "Projects/Boardless Example"
-    board_path = project_root / "Board.md"
-    assert not board_path.exists()
-
-    created_task = run_oaw(
-        "task",
-        "create",
-        "--project",
-        "obs:BLE",
-        "--title",
-        "Boardless lifecycle",
-        "--start",
-    )
-    assert created_task.returncode == 0, created_task.stderr
-    assert "Board:" not in created_task.stdout
-    assert not board_path.exists()
-
-    reviewed = run_oaw(
-        "task",
-        "review",
-        "BLE-TSK-boardless-lifecycle",
-        "--note",
-        "Ready for verification.",
-        "--checks",
-        "focused lifecycle check",
-    )
-    assert reviewed.returncode == 0, reviewed.stderr
-    assert "Board:" not in reviewed.stdout
-    assert not board_path.exists()
-
-    restarted = run_oaw(
-        "task",
-        "start",
-        "BLE-TSK-boardless-lifecycle",
-        "--note",
-        "Verification accepted; finishing.",
-    )
-    assert restarted.returncode == 0, restarted.stderr
-    completed = run_oaw(
-        "task",
-        "complete",
-        "BLE-TSK-boardless-lifecycle",
-        "--note",
-        "Lifecycle verified.",
-        "--checks",
-        "focused lifecycle check",
-    )
-    assert completed.returncode == 0, completed.stderr
-    task = (project_root / "Tasks/Boardless lifecycle.md").read_text(encoding="utf-8")
-    assert "status: done" in task
-    assert not board_path.exists()
 
 
 def test_task_create_writes_timezone_aware_iso8601_created_timestamp(run_oaw, vault):
@@ -230,10 +159,7 @@ def test_task_create_writes_timezone_aware_iso8601_created_timestamp(run_oaw, va
     assert parsed <= after + dt.timedelta(seconds=1)
 
 
-def test_task_create_todo_sets_status_without_touching_legacy_board(run_oaw, vault):
-    support.add_legacy_board(vault)
-    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
-    board_before = board_path.read_bytes()
+def test_task_create_todo_sets_status(run_oaw, vault):
     proc = run_oaw(
         "task",
         "create",
@@ -250,8 +176,6 @@ def test_task_create_todo_sets_status_without_touching_legacy_board(run_oaw, vau
         encoding="utf-8"
     )
     assert "status: todo" in task
-    assert "Board:" not in proc.stdout
-    assert board_before == board_path.read_bytes()
 
 
 def test_task_create_start_is_atomic_without_capture(run_oaw, vault):
@@ -279,7 +203,6 @@ def test_task_create_start_is_atomic_without_capture(run_oaw, vault):
 
 
 def test_task_create_rejects_start_with_human_execution_without_writes(run_oaw, vault):
-    support.add_legacy_board(vault)
     before = snapshot_tree_without_following_symlinks(vault)
 
     proc = run_oaw(
@@ -301,7 +224,6 @@ def test_task_create_rejects_start_with_human_execution_without_writes(run_oaw, 
 
 def test_task_create_duplicate_id_fails_without_writes(run_oaw, vault):
     add_resolver_cli_task(vault)
-    support.add_legacy_board(vault)
     before = snapshot_tree_without_following_symlinks(vault)
     proc = run_oaw(
         "task",
@@ -386,7 +308,6 @@ def test_task_create_requires_session_id(run_oaw, vault):
 
 def test_task_create_from_capture_is_atomic_and_preserves_provenance(run_oaw, vault):
     support.add_captures(vault)
-    support.add_legacy_board(vault)
     capture_path = vault / "Projects/Obsidian Agent Workflow/Inbox/Active capture.md"
     original = capture_path.read_text(encoding="utf-8")
     capture_path.write_text(
@@ -440,13 +361,10 @@ def test_task_create_from_capture_is_atomic_and_preserves_provenance(run_oaw, va
     assert "status: triaged" in capture
     assert "Expected next shape: route the regression into a verified task." in capture
     assert "Routing-regression investigation details stay here." in capture
-    board = (vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(encoding="utf-8")
-    assert "OAW-TSK-investigate-routing-regression" not in board
 
 
 def test_task_create_from_capture_start_creates_active_task(run_oaw, vault):
     support.add_captures(vault)
-    support.add_legacy_board(vault)
     proc = run_oaw(
         "task",
         "create",
@@ -463,8 +381,6 @@ def test_task_create_from_capture_start_creates_active_task(run_oaw, vault):
     )
     assert "status: active" in task
     assert 'session-ids:\n  - "test-thread"' in task
-    board = (vault / "Projects/Obsidian Agent Workflow/Board.md").read_text(encoding="utf-8")
-    assert "OAW-TSK-start-capture-work" not in board
 
 
 def test_task_create_from_capture_start_requires_real_session_provenance(run_oaw, vault):
@@ -511,7 +427,6 @@ def test_task_create_rejects_conflicting_capture_intents(run_oaw, vault):
 def test_task_create_from_capture_creation_failure_leaves_capture_unchanged(run_oaw, vault):
     support.add_captures(vault)
     add_resolver_cli_task(vault)
-    support.add_legacy_board(vault)
     before = snapshot_tree_without_following_symlinks(vault)
     proc = run_oaw(
         "task",

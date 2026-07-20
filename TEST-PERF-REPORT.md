@@ -83,7 +83,6 @@ The dominant cost (≈75–80% of wall time) is ~280 `subprocess.run([sys.execut
 | `test_oaw.py::test_durable_prose_writes_share_obs_materialization` | 0.94–0.97s | 3 sequential `run_oaw()` subprocess spawns |
 | `test_oaw.py::test_research_start_rejects_unsafe_duplicate_and_non_http_sources` | 0.60–0.61s | 7 sequential `run_oaw()` subprocess spawns |
 | `test_oaw.py::test_run_list_filters_by_session_and_current_session` | 0.58–0.61s | 7 sequential `run_oaw()` subprocess spawns |
-| `test_oaw.py::test_boardless_project_task_lifecycle_never_creates_a_board` | 0.57s | 3 sequential `run_oaw()` subprocess spawns |
 | ≈245 more `test_oaw.py::test_*` | ~0.09–0.4s each | Single `run_oaw()` subprocess spawn; cost is fixed interpreter+import overhead, not test logic |
 
 ## Test Hygiene (Phase 2.5)

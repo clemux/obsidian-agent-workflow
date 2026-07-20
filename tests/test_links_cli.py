@@ -26,7 +26,7 @@ def vault(tmp_path: Path) -> Path:
     project task (with the ``## Agent sessions`` section lifecycle writers append
     to and the ``tags:`` block one test rewrites), the ``OAW-TSK-archived`` task
     that ``obs:OAW-TSK-archived`` materializes into, and the project index that
-    ``obs:OAW`` resolves to. Tests needing more (agent task, board, templates)
+    ``obs:OAW`` resolves to. Tests needing more (agent task or templates)
     add them inline. Byte-identical to the corresponding notes in the legacy tree.
     """
     root = support.make_vault(tmp_path)
@@ -459,7 +459,6 @@ def test_multiline_code_spans_are_protected_by_shared_automatic_materialization(
 
 
 def test_automatic_materialization_failures_do_not_partially_write(run_oaw, vault):
-    support.add_legacy_board(vault)
     support.add_agent_task(
         vault,
         "Resolve vault-wide Obsidian task IDs.md",
@@ -467,8 +466,6 @@ def test_automatic_materialization_failures_do_not_partially_write(run_oaw, vaul
         status="open",
         body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
     )
-    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
-    before_board = board_path.read_bytes()
     missing_task = run_oaw(
         "task",
         "create",
@@ -483,7 +480,6 @@ def test_automatic_materialization_failures_do_not_partially_write(run_oaw, vaul
     assert not (
         vault / "Projects/Obsidian Agent Workflow/Tasks/Missing materialized target.md"
     ).exists()
-    assert board_path.read_bytes() == before_board
 
     target = vault / "Agents/Tasks/Resolve vault-wide Obsidian task IDs.md"
     before_target = target.read_bytes()

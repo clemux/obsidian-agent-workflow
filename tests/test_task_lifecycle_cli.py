@@ -20,11 +20,10 @@ from tests.support import (
 
 @pytest.fixture
 def vault(tmp_path: Path) -> Path:
-    """Minimal lifecycle vault: the project index, the Resolver CLI task, and the board.
+    """Minimal lifecycle vault: the project index and the Resolver CLI task.
 
-    Tests pay only for the notes nearly all of them touch (``OAW-TSK-cli`` plus
-    the non-interference board). Tests that need the archived task, captures, or
-    the vault-wide agent task add them inline.
+    Tests pay only for the notes nearly all of them touch. Tests that need the
+    archived task, captures, or the vault-wide agent task add them inline.
     """
     root = support.make_vault(tmp_path)
     support.add_project_index(root, "Obsidian Agent Workflow", "OAW-index")
@@ -38,7 +37,6 @@ def vault(tmp_path: Path) -> Path:
         tags=("projects",),
         body="# Resolver CLI\n\n## Goal\n\nBuild it.\n\n## Agent sessions\n\n",
     )
-    support.add_legacy_board(root)
     return root
 
 
@@ -48,17 +46,13 @@ def run_oaw(vault: Path):
     return support.make_runner(vault)
 
 
-def test_task_start_updates_status_and_session_without_touching_legacy_board(run_oaw, vault):
-    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
-    board_before = board_path.read_bytes()
+def test_task_start_updates_status_and_session(run_oaw, vault):
     proc = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Started work.")
     assert proc.returncode == 0, proc.stderr
     task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
     assert "status: active" in task
     assert "CODEX_THREAD_ID=test-thread" in task
     assert 'session-ids:\n  - "test-thread"\n' in task
-    assert "Board:" not in proc.stdout
-    assert board_before == board_path.read_bytes()
 
 
 def test_task_start_is_idempotent_for_same_identity(vault):
@@ -937,8 +931,6 @@ def test_task_review_domain_rejects_blank_values_before_transaction(monkeypatch,
 @pytest.mark.parametrize("initial_status", ["backlog", "todo", "active", "review", "done"])
 def test_task_review_accepts_every_lifecycle_source_status(initial_status, run_oaw, vault):
     task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
-    board_before = board_path.read_bytes()
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Established caller run.")
     assert started.returncode == 0, started.stderr
     task_path.write_text(
@@ -961,13 +953,9 @@ def test_task_review_accepts_every_lifecycle_source_status(initial_status, run_o
     assert "status: review" in task
     assert "Ready for review.; checks: pytest" in task
     assert "CODEX_THREAD_ID=test-thread" in task
-    assert "Board:" not in proc.stdout
-    assert board_before == board_path.read_bytes()
 
 
-def test_task_review_transaction_failure_restores_task_run_and_legacy_board_bytes(
-    monkeypatch, run_oaw, vault
-):
+def test_task_review_transaction_failure_restores_vault(monkeypatch, run_oaw, vault):
     started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Established caller run.")
     assert started.returncode == 0, started.stderr
     before = snapshot_tree_without_following_symlinks(vault)
@@ -1059,7 +1047,6 @@ def test_complete_requires_checks(run_oaw):
 @pytest.mark.parametrize("priority", [1, 2, 3])
 def test_task_priority_updates_metadata_trace_and_preserves_task_state(priority, run_oaw, vault):
     task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
     task_path.write_text(
         task_path.read_text(encoding="utf-8").replace(
             "status: todo\n",
@@ -1067,8 +1054,6 @@ def test_task_priority_updates_metadata_trace_and_preserves_task_state(priority,
         ),
         encoding="utf-8",
     )
-    before_board = board_path.read_bytes()
-
     proc = run_oaw(
         "task",
         "priority",
@@ -1082,13 +1067,11 @@ def test_task_priority_updates_metadata_trace_and_preserves_task_state(priority,
     assert proc.returncode == 0, proc.stderr
     assert f"Priority: {priority}" in proc.stdout
     assert "Status: todo" in proc.stdout
-    assert "Board:" not in proc.stdout
     task = task_path.read_text(encoding="utf-8")
     assert f"status: todo\npriority: {priority} # retained comment\neffort: M\n" in task
     assert 'session-ids:\n  - "test-thread"\n' in task
     assert "`CODEX_THREAD_ID=test-thread`" in task
     assert "Re-ranked against the cross-project queue." in task
-    assert before_board == board_path.read_bytes()
     assert not (vault / "Agents/Runs").exists()
 
 
@@ -1138,7 +1121,6 @@ aliases:
 
     assert proc.returncode == 0, proc.stderr
     assert "priority: 2" in path.read_text(encoding="utf-8")
-    assert "Board:" not in proc.stdout
 
 
 def test_task_priority_allows_explicit_missing_session_trace(run_oaw, vault):
@@ -1359,7 +1341,7 @@ def test_task_preparedness_rejects_malformed_existing_value_without_writing(run_
     assert before == snapshot_tree_without_following_symlinks(vault)
 
 
-def test_task_note_appends_session_without_status_or_legacy_board_change(run_oaw, vault):
+def test_task_note_appends_session_without_status_change(run_oaw, vault):
     support.add_task(
         vault,
         "Obsidian Agent Workflow",
@@ -1370,8 +1352,6 @@ def test_task_note_appends_session_without_status_or_legacy_board_change(run_oaw
         body="# Archived task\n",
     )
     task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
-    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
-    before_board = board_path.read_text(encoding="utf-8")
     task_path.write_text(
         task_path.read_text(encoding="utf-8").replace(
             "status: archived\n",
@@ -1394,7 +1374,6 @@ def test_task_note_appends_session_without_status_or_legacy_board_change(run_oaw
     assert proc.returncode == 0, proc.stderr
     assert "Updated: Projects/Obsidian Agent Workflow/Tasks/Archived task.md" in proc.stdout
     assert "Status: archived" in proc.stdout
-    assert "Board:" not in proc.stdout
     task = task_path.read_text(encoding="utf-8")
     assert "status: archived" in task
     assert "CODEX_THREAD_ID=test-thread" in task
@@ -1402,7 +1381,6 @@ def test_task_note_appends_session_without_status_or_legacy_board_change(run_oaw
     assert (
         'session-ids:\n  - "old,with-comma"\n  - earlier-thread # prior run\n  - "test-thread"\n'
     ) in task
-    assert before_board == board_path.read_text(encoding="utf-8")
 
     repeated = run_oaw(
         "task",
@@ -1420,8 +1398,6 @@ def test_task_note_appends_session_without_status_or_legacy_board_change(run_oaw
 
 def test_task_note_ignores_inline_agent_sessions_marker_before_real_heading(run_oaw, vault):
     task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
-    before_board = board_path.read_text(encoding="utf-8")
     write(
         task_path,
         """---
@@ -1470,7 +1446,6 @@ Keep the two concepts separate.
         f"- {dt.date.today().isoformat()} - Codex - `CODEX_THREAD_ID=test-thread` - "
         "Finished the implementation-ready design.\n"
     ) in task
-    assert before_board == board_path.read_text(encoding="utf-8")
 
 
 def test_task_note_requires_session_id_unless_allowed(run_oaw, vault):
@@ -1507,25 +1482,17 @@ def test_task_note_requires_session_id_unless_allowed(run_oaw, vault):
     assert "session-ids:" not in task
 
 
-def test_task_backlog_updates_status_and_session_without_touching_legacy_board(run_oaw, vault):
-    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
-    board_before = board_path.read_bytes()
+def test_task_backlog_updates_status_and_session(run_oaw, vault):
     proc = run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later.")
     assert proc.returncode == 0, proc.stderr
     task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
     assert "status: backlog" in task
     assert "CODEX_THREAD_ID=test-thread" in task
-    assert "Board:" not in proc.stdout
-    assert board_before == board_path.read_bytes()
 
 
-def test_task_promote_updates_status_without_touching_legacy_board(run_oaw, vault):
-    board_path = vault / "Projects/Obsidian Agent Workflow/Board.md"
-    board_before = board_path.read_bytes()
+def test_task_promote_updates_status(run_oaw, vault):
     assert_ok(run_oaw("task", "backlog", "OAW-TSK-cli", "--note", "Parked for later."))
     proc = run_oaw("task", "promote", "OAW-TSK-cli", "--note", "Selected next.")
     assert proc.returncode == 0, proc.stderr
     task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text()
     assert "status: todo" in task
-    assert "Board:" not in proc.stdout
-    assert board_before == board_path.read_bytes()

@@ -411,33 +411,6 @@ def add_project_template(root: Path) -> Path:
     return path
 
 
-_LEGACY_BOARD = """---
-kanban-plugin: board
-type: board
-project: obsidian-agent-workflow
-id: OAW-board
-aliases:
-  - OAW-board
----
-
-## Active
-
-## Todo
-
-- [ ] [[Tasks/Resolver CLI|Resolver CLI]] - OAW-TSK-cli
-
-## Done
-
-"""
-
-
-def add_legacy_board(root: Path) -> Path:
-    """Write the retired kanban board note used to prove lifecycle non-interference."""
-    path = root / "Projects" / "Obsidian Agent Workflow" / "Board.md"
-    write(path, _LEGACY_BOARD)
-    return path
-
-
 def add_captures(root: Path) -> list[Path]:
     """Write the legacy active and archived capture notes under the project Inbox."""
     active = root / "Projects" / "Obsidian Agent Workflow" / "Inbox" / "Active capture.md"
