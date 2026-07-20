@@ -57,6 +57,36 @@ def run_oaw_in_process(args: list[str], env: dict[str, str]) -> subprocess.Compl
     )
 
 
+def cli_env(vault: Path, **overrides: str) -> dict[str, str]:
+    """Build a CLI environment for ``vault``: ambient env + OAW_VAULT + test session.
+
+    Mirrors the legacy class setup (``os.environ`` copy, ``CODEX_THREAD_ID``
+    "test-thread") so a minimal-vault test sees the same session identity as a
+    legacy-vault test. Keyword overrides are applied last.
+    """
+    env = os.environ.copy()
+    env["OAW_VAULT"] = str(vault)
+    env["CODEX_THREAD_ID"] = "test-thread"
+    env.update(overrides)
+    return env
+
+
+def make_runner(vault: Path):
+    """Return ``run(*args, env=None)`` bound to ``vault`` via :func:`cli_env`.
+
+    The per-call ``env`` mapping overlays the base environment, matching the
+    ``run_oaw`` fixture's merge semantics for the legacy vault.
+    """
+
+    def run(*args: object, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        merged = cli_env(vault)
+        if env:
+            merged.update(env)
+        return run_oaw_in_process([str(arg) for arg in args], merged)
+
+    return run
+
+
 def run_oaw_subprocess(
     args: Sequence[str], env: dict[str, str]
 ) -> subprocess.CompletedProcess[str]:
