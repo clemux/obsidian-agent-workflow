@@ -35,11 +35,13 @@ def codex_rollout_paths(codex_roots: Sequence[Path], pattern: str) -> list[Path]
         root = root.expanduser()
         if not root.exists():
             continue
+        root_names: set[str] = set()
         for path in sorted(root.rglob(pattern)):
             if not path.is_file() or path.name in seen_names:
                 continue
-            seen_names.add(path.name)
             matches.append(path)
+            root_names.add(path.name)
+        seen_names.update(root_names)
     return matches
 
 
