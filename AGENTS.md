@@ -50,8 +50,8 @@ snapshot against the checkout's help surfaces and source bytes.
   `mise run hooks-check` runs every configured hook against all files.
 - `uv run pytest` runs the full test suite.
 - `uv run pytest tests/test_task_lifecycle_cli.py` (or any other `tests/test_*_cli.py` file) runs one per-domain CLI suite.
-- `uv run pytest tests/test_typer_cli.py tests/test_cli_parity.py` runs focused
-  native Typer contracts and the installed-vs-checkout staleness check tests.
+- `uv run pytest tests/test_typer_cli.py tests/test_cli_entry.py` runs focused
+  native Typer contracts and checkout launcher coverage.
 - `uv run python bin/oaw --help` shows top-level CLI commands.
 - `uv run python bin/oaw resolve --json OAW-TSK-cli` exercises vault resolution.
 - `OAW_VAULT=/tmp/example-vault uv run python bin/oaw ...` sets the required vault root for manual testing.

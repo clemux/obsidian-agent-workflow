@@ -6,6 +6,8 @@
 
 *Update 2026-07-20: the xdist recommendation below was approved and applied after the initial profiling run — see Fix 1.*
 
+*Update 2026-07-20: `tests/test_cli_parity.py` was later retired after the installed-parity checker was identified as migration-era manual tooling. Its timings and test counts below remain as historical profiling evidence, not a description of the current suite.*
+
 ## Baseline
 
 - Test command: `uv run pytest tests --durations=20 -q`

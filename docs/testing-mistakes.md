@@ -204,6 +204,36 @@ trace them through production code, current documentation, stored-data formats,
 and migration status. Treat compatibility retirement as a behavior decision
 with migration evidence, not as routine test cleanup.
 
+### Migration verification self-tests outlived the migration
+
+**Evidence:** the 2026-07-20 installed-parity test retirement batch;
+`tests/test_cli_parity.py` contained eight tests for
+`scripts/check_cli_parity.py` after the package and Typer migrations were
+complete.
+
+The parity tests exercised synthetic launchers, shebang parsing, fake CLI help
+diffs, and a source-byte mismatch. They did not compare the checkout with the
+user's real installed `oaw`; the actual installed-snapshot check remained a
+manual maintenance command. One test even passed the checkout launcher as both
+sides of the comparison. Native Typer contracts, catalog freshness, and the real
+checkout launcher remain covered elsewhere.
+
+**Why it was bloat:** the repository paid for a second-order test suite around
+manual migration tooling without gaining continuous assurance about the
+installed artifact. The eight tests added roughly 2.7 seconds to the serial
+suite and made parity-script implementation details look like product
+contracts.
+
+**Candidate cross-project instruction:** when a migration finishes, audit its
+comparison scripts, temporary adapters, dual-run harnesses, and their self-tests.
+Retain tests only for verification tooling that remains an automated release or
+CI gate, or whose failure would violate a current product contract. A manual
+diagnostic command does not automatically require a permanent test suite.
+
+**Exception:** keep focused tests for long-lived release, migration, or
+compatibility validators when they are routinely executed against real
+artifacts and their correctness is itself operationally important.
+
 ## Candidate shared instruction themes
 
 A future cross-project session should consider turning the findings above into
@@ -216,6 +246,8 @@ a short reusable policy built around these themes:
 5. Select parameter cases by distinct branch or boundary class.
 6. Audit test scaffolding when migrations or features finish.
 7. Require production/docs/data tracing before retiring compatibility tests.
+8. Retire migration-verification harnesses and self-tests when their temporary
+   contract ends.
 
 The shared policy should remain concise. Keep the detailed rationale and local
 examples here rather than copying this entire document into every project's
