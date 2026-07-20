@@ -208,30 +208,6 @@ def assert_ok(result: object, *, allow_stderr: bool = False) -> None:
         raise AssertionError(f"expected empty stderr on success{_streams(stdout, stderr)}")
 
 
-def assert_usage_error(result: object, *fragments: str) -> None:
-    """Assert a usage error: exit code 2, empty stdout, each fragment in stderr."""
-    code, stdout, stderr = _outcome(result)
-    if code != 2:
-        raise AssertionError(f"expected exit 2 (usage), got {code}{_streams(stdout, stderr)}")
-    if stdout != "":
-        raise AssertionError(f"expected empty stdout on usage error{_streams(stdout, stderr)}")
-    for fragment in fragments:
-        if fragment not in stderr:
-            raise AssertionError(f"expected {fragment!r} in stderr{_streams(stdout, stderr)}")
-
-
-def assert_domain_error(result: object, *fragments: str) -> None:
-    """Assert a domain error: exit code 1, empty stdout, each fragment in stderr."""
-    code, stdout, stderr = _outcome(result)
-    if code != 1:
-        raise AssertionError(f"expected exit 1 (domain), got {code}{_streams(stdout, stderr)}")
-    if stdout != "":
-        raise AssertionError(f"expected empty stdout on domain error{_streams(stdout, stderr)}")
-    for fragment in fragments:
-        if fragment not in stderr:
-            raise AssertionError(f"expected {fragment!r} in stderr{_streams(stdout, stderr)}")
-
-
 # --------------------------------------------------------------------------- #
 # Filesystem helper
 # --------------------------------------------------------------------------- #

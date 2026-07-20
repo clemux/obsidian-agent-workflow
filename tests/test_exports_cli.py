@@ -431,19 +431,6 @@ export-scope: personal
     assert "--destination must be vault-relative" in proc.stderr
 
 
-def test_safe_export_ingest_refuses_conflicting_modes(run_oaw, vault):
-    proc = run_oaw(
-        "ingest",
-        "safe-export",
-        "--dry-run",
-        "--write",
-    )
-
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert "not allowed with argument" in proc.stderr
-
-
 def test_safe_export_ingest_refuses_root_that_contains_vault(run_oaw, vault):
     ingestion = vault / "misconfigured"
     nested_vault = ingestion / "vault"

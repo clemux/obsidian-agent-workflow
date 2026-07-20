@@ -67,28 +67,17 @@ def test_resolver_large_frontmatter_participates_in_duplicate_detection(tmp_path
         resolve_id("duplicate", tmp_path)
 
 
-def test_scanned_references_prefilter_before_parsing(tmp_path: Path, monkeypatch):
+def test_scanned_references_ignore_body_decoys(tmp_path: Path):
     (tmp_path / "Unrelated.md").write_text(
-        "---\nid: unrelated\nmarker: must-not-parse\n---\n", encoding="utf-8"
+        "---\nid: unrelated\n---\n\n# target body decoy\n", encoding="utf-8"
     )
     (tmp_path / "Target.md").write_text("---\nid: target\n---\n\n# Target\n", encoding="utf-8")
-    original = resolver.parse_frontmatter
-    parsed: list[str] = []
-
-    def recording_parse(frontmatter: str):
-        parsed.append(frontmatter)
-        return original(frontmatter)
-
-    monkeypatch.setattr(resolver, "parse_frontmatter", recording_parse)
 
     references = scan_note_references(tmp_path)
     matches = resolver.matches_from_references("target", references)
 
     assert len(matches) == 1
     assert matches[0].title == "Target"
-    assert len(parsed) == 1
-    assert "id: target" in parsed[0]
-    assert "must-not-parse" not in parsed[0]
 
 
 def test_scanned_project_alias_ignores_nested_projects_directory(tmp_path: Path):

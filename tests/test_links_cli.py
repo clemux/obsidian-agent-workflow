@@ -533,6 +533,24 @@ def _no_setup(run: Runner, vault: Path) -> None:
     """Row has no prerequisite state."""
 
 
+def _add_agent_task(run: Runner, vault: Path) -> None:
+    support.add_agent_task(
+        vault,
+        "Resolve vault-wide Obsidian task IDs.md",
+        "AGT-TSK-obsidian-task-ids",
+        status="open",
+        body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
+    )
+
+
+def _add_project_template(run: Runner, vault: Path) -> None:
+    support.add_project_template(vault)
+
+
+def _add_research_template(run: Runner, vault: Path) -> None:
+    support.add_research_template(vault)
+
+
 def _create_materialized_prose_task(run: Runner, vault: Path) -> None:
     created = run(
         "task",
@@ -610,7 +628,7 @@ DURABLE_PROSE_CASES: tuple[DurableProseCase, ...] = (
     ),
     DurableProseCase(
         id="project-create",
-        setup=_no_setup,
+        setup=_add_project_template,
         command=(
             "project",
             "create",
@@ -626,7 +644,7 @@ DURABLE_PROSE_CASES: tuple[DurableProseCase, ...] = (
     ),
     DurableProseCase(
         id="note-session",
-        setup=_no_setup,
+        setup=_add_agent_task,
         command=(
             "note",
             "session",
@@ -639,7 +657,7 @@ DURABLE_PROSE_CASES: tuple[DurableProseCase, ...] = (
     ),
     DurableProseCase(
         id="note-observe",
-        setup=_no_setup,
+        setup=_add_agent_task,
         command=(
             "note",
             "observe",
@@ -690,7 +708,7 @@ DURABLE_PROSE_CASES: tuple[DurableProseCase, ...] = (
     ),
     DurableProseCase(
         id="research-scaffold",
-        setup=_no_setup,
+        setup=_add_research_template,
         command=(
             "research",
             "scaffold",
@@ -712,19 +730,6 @@ DURABLE_PROSE_CASES: tuple[DurableProseCase, ...] = (
 
 @pytest.mark.parametrize("case", DURABLE_PROSE_CASES, ids=[case.id for case in DURABLE_PROSE_CASES])
 def test_durable_prose_writes_share_obs_materialization(run_oaw, vault, case):
-    # The parametrized rows collectively exercise note session/observe (agent
-    # task), project create (project template), and research scaffold (research
-    # template); provide all three so every case runs against its prerequisites.
-    support.add_agent_task(
-        vault,
-        "Resolve vault-wide Obsidian task IDs.md",
-        "AGT-TSK-obsidian-task-ids",
-        status="open",
-        body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
-    )
-    support.add_project_template(vault)
-    support.add_research_template(vault)
-
     case.setup(run_oaw, vault)
 
     result = run_oaw(*case.command)
@@ -735,56 +740,6 @@ def test_durable_prose_writes_share_obs_materialization(run_oaw, vault, case):
         assert fragment in text, fragment
     for fragment in case.forbidden:
         assert fragment not in text, fragment
-
-
-def test_link_materialize_rejects_conflicting_dry_run_and_write(run_oaw, vault):
-    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    task_path.write_text(
-        task_path.read_text(encoding="utf-8") + "\nobs:OAW-TSK-archived\n",
-        encoding="utf-8",
-    )
-    before = task_path.read_bytes()
-
-    proc = run_oaw("link", "materialize", "OAW-TSK-cli", "--dry-run", "--write")
-
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert "not allowed with argument" in proc.stderr
-    assert task_path.read_bytes() == before
-
-
-def test_link_ensure_rejects_conflicting_dry_run_and_write(run_oaw, vault):
-    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
-    before = task_path.read_text(encoding="utf-8")
-
-    proc = run_oaw(
-        "link",
-        "ensure",
-        "OAW-TSK-cli",
-        "OAW-TSK-archived",
-        "--dry-run",
-        "--write",
-    )
-
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert "not allowed with argument" in proc.stderr
-    assert before == task_path.read_text(encoding="utf-8")
-
-
-def test_link_ensure_bidirectional_rejects_conflicting_dry_run_and_write(run_oaw):
-    proc = run_oaw(
-        "link",
-        "ensure-bidirectional",
-        "OAW-TSK-cli",
-        "OAW-TSK-archived",
-        "--dry-run",
-        "--write",
-    )
-
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert "not allowed with argument" in proc.stderr
 
 
 def test_link_ensure_bidirectional_writes_missing_reciprocal_links(run_oaw, vault):

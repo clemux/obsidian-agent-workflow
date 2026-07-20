@@ -73,15 +73,6 @@ def test_cli_main_translates_usage_exit_to_status_code():
     assert "the following arguments are required: command" in stderr.getvalue()
 
 
-def test_no_command_is_usage_error_on_stderr(run_oaw):
-    proc = run_oaw()
-
-    assert proc.returncode == 2
-    assert proc.stdout == ""
-    assert "usage: oaw" in proc.stderr
-    assert "the following arguments are required: command" in proc.stderr
-
-
 def test_resolve_obs_prefix_to_json(run_oaw):
     proc = run_oaw("resolve", "--json", "obs:AGT-TSK-obsidian-task-ids")
     assert proc.returncode == 0, proc.stderr

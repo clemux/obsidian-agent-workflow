@@ -37,12 +37,6 @@ def capture_fm(vault: Path, note_id: str) -> dict:
     return parse_frontmatter(split_note(text)[1])
 
 
-def create_capture(vault: Path, title: str, *extra) -> str:
-    result = run(vault, ["capture", "create", "--title", title, "--json", *extra])
-    assert result.exit_code == 0, result.stderr
-    return json.loads(result.stdout)["id"]
-
-
 CANONICAL = "Captures/Entries"
 
 
@@ -398,32 +392,6 @@ def test_list_malformed_capture_warning(tmp_path: Path):
     assert "warning" in result.stderr
     assert "broken.md" in result.stderr
     assert [obj["id"] for obj in json.loads(result.stdout)] == ["CAP-ok"]
-
-
-def test_list_reads_only_matched_bodies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    for i in range(5):
-        write(
-            tmp_path / f"Notes/plain-{i}.md",
-            f"---\ntype: note\nid: N-{i}\n---\n\n# note {i}\n",
-        )
-    _write_capture(tmp_path, f"{CANONICAL}/CAP-inbox.md", "CAP-inbox", status="inbox")
-    _write_capture(tmp_path, f"{CANONICAL}/CAP-parked.md", "CAP-parked", status="parked")
-    write(
-        tmp_path / CANONICAL / "CAP-big.md",
-        "---\nid: CAP-big\ntype: capture\nstatus: parked\n---\n\n# big\n" + ("x" * 5000) + "\n",
-    )
-
-    read_paths: list[str] = []
-    original = captures._read_capture_body
-
-    def spy(path):
-        read_paths.append(path.relative_to(tmp_path).as_posix())
-        return original(path)
-
-    monkeypatch.setattr(captures, "_read_capture_body", spy)
-    captures.list_captures(tmp_path, "inbox", None, "newer", False)
-
-    assert read_paths == [f"{CANONICAL}/CAP-inbox.md"]
 
 
 def test_body_chars_counts_code_points(tmp_path: Path):

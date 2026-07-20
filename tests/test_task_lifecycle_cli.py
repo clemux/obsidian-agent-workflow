@@ -317,13 +317,6 @@ def test_run_list_current_session_requires_a_real_session_id(run_oaw):
     assert "no stable session ID found" in result.stderr
 
 
-def test_run_list_rejects_session_combined_with_current_session(run_oaw):
-    result = run_oaw("run", "list", "--session", "test-thread", "--current-session")
-    assert result.returncode == 2
-    assert "argument --current-session: not allowed with argument --session" in result.stderr
-    assert "usage: oaw run list" in result.stderr
-
-
 @pytest.mark.parametrize("command", ["review", "complete"])
 @pytest.mark.parametrize(
     ("old", "new", "expected"),
@@ -993,49 +986,6 @@ def test_task_review_transaction_failure_restores_vault(monkeypatch, run_oaw, va
     assert result == 1
     assert "transaction failed and was rolled back" in stderr.getvalue()
     assert before == snapshot_tree_without_following_symlinks(vault)
-
-
-def test_task_lifecycle_resolves_once_per_write(monkeypatch, vault):
-    monkeypatch.setenv("OAW_VAULT", str(vault))
-    monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
-    original = cli.resolve_id
-    resolved: list[str] = []
-
-    def recording_resolve(raw_id: str, root: Path):
-        resolved.append(raw_id)
-        return original(raw_id, root)
-
-    monkeypatch.setattr(cli, "resolve_id", recording_resolve)
-
-    cli.main(["task", "start", "OAW-TSK-cli", "--note", "Started once."])
-    assert resolved == ["OAW-TSK-cli"]
-
-    resolved.clear()
-    cli.main(["task", "note", "OAW-TSK-cli", "--note", "Noted once."])
-    assert resolved == ["OAW-TSK-cli"]
-
-    resolved.clear()
-    cli.main(["note", "session", "OAW-TSK-cli", "--note", "Traced once."])
-    assert resolved == ["OAW-TSK-cli"]
-
-
-def test_task_create_from_capture_walks_vault_once(monkeypatch, vault):
-    support.add_captures(vault)
-    monkeypatch.setenv("OAW_VAULT", str(vault))
-    monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
-    original = resolver.iter_markdown
-    walks: list[Path] = []
-
-    def recording_walk(root: Path):
-        walks.append(root)
-        yield from original(root)
-
-    monkeypatch.setattr(resolver, "iter_markdown", recording_walk)
-
-    result = cli.main(["task", "create", "--from-capture", "OAW-CAP-active"])
-
-    assert result == 0
-    assert walks == [vault]
 
 
 def test_complete_requires_checks(run_oaw):

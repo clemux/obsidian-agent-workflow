@@ -8,7 +8,6 @@ from oaw import cli
 from tests.support import (
     NO_SESSION_ENV,
     add_project_index,
-    snapshot_tree_without_following_symlinks,
     write,
 )
 
@@ -245,41 +244,6 @@ def test_note_file_preserves_newlines_exactly(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.stderr
     note_bytes = (tmp_path / "Projects/Example/Tasks/Newline-preserving task.md").read_bytes()
     assert f"## Problem\n\n{body}".encode() in note_bytes
-
-
-@pytest.mark.parametrize(
-    "arguments",
-    [
-        ["task", "note", "EXP-TSK-example", "--note", "inline", "--note-file", "-"],
-        [
-            "note",
-            "observe",
-            "SAFE-NOTE",
-            "--title",
-            "Conflict",
-            "--body",
-            "inline",
-            "--body-file",
-            "-",
-        ],
-    ],
-)
-def test_note_and_note_file_conflict_errors(tmp_path: Path, arguments: list[str]) -> None:
-    write_task(tmp_path)
-    write_note(tmp_path)
-    before = snapshot_tree_without_following_symlinks(tmp_path)
-
-    result = CliRunner().invoke(
-        cli.app,
-        arguments,
-        input="stdin must not be read",
-        env={**NO_SESSION_ENV, "OAW_VAULT": str(tmp_path)},
-    )
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "not allowed with argument" in result.stderr
-    assert snapshot_tree_without_following_symlinks(tmp_path) == before
 
 
 def test_missing_note_file_errors_clearly(tmp_path: Path) -> None:

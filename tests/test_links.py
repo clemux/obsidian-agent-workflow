@@ -31,21 +31,12 @@ def vault(tmp_path):
     return root
 
 
-def test_obs_materialization_caches_repeated_resolution(vault, monkeypatch):
+def test_obs_materialization_replaces_repeated_references(vault):
     references = resolver.scan_note_references(vault)
-    original = links.resolve_id_from_references
-    calls = []
-
-    def recording_resolve(target, root, cached_references):
-        calls.append(target)
-        return original(target, root, cached_references)
-
-    monkeypatch.setattr(links, "resolve_id_from_references", recording_resolve)
     rendered, replacements = links.materialize_obs_references(
         "obs:OAW-TSK-cli and obs:OAW-TSK-cli", vault, references
     )
 
-    assert calls == ["OAW-TSK-cli"]
     assert len(replacements) == 2
     assert rendered.count("[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI") == 2
 

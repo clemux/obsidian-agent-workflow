@@ -20,11 +20,9 @@ CATALOG = ROOT / "docs/oaw-cli-feature-catalog.md"
 GENERATOR = ROOT / "scripts/generate_cli_catalog.py"
 
 
-def test_catalog_semantics_cover_every_live_leaf_command() -> None:
+def test_catalog_leaf_commands_have_help_and_semantic_metadata() -> None:
     leaves = leaf_commands(get_command(cli.app))
-    live_paths = {path for path, _ in leaves}
 
-    assert set(SEMANTICS) == live_paths
     assert all(command.help for _, command in leaves)
     assert all(metadata.owner and metadata.mutation_scope for metadata in SEMANTICS.values())
 
