@@ -5,7 +5,12 @@ import pytest
 from typer.testing import CliRunner
 
 from oaw import cli
-from tests.support import NO_SESSION_ENV, add_project_index, file_state, write
+from tests.support import (
+    NO_SESSION_ENV,
+    add_project_index,
+    snapshot_tree_without_following_symlinks,
+    write,
+)
 
 
 def write_project_index(vault: Path, name: str = "Example", alias: str = "EXP") -> None:
@@ -262,7 +267,7 @@ def test_note_file_preserves_newlines_exactly(tmp_path: Path) -> None:
 def test_note_and_note_file_conflict_errors(tmp_path: Path, arguments: list[str]) -> None:
     write_task(tmp_path)
     write_note(tmp_path)
-    before = file_state(tmp_path)
+    before = snapshot_tree_without_following_symlinks(tmp_path)
 
     result = CliRunner().invoke(
         cli.app,
@@ -274,7 +279,7 @@ def test_note_and_note_file_conflict_errors(tmp_path: Path, arguments: list[str]
     assert result.exit_code == 2
     assert result.stdout == ""
     assert "not allowed with argument" in result.stderr
-    assert file_state(tmp_path) == before
+    assert snapshot_tree_without_following_symlinks(tmp_path) == before
 
 
 def test_missing_note_file_errors_clearly(tmp_path: Path) -> None:

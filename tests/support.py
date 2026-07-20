@@ -17,7 +17,6 @@ from io import StringIO
 from pathlib import Path
 
 from oaw import cli
-from oaw.sessions import SESSION_ENV as _SESSION_ENV_VARS
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "bin" / "oaw"
@@ -59,9 +58,9 @@ def run_oaw_in_process(args: list[str], env: dict[str, str]) -> subprocess.Compl
 def cli_env(vault: Path, **overrides: str) -> dict[str, str]:
     """Build a CLI environment for ``vault``: ambient env + OAW_VAULT + test session.
 
-    Mirrors the legacy class setup (``os.environ`` copy, ``CODEX_THREAD_ID``
-    "test-thread") so a minimal-vault test sees the same session identity as a
-    legacy-vault test. Keyword overrides are applied last.
+    Uses an ``os.environ`` copy plus ``CODEX_THREAD_ID=test-thread`` so every
+    minimal-vault test starts from the same session identity. Keyword overrides
+    are applied last.
     """
     env = os.environ.copy()
     env["OAW_VAULT"] = str(vault)
@@ -73,8 +72,7 @@ def cli_env(vault: Path, **overrides: str) -> dict[str, str]:
 def make_runner(vault: Path):
     """Return ``run(*args, env=None)`` bound to ``vault`` via :func:`cli_env`.
 
-    The per-call ``env`` mapping overlays the base environment, matching the
-    ``run_oaw`` fixture's merge semantics for the legacy vault.
+    The per-call ``env`` mapping overlays the base environment.
     """
 
     def run(*args: object, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -105,11 +103,18 @@ def run_oaw_subprocess(
 
 
 def run_record_for(vault: Path, session_id: str) -> Path:
-    """Return the run record under ``Agents/Runs`` whose agent session matches."""
-    for path in (vault / "Agents/Runs").glob("*.md"):
-        if f'agent_session_id: "{session_id}"' in path.read_text(encoding="utf-8"):
-            return path
-    raise AssertionError(f"run record not found for {session_id}")
+    """Return the unique run record whose exact agent-session line matches."""
+    identity_line = f'agent_session_id: "{session_id}"'
+    matches = [
+        path
+        for path in (vault / "Agents/Runs").glob("*.md")
+        if identity_line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected one run record for {session_id}, found {len(matches)}: {matches}"
+        )
+    return matches[0]
 
 
 def snapshot_tree_without_following_symlinks(
@@ -119,8 +124,7 @@ def snapshot_tree_without_following_symlinks(
 
     Directories, symlinks, and regular files are all recorded, so this is the
     single source of truth for exact tree reproduction and diffing (structure,
-    symlink targets, and file bytes). Use :func:`vault_state` for the lighter
-    file-content-only snapshot used in "no write" assertions.
+    symlink targets, and file bytes).
     """
     snapshot: dict[str, tuple[str, bytes | str | None]] = {}
     for current, directories, files in os.walk(root, followlinks=False):
@@ -137,38 +141,34 @@ def snapshot_tree_without_following_symlinks(
     return snapshot
 
 
-def file_state(root: Path) -> dict[str, bytes]:
-    """Return a relpath -> file-bytes snapshot of every file under ``root``.
-
-    Only regular files are recorded (directories are omitted). This is the
-    lightweight "did any file change?" snapshot for before/after "no write"
-    assertions where directory creation is not part of the contract. For a
-    snapshot that also captures directory structure and symlink targets, use
-    :func:`snapshot_tree_without_following_symlinks`.
-    """
-    return {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
-
-
 # --------------------------------------------------------------------------- #
-# Session environment presets (derived from oaw.sessions.SESSION_ENV)
+# Session environment contract and presets
 # --------------------------------------------------------------------------- #
+
+# Kept independent from production so removing or renaming a supported harness
+# cannot silently change both the implementation and its test oracle.
+EXPECTED_SESSION_IDENTITIES = (
+    ("codex", "Codex", "CODEX_THREAD_ID"),
+    ("claude-code", "Claude Code", "CLAUDE_SESSION_ID"),
+    ("claude-code", "Claude Code", "CLAUDE_CODE_SESSION_ID"),
+    ("opencode", "OpenCode", "OPENCODE_SESSION_ID"),
+    ("gemini", "Gemini", "GEMINI_SESSION_ID"),
+)
 
 # One active Codex thread; every other supported harness variable is set to the
 # empty string so its harness is treated as inactive.
 SESSION_ENV: dict[str, str] = {
     env_name: ("test-thread" if env_name == "CODEX_THREAD_ID" else "")
-    for _, env_name in _SESSION_ENV_VARS
+    for _, _, env_name in EXPECTED_SESSION_IDENTITIES
 }
 
 # Unset every supported harness session variable so test outcomes do not depend
 # on which agent harness (if any) happens to be running the suite. The ``None``
 # values are a CliRunner convention (unset the variable); this mapping must NOT
 # be passed to run_oaw_in_process, which requires str values for os.environ.
-NO_SESSION_ENV: dict[str, str | None] = {env_name: None for _, env_name in _SESSION_ENV_VARS}
+NO_SESSION_ENV: dict[str, str | None] = {
+    env_name: None for _, _, env_name in EXPECTED_SESSION_IDENTITIES
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -246,9 +246,7 @@ def write(path: Path, text: str) -> None:
 # --------------------------------------------------------------------------- #
 # Composable vault factories
 #
-# Each factory takes an explicit vault root and writes exactly the note bodies
-# used by tests/test_oaw.py's setup_method. Composing all of them via
-# build_legacy_vault reproduces that fixture tree byte-for-byte.
+# Each factory takes an explicit vault root and writes one reusable test shape.
 # --------------------------------------------------------------------------- #
 
 
@@ -471,45 +469,3 @@ def add_captures(root: Path) -> list[Path]:
         "# Archived capture\n",
     )
     return [active, archived]
-
-
-def build_legacy_vault(root: Path) -> Path:
-    """Reproduce tests/test_oaw.py setup_method's full fixture tree at ``root``.
-
-    Composing every factory here yields the same nine-note vault the class-based
-    suite seeds, byte-for-byte. Returns the vault root.
-    """
-    make_vault(root)
-    add_agent_task(
-        root,
-        "Resolve vault-wide Obsidian task IDs.md",
-        "AGT-TSK-obsidian-task-ids",
-        status="open",
-        body="# Resolve vault-wide Obsidian task IDs\n\n## Problem\n\nText.\n",
-    )
-    add_task(
-        root,
-        "Obsidian Agent Workflow",
-        "Resolver CLI.md",
-        "OAW-TSK-cli",
-        project="obsidian-agent-workflow",
-        status="todo",
-        tags=("projects",),
-        body="# Resolver CLI\n\n## Goal\n\nBuild it.\n\n## Agent sessions\n\n",
-    )
-    add_project_index(root, "Obsidian Agent Workflow", "OAW-index")
-    add_research_template(root)
-    add_project_template(root)
-    add_project_index(root, "Codex Delegation", "CDX-index")
-    add_task(
-        root,
-        "Obsidian Agent Workflow",
-        "Archived task.md",
-        "OAW-TSK-archived",
-        project="obsidian-agent-workflow",
-        status="archived",
-        body="# Archived task\n",
-    )
-    add_legacy_board(root)
-    add_captures(root)
-    return root

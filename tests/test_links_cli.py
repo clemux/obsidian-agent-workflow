@@ -839,7 +839,8 @@ aliases:
 def test_link_lint_suggests_durable_opaque_id_replacements(run_oaw, vault):
     task = vault / "Projects/Obsidian Agent Workflow/Tasks/Archived task.md"
     task.write_text(
-        task.read_text(encoding="utf-8") + "\n## Related\n\n- [[OAW-TSK-cli]]\n- [[PMX-UNKNOWN]]\n",
+        task.read_text(encoding="utf-8")
+        + "\n## Related\n\n- [[OAW-TSK-cli]]\n- [[PMX-UNKNOWN]]\n- [[Projects/Elsewhere|durable]]\n",
         encoding="utf-8",
     )
 
@@ -851,6 +852,7 @@ def test_link_lint_suggests_durable_opaque_id_replacements(run_oaw, vault):
         in proc.stdout
     )
     assert "Archived task.md: [[PMX-UNKNOWN]] -> (unresolved)" in proc.stdout
+    assert "[[Projects/Elsewhere|durable]]" not in proc.stdout
 
 
 def test_link_lint_skips_non_utf8_notes(run_oaw, vault):

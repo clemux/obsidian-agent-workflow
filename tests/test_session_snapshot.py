@@ -6,14 +6,8 @@ import pytest
 from tests import support
 from tests.support import FIXTURES, write
 
-# Local fixture overrides: these tests exercise `oaw session snapshot`, which
-# copies harness artifacts (Claude/Codex session files, plugin logs) into an
-# output root computed from the vault path. It never reads or resolves vault
-# notes, so the full nine-note legacy tree from conftest's `legacy_vault` is
-# pure overhead here — a bare vault directory is enough. (This `vault`
-# fixture matches conftest's own bare-vault `vault` fixture; it is redefined
-# here only so `base_env`/`run_oaw` below depend on it instead of
-# `legacy_vault`.)
+# These tests copy harness artifacts into an output root computed from the vault
+# path. They never read or resolve vault notes, so a bare vault is sufficient.
 
 
 @pytest.fixture

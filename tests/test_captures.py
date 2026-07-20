@@ -9,7 +9,12 @@ from typer.testing import CliRunner
 from oaw import captures, cli, notes
 from oaw.frontmatter import parse_frontmatter
 from oaw.notes import split_note
-from tests.support import SESSION_ENV, add_project_index, file_state, write
+from tests.support import (
+    SESSION_ENV,
+    add_project_index,
+    snapshot_tree_without_following_symlinks,
+    write,
+)
 
 
 def run(vault: Path, args, *, env=None, **kwargs):
@@ -186,11 +191,11 @@ def test_create_url_validation_and_dedup(tmp_path: Path):
     assert '  - "https://example.com/a"' in text
     assert '  - "https://example.com/b"' in text
 
-    before = file_state(tmp_path)
+    before = snapshot_tree_without_following_symlinks(tmp_path)
     bad = run(tmp_path, ["capture", "create", "--title", "Bad", "--url", "ftp://example.com/x"])
     assert bad.exit_code == 2
     assert bad.stdout == ""
-    assert file_state(tmp_path) == before
+    assert snapshot_tree_without_following_symlinks(tmp_path) == before
 
 
 @pytest.mark.parametrize(
@@ -201,14 +206,14 @@ def test_create_url_validation_and_dedup(tmp_path: Path):
     ],
 )
 def test_create_rejects_multiline_url_without_writing(tmp_path: Path, url: str):
-    before = file_state(tmp_path)
+    before = snapshot_tree_without_following_symlinks(tmp_path)
 
     result = run(tmp_path, ["capture", "create", "--title", "Bad URL", "--url", url])
 
     assert result.exit_code == 2
     assert "single-line" in result.stderr
     assert result.stdout == ""
-    assert file_state(tmp_path) == before
+    assert snapshot_tree_without_following_symlinks(tmp_path) == before
 
 
 def test_create_collision_suffixes(tmp_path: Path):
@@ -229,7 +234,7 @@ def test_create_collision_suffixes(tmp_path: Path):
 
 def test_create_concurrent_collision_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_project_index(tmp_path, "Demo", "DEMO-index")
-    before = file_state(tmp_path)
+    before = snapshot_tree_without_following_symlinks(tmp_path)
 
     def always_exists(*_args, **_kwargs):
         raise FileExistsError("racing creator")
@@ -239,7 +244,7 @@ def test_create_concurrent_collision_bounded(tmp_path: Path, monkeypatch: pytest
     result = run(tmp_path, ["capture", "create", "--title", "Race", "--project", "obs:DEMO"])
     assert result.exit_code == 1
     assert "unique capture id" in result.stderr
-    assert file_state(tmp_path) == before
+    assert snapshot_tree_without_following_symlinks(tmp_path) == before
 
 
 @pytest.mark.parametrize(
@@ -252,11 +257,11 @@ def test_create_concurrent_collision_bounded(tmp_path: Path, monkeypatch: pytest
     ],
 )
 def test_create_usage_errors(tmp_path: Path, args):
-    before = file_state(tmp_path)
+    before = snapshot_tree_without_following_symlinks(tmp_path)
     result = run(tmp_path, args, input="stdin must not matter")
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert file_state(tmp_path) == before
+    assert snapshot_tree_without_following_symlinks(tmp_path) == before
 
 
 def test_create_session_provenance(tmp_path: Path):
@@ -557,7 +562,7 @@ def test_triage_incubating_flow(tmp_path: Path):
 @pytest.mark.parametrize("review_after", ["2026-13-01", "2026-04-31", "2025-02-29"])
 def test_triage_incubating_rejects_invalid_calendar_date(tmp_path: Path, review_after: str):
     make_canonical_capture(tmp_path, "CAP-invalid-date")
-    before = file_state(tmp_path)
+    before = snapshot_tree_without_following_symlinks(tmp_path)
 
     result = run(
         tmp_path,
@@ -577,7 +582,7 @@ def test_triage_incubating_rejects_invalid_calendar_date(tmp_path: Path, review_
     assert result.exit_code == 2
     assert "argument --review-after: must use YYYY-MM-DD" in result.stderr
     assert result.stdout == ""
-    assert file_state(tmp_path) == before
+    assert snapshot_tree_without_following_symlinks(tmp_path) == before
 
 
 def test_triage_incubating_accepts_valid_leap_date(tmp_path: Path):
@@ -688,7 +693,7 @@ def test_triage_triaged_requires_destination(tmp_path: Path):
 
 def test_triage_rejects_capture_as_its_own_destination_without_writing(tmp_path: Path):
     make_canonical_capture(tmp_path, "CAP-self")
-    before = file_state(tmp_path)
+    before = snapshot_tree_without_following_symlinks(tmp_path)
 
     result = run(
         tmp_path,
@@ -709,7 +714,7 @@ def test_triage_rejects_capture_as_its_own_destination_without_writing(tmp_path:
     assert result.exit_code == 1
     assert "cannot be its own destination" in result.stderr
     assert result.stdout == ""
-    assert file_state(tmp_path) == before
+    assert snapshot_tree_without_following_symlinks(tmp_path) == before
 
 
 def test_triage_reason_contract(tmp_path: Path):

@@ -279,6 +279,7 @@ def test_task_create_start_is_atomic_without_capture(run_oaw, vault):
 
 
 def test_task_create_rejects_start_with_human_execution_without_writes(run_oaw, vault):
+    support.add_legacy_board(vault)
     before = snapshot_tree_without_following_symlinks(vault)
 
     proc = run_oaw(
@@ -300,6 +301,7 @@ def test_task_create_rejects_start_with_human_execution_without_writes(run_oaw, 
 
 def test_task_create_duplicate_id_fails_without_writes(run_oaw, vault):
     add_resolver_cli_task(vault)
+    support.add_legacy_board(vault)
     before = snapshot_tree_without_following_symlinks(vault)
     proc = run_oaw(
         "task",
@@ -509,6 +511,7 @@ def test_task_create_rejects_conflicting_capture_intents(run_oaw, vault):
 def test_task_create_from_capture_creation_failure_leaves_capture_unchanged(run_oaw, vault):
     support.add_captures(vault)
     add_resolver_cli_task(vault)
+    support.add_legacy_board(vault)
     before = snapshot_tree_without_following_symlinks(vault)
     proc = run_oaw(
         "task",

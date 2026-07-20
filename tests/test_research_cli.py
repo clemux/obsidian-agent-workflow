@@ -35,17 +35,18 @@ def test_research_scaffold_renders_template_with_audience_boundary(run_oaw, vaul
         "2026-07-12",
     )
     assert proc.returncode == 0, proc.stderr
+    stdout_lines = proc.stdout.splitlines()
     assert (
         "Created: Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Prompt.md"
-        in proc.stdout
+        in stdout_lines
     )
     assert (
         "Synthesis: Projects/Obsidian Agent Workflow/Research/architecture/provider-choice"
-        "/Synthesis.md" in proc.stdout
+        "/Synthesis.md" in stdout_lines
     )
-    assert "Base: Bases/Research packet.base" in proc.stdout
-    assert "Template: Templates/Research packet.md" in proc.stdout
-    assert "Deep research prompt: self-contained provider-visible body" in proc.stdout
+    assert "Base: Bases/Research packet.base" in stdout_lines
+    assert "Template: Templates/Research packet.md" in stdout_lines
+    assert "Deep research prompt: self-contained provider-visible body" in stdout_lines
     prompt = (
         vault / "Projects/Obsidian Agent Workflow/Research/architecture/provider-choice/Prompt.md"
     ).read_text(encoding="utf-8")

@@ -22,10 +22,9 @@ from tests.support import (
 def vault(tmp_path: Path) -> Path:
     """Minimal lifecycle vault: the project index, the Resolver CLI task, and the board.
 
-    Shadows the conftest ``legacy_vault`` fixture so this file's tests pay only for
-    the notes nearly all of them touch (``OAW-TSK-cli`` plus the non-interference
-    board). Tests that need the archived task, captures, or the vault-wide agent
-    task add them inline.
+    Tests pay only for the notes nearly all of them touch (``OAW-TSK-cli`` plus
+    the non-interference board). Tests that need the archived task, captures, or
+    the vault-wide agent task add them inline.
     """
     root = support.make_vault(tmp_path)
     support.add_project_index(root, "Obsidian Agent Workflow", "OAW-index")
@@ -45,7 +44,7 @@ def vault(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def run_oaw(vault: Path):
-    """In-process runner bound to the minimal ``vault``; mirrors the conftest fixture."""
+    """Return an in-process runner bound to the minimal ``vault``."""
     return support.make_runner(vault)
 
 

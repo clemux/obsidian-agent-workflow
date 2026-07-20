@@ -33,6 +33,12 @@ def _add_resolver_cli_task(vault):
 
 def test_session_lookup_reports_vault_note_hit(run_oaw, vault):
     task = _add_resolver_cli_task(vault)
+    support.add_agent_task(
+        vault,
+        "Distractor.md",
+        "AGT-TSK-distractor",
+        body="# Distractor\n\nThis note does not contain the requested session.\n",
+    )
     task.write_text(
         task.read_text(encoding="utf-8")
         + "- 2026-07-09 - Codex - `CODEX_THREAD_ID=lookup-thread` - Logged.\n",
@@ -55,6 +61,7 @@ def test_session_lookup_reports_vault_note_hit(run_oaw, vault):
     assert (
         "- Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md | id: OAW-TSK-cli" in proc.stdout
     )
+    assert "AGT-TSK-distractor" not in proc.stdout
     assert "Harness artifacts:" not in proc.stdout
 
 

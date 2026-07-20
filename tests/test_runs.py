@@ -3,9 +3,36 @@ from pathlib import Path
 
 import pytest
 
+from oaw import runs, sessions
 from oaw.errors import OawError
 from oaw.notes import VaultTransaction
 from oaw.runs import Identity, Run, is_stale, run_id
+from tests.support import EXPECTED_SESSION_IDENTITIES
+
+
+def test_supported_session_environment_contract_is_explicit():
+    assert runs.SESSION_ENV == EXPECTED_SESSION_IDENTITIES
+    expected_session_env = tuple(
+        (provider_label, env_name) for _, provider_label, env_name in EXPECTED_SESSION_IDENTITIES
+    )
+    assert expected_session_env == sessions.SESSION_ENV
+
+
+@pytest.mark.parametrize(
+    ("provider", "provider_label", "env_name"),
+    EXPECTED_SESSION_IDENTITIES,
+    ids=[env_name for _, _, env_name in EXPECTED_SESSION_IDENTITIES],
+)
+def test_detect_identity_supports_each_session_environment(provider, provider_label, env_name):
+    environ = {name: "" for _, _, name in EXPECTED_SESSION_IDENTITIES}
+    environ[env_name] = "session-id"
+
+    assert runs.detect_identity(environ) == Identity(
+        provider,
+        provider_label,
+        "session-id",
+        env_name,
+    )
 
 
 def test_run_id_is_deterministic_and_session_scoped():

@@ -47,9 +47,10 @@ def test_project_create_renders_native_template_and_frontmatter(run_oaw, vault):
         "workflow",
     )
     assert proc.returncode == 0, proc.stderr
-    assert "Created: Projects/Agent Tooling/Index.md" in proc.stdout
-    assert "ID: AGT-index" in proc.stdout
-    assert "Status: active" in proc.stdout
+    stdout_lines = proc.stdout.splitlines()
+    assert "Created: Projects/Agent Tooling/Index.md" in stdout_lines
+    assert "ID: AGT-index" in stdout_lines
+    assert "Status: active" in stdout_lines
     note = (vault / "Projects/Agent Tooling/Index.md").read_text(encoding="utf-8")
     assert 'project: "agent-tooling"' in note
     assert 'repo: "~/dev/agent-skills:main"' in note
