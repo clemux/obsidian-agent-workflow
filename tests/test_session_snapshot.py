@@ -172,7 +172,7 @@ def test_session_snapshot_refresh_updates_parent_and_adds_subagents(vault, base_
         "--plugin-data-root",
         str(vault / "missing-plugin"),
     )
-    first = support.run_oaw_subprocess([str(x) for x in base_args], base_env)
+    first = support.run_oaw_in_process([str(x) for x in base_args], base_env)
     assert first.returncode == 0, first.stderr
     snapshot = output_root / "2026-07-08-refresh-test"
     nested_copy = snapshot / "claude/subagents/nested/agent-nested.jsonl"
@@ -203,7 +203,7 @@ def test_session_snapshot_refresh_updates_parent_and_adds_subagents(vault, base_
         claude_root / "-tmp-project" / session_id / "subagents/agent-new.jsonl",
         '{"content":"new subagent"}\n',
     )
-    second = support.run_oaw_subprocess([str(x) for x in base_args], base_env)
+    second = support.run_oaw_in_process([str(x) for x in base_args], base_env)
     assert second.returncode == 0, second.stderr
 
     parent_copy = snapshot / "claude/parent-019f3ed8-PARTIAL.jsonl"

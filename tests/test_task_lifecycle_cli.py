@@ -56,10 +56,10 @@ def test_task_start_updates_status_and_session(run_oaw, vault):
 
 def test_task_start_is_idempotent_for_same_identity(vault):
     env = support.cli_env(vault)
-    first = support.run_oaw_subprocess(
+    first = support.run_oaw_in_process(
         ["task", "start", "OAW-TSK-cli", "--note", "First start."], env
     )
-    second = support.run_oaw_subprocess(
+    second = support.run_oaw_in_process(
         ["task", "start", "OAW-TSK-cli", "--note", "Refresh start."], env
     )
 
@@ -84,7 +84,7 @@ def test_claude_refresh_uses_provider_and_session_identity_and_preserves_env(
         "OPENCODE_SESSION_ID": "",
         "GEMINI_SESSION_ID": "",
     }
-    first = support.run_oaw_subprocess(
+    first = support.run_oaw_in_process(
         [
             "task",
             "start",
@@ -94,7 +94,7 @@ def test_claude_refresh_uses_provider_and_session_identity_and_preserves_env(
         ],
         {**support.cli_env(vault), **cleared, "CLAUDE_CODE_SESSION_ID": "shared-claude-session"},
     )
-    second = support.run_oaw_subprocess(
+    second = support.run_oaw_in_process(
         [
             "task",
             "start",

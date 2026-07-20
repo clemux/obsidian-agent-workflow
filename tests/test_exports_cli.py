@@ -159,7 +159,7 @@ export_artifacts:
     output_root = vault / "exports"
     before = support.snapshot_tree_without_following_symlinks(vault)
 
-    failed = support.run_oaw_subprocess(
+    failed = support.run_oaw_in_process(
         [
             str(x)
             for x in (
@@ -183,7 +183,7 @@ export_artifacts:
     }
 
     write(artifact, "ready\n")
-    retried = support.run_oaw_subprocess(
+    retried = support.run_oaw_in_process(
         [
             str(x)
             for x in (
