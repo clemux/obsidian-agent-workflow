@@ -56,6 +56,9 @@ snapshot against the checkout's help surfaces and source bytes.
 - `uv run python bin/oaw resolve --json OAW-TSK-cli` exercises vault resolution.
 - `OAW_VAULT=/tmp/example-vault uv run python bin/oaw ...` sets the required vault root for manual testing.
 
+When changing Ruff or Pyrefly configuration, update `docs/linting.md` in the
+same change with the rule's rationale and any narrowly scoped exceptions.
+
 The CLI has one runtime dependency, `typer`, so the checkout must be run inside the
 project environment: use `uv run python bin/oaw ...`, not bare `python bin/oaw ...`
 (which fails with `ModuleNotFoundError: No module named 'typer'`). The installed
