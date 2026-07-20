@@ -552,6 +552,55 @@ def test_triage_incubating_flow(tmp_path: Path):
     assert "CODEX_THREAD_ID=test-thread" in text
 
 
+@pytest.mark.parametrize("review_after", ["2026-13-01", "2026-04-31", "2025-02-29"])
+def test_triage_incubating_rejects_invalid_calendar_date(tmp_path: Path, review_after: str):
+    make_canonical_capture(tmp_path, "CAP-invalid-date")
+    before = vault_state(tmp_path)
+
+    result = run(
+        tmp_path,
+        [
+            "capture",
+            "triage",
+            "CAP-invalid-date",
+            "--status",
+            "incubating",
+            "--review-after",
+            review_after,
+            "--reason",
+            "later",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "argument --review-after: must use YYYY-MM-DD" in result.stderr
+    assert result.stdout == ""
+    assert vault_state(tmp_path) == before
+
+
+def test_triage_incubating_accepts_valid_leap_date(tmp_path: Path):
+    make_canonical_capture(tmp_path, "CAP-leap-date")
+
+    result = run(
+        tmp_path,
+        [
+            "capture",
+            "triage",
+            "CAP-leap-date",
+            "--status",
+            "incubating",
+            "--review-after",
+            "2028-02-29",
+            "--reason",
+            "later",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    fm = capture_fm(tmp_path, "CAP-leap-date")
+    assert fm["review_after"] == "2028-02-29"
+
+
 def test_triage_review_after_scoping(tmp_path: Path):
     make_canonical_capture(tmp_path, "CAP-scope")
     bad = run(

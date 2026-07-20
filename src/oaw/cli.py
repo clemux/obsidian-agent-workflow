@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 import sys
 from collections.abc import Callable, Sequence
@@ -1380,7 +1381,11 @@ def capture_triage(
         _usage_error("capture triage requires a non-empty --reason")
     clean_reason = reason.strip() if reason is not None else None
     if review_after is not None:
-        if not CAPTURE_DATE_RE.fullmatch(review_after):
+        try:
+            parsed_review_after = dt.date.fromisoformat(review_after)
+        except ValueError:
+            parsed_review_after = None
+        if not CAPTURE_DATE_RE.fullmatch(review_after) or parsed_review_after is None:
             _usage_error("argument --review-after: must use YYYY-MM-DD")
         if triage_status is not CaptureTriageStatus.INCUBATING:
             _usage_error("argument --review-after: only valid with --status incubating")
