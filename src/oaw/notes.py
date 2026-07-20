@@ -212,7 +212,12 @@ def heading_level(line: str) -> int | None:
 
 def fence_delimiter(line: str) -> str | None:
     match = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
-    return match.group(1) if match else None
+    if match is None:
+        return None
+    delimiter = match.group(1)
+    if delimiter[0] == "`" and "`" in line[match.end() :]:
+        return None
+    return delimiter
 
 
 def fence_closes(opening: str, candidate_line: str) -> bool:
