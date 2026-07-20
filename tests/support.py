@@ -1,10 +1,9 @@
 """Shared, importable test infrastructure for the oaw CLI suite.
 
 This module is a plain library of helpers and vault factories (NOT pytest
-fixtures) so that both fixture-based tests and non-fixture callers (for example
-the class-based ``tests/test_oaw.py`` and throwaway verification scripts) can
-reuse exactly the same building blocks. Thin pytest fixtures wrapping these
-helpers live in ``tests/conftest.py``.
+fixtures) so that fixture-based tests and non-fixture callers can reuse exactly
+the same building blocks. Each test file composes its own minimal ``vault`` and
+``run_oaw`` fixtures from these factories, paying only for the notes it uses.
 """
 
 from __future__ import annotations

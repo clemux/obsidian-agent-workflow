@@ -6,7 +6,7 @@ This repository provides the `oaw` local CLI and its agent skill metadata:
 
 - `src/oaw/` contains the CLI implementation as domain modules (`resolver.py`, `notes.py`, `lifecycle.py`, `frontmatter.py`, `cli.py`, ...) for resolving Obsidian IDs and updating task lifecycle state.
 - `bin/oaw` is a thin launcher that runs the checkout copy of `src/oaw/` without installing it.
-- `tests/` holds the pytest suite: domain-level suites such as `tests/test_resolver.py`, `tests/test_notes.py`, and `tests/test_links.py`; per-domain CLI suites such as `tests/test_task_lifecycle_cli.py` and `tests/test_links_cli.py`; command-contract coverage in `tests/test_typer_cli.py`; and shared vault factories, runners, and snapshot/assertion helpers in `tests/support.py` with thin fixtures in `tests/conftest.py`.
+- `tests/` holds the pytest suite: domain-level suites such as `tests/test_resolver.py`, `tests/test_notes.py`, and `tests/test_links.py`; per-domain CLI suites such as `tests/test_task_lifecycle_cli.py` and `tests/test_links_cli.py`; command-contract coverage in `tests/test_typer_cli.py`; and shared vault factories, runners, and snapshot/assertion helpers in `tests/support.py`, from which each test file composes its own minimal vault fixtures.
 - `docs/architecture.md` records the package-layout rationale; `docs/claude-code.md` documents the Claude Code session-title hook shipped in `scripts/`.
 - `skills/oaw/` documents the agent-facing workflow for using the CLI.
 - `skills/obsidian-capture/` preserves side observations in the vault capture workflow.
