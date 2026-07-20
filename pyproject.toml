@@ -46,7 +46,9 @@ search-path = ["."]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-# Parallel by default: the suite is dominated by subprocess-spawn wait, which
-# scales almost linearly with workers. Use -n 0 for serial runs (profiling,
-# --durations, pyinstrument, or debugging a single test).
+# Parallel by default: the filesystem-heavy per-test vault fixtures scale well
+# across workers. Use -n 0 for serial runs (profiling, --durations,
+# pyinstrument, or debugging a single test). CLI tests default to in-process
+# cli.main via run_oaw, which swaps os.environ per call: safe under xdist's
+# process-per-worker model, unsafe with any thread-based test parallelism.
 addopts = ["-n", "auto"]
