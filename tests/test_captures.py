@@ -177,13 +177,35 @@ def test_create_url_validation_and_dedup(tmp_path: Path):
         ],
     )
     assert result.exit_code == 0, result.stderr
-    fm = capture_fm(tmp_path, f"CAP-{local_date()}-sourced")
+    note_id = f"CAP-{local_date()}-sourced"
+    fm = capture_fm(tmp_path, note_id)
     assert fm["urls"] == ["https://example.com/a", "https://example.com/b"]
+    text = (tmp_path / CANONICAL / f"{note_id}.md").read_text(encoding="utf-8")
+    assert '  - "https://example.com/a"' in text
+    assert '  - "https://example.com/b"' in text
 
     before = vault_state(tmp_path)
     bad = run(tmp_path, ["capture", "create", "--title", "Bad", "--url", "ftp://example.com/x"])
     assert bad.exit_code == 2
     assert bad.stdout == ""
+    assert vault_state(tmp_path) == before
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com/a\nstatus: discarded",
+        "https://example.com/a\rstatus: discarded",
+    ],
+)
+def test_create_rejects_multiline_url_without_writing(tmp_path: Path, url: str):
+    before = vault_state(tmp_path)
+
+    result = run(tmp_path, ["capture", "create", "--title", "Bad URL", "--url", url])
+
+    assert result.exit_code == 2
+    assert "single-line" in result.stderr
+    assert result.stdout == ""
     assert vault_state(tmp_path) == before
 
 
