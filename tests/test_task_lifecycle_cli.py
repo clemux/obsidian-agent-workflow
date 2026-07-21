@@ -985,8 +985,9 @@ def test_task_review_transaction_failure_restores_vault(monkeypatch, run_oaw, va
 
 def test_complete_requires_checks(run_oaw):
     proc = run_oaw("task", "complete", "OAW-TSK-cli", "--note", "Done.")
-    assert proc.returncode != 0
-    assert "required: --checks" in proc.stderr
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "Error: Missing option '--checks'." in proc.stderr
 
 
 @pytest.mark.parametrize("priority", [1, 2, 3])

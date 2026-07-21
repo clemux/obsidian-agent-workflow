@@ -212,8 +212,10 @@ def test_list_json_emits_sorted_projected_records(run_oaw, vault):
 def test_list_invalid_sort_choice_is_usage_error(run_oaw, vault):
     proc = run_oaw("list", "--project", "Obsidian Agent Workflow", "--sort", "nope")
     assert proc.returncode == 2
-    assert "usage: oaw list" in proc.stderr
-    assert "invalid choice: 'nope'" in proc.stderr
+    assert proc.stdout == ""
+    assert proc.stderr.startswith("Usage: oaw list [OPTIONS]")
+    assert "Invalid value for '--sort'" in proc.stderr
+    assert "'nope'" in proc.stderr
 
 
 @pytest.mark.parametrize(

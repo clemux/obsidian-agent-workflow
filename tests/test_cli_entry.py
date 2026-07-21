@@ -70,7 +70,8 @@ def test_cli_main_translates_usage_exit_to_status_code():
         returncode = cli.main([])
 
     assert returncode == 2
-    assert "the following arguments are required: command" in stderr.getvalue()
+    assert stderr.getvalue().startswith("Usage: oaw [OPTIONS] COMMAND [ARGS]...")
+    assert "Error: Missing command." in stderr.getvalue()
 
 
 def test_resolve_obs_prefix_to_json(run_oaw):

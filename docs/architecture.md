@@ -90,6 +90,9 @@ layer. Those modules are dual-role: shared service for the command domains,
 and direct command implementation for their own subcommands. Rename-only
 adapter modules above them would violate the non-goals.
 
+CLI usage and error text is Typer-native and derived from the command tree;
+do not reintroduce hand-maintained per-command message or usage tables.
+
 - `cli.py` sits at the top and may import any lower layer; in practice it
   imports the command domains plus the shared-service command entrypoints
   named above. Command domains import lower services and the note model;

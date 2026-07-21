@@ -82,18 +82,17 @@ def command_paths() -> set[tuple[str, ...]]:
 @pytest.mark.parametrize(
     ("args", "error"),
     [
-        ([], "the following arguments are required: command"),
-        (["not-a-command"], "argument command: invalid choice: 'not-a-command'"),
+        ([], "Error: Missing command."),
+        (["not-a-command"], "Error: No such command 'not-a-command'."),
     ],
 )
-def test_top_level_usage_contract_lists_registered_commands(args: list[str], error: str) -> None:
-    command_surface = ",".join(getattr(get_command(cli.app), "commands", {}))
-
+def test_top_level_usage_contract_is_typer_native(args: list[str], error: str) -> None:
     result = CliRunner().invoke(cli.app, args)
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert f"usage: oaw [-h]\n           {{{command_surface}}} ...\n" in result.stderr
+    assert result.stderr.startswith("Usage: oaw [OPTIONS] COMMAND [ARGS]...")
+    assert "Try 'oaw -h' for help." in result.stderr
     assert error in result.stderr
 
 
@@ -167,8 +166,8 @@ def test_typer_help_after_separator_is_a_positional_token() -> None:
 @pytest.mark.parametrize(
     ("arguments", "exit_code", "output_prefix"),
     [
-        (["task", "bogus", "--help"], 2, "usage: oaw task "),
-        (["unknown-command", "--help"], 2, "usage: oaw "),
+        (["task", "bogus", "--help"], 2, "Usage: oaw task "),
+        (["unknown-command", "--help"], 2, "Usage: oaw "),
         (["--help", "task"], 0, "Usage: oaw "),
         (["task", "--help", "create"], 0, "Usage: oaw task "),
     ],
@@ -205,7 +204,8 @@ def test_typer_feedback_help_and_type_validation_use_native_contract() -> None:
     )
     assert invalid_type.exit_code == 2
     assert invalid_type.stdout == ""
-    assert "argument --type: invalid choice: 'unknown'" in invalid_type.stderr
+    assert "Invalid value for '--type'" in invalid_type.stderr
+    assert "'unknown'" in invalid_type.stderr
 
 
 NOTE_SOURCE_COMMAND_PATHS = [
@@ -287,7 +287,7 @@ def test_typer_note_source_missing_is_a_usage_error(base_arguments: list[str]) -
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert "the following arguments are required: one of --note, --note-file" in result.stderr
+    assert "Error: Missing one of --note or --note-file." in result.stderr
 
 
 def test_typer_task_create_note_source_conflict_is_a_usage_error() -> None:
@@ -331,7 +331,7 @@ def test_typer_note_observe_body_source_missing_is_a_usage_error() -> None:
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert "the following arguments are required: one of --body, --body-file" in result.stderr
+    assert "Error: Missing one of --body or --body-file." in result.stderr
 
 
 def test_typer_note_source_usage_errors_do_not_access_the_vault(
@@ -410,34 +410,31 @@ def test_typer_frontend_requires_configured_vault(configured: str | None) -> Non
 
 
 @pytest.mark.parametrize(
-    ("arguments", "error_line"),
+    ("arguments", "error_message"),
     [
         (
             ["task", "create", "--start", "--status", "todo"],
-            "oaw task create: error: argument --status: not allowed with argument --start\n",
+            "argument --status: not allowed with argument --start",
         ),
         (
             ["task", "create", "--start", "--allow-missing-session-id"],
-            "oaw task create: error: argument --allow-missing-session-id: "
-            "not allowed with argument --start\n",
+            "argument --allow-missing-session-id: not allowed with argument --start",
         ),
         (
             ["ingest", "safe-export", "--dry-run", "--write"],
-            "oaw ingest safe-export: error: argument --write: "
-            "not allowed with argument --dry-run\n",
+            "argument --write: not allowed with argument --dry-run",
         ),
         (
             ["link", "ensure", "left", "right", "--dry-run", "--write"],
-            "oaw link ensure: error: argument --write: not allowed with argument --dry-run\n",
+            "argument --write: not allowed with argument --dry-run",
         ),
         (
             ["link", "materialize", "left", "--dry-run", "--write"],
-            "oaw link materialize: error: argument --write: not allowed with argument --dry-run\n",
+            "argument --write: not allowed with argument --dry-run",
         ),
         (
             ["run", "list", "--session", "example-session", "--current-session"],
-            "oaw run list: error: argument --current-session: "
-            "not allowed with argument --session\n",
+            "argument --current-session: not allowed with argument --session",
         ),
         (
             [
@@ -448,20 +445,20 @@ def test_typer_frontend_requires_configured_vault(configured: str | None) -> Non
                 "--dry-run",
                 "--write",
             ],
-            "oaw link ensure-bidirectional: error: argument --write: "
-            "not allowed with argument --dry-run\n",
+            "argument --write: not allowed with argument --dry-run",
         ),
     ],
 )
 def test_typer_conflicts_preserve_usage_diagnostics(
     arguments: list[str],
-    error_line: str,
+    error_message: str,
 ) -> None:
     result = CliRunner().invoke(cli.app, arguments, env={"COLUMNS": "80"})
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert result.stderr.endswith(error_line)
+    assert result.stderr.startswith("Usage: oaw ")
+    assert f"Error: {error_message}" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -613,7 +610,8 @@ def test_typer_task_preparedness_rejects_invalid_state() -> None:
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert "argument --state: invalid choice: 'unknown'" in result.stderr
+    assert "Invalid value for '--state'" in result.stderr
+    assert "'unknown'" in result.stderr
 
 
 def test_typer_task_relation_rejects_invalid_type() -> None:
@@ -634,7 +632,8 @@ def test_typer_task_relation_rejects_invalid_type() -> None:
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert "argument relation_type: invalid choice: 'unknown'" in result.stderr
+    assert "Invalid value for 'RELATION_TYPE" in result.stderr
+    assert "'unknown'" in result.stderr
 
 
 def test_typer_domain_error_uses_stderr_and_exit_class_one(tmp_path: Path) -> None:

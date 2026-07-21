@@ -292,7 +292,7 @@ def test_feedback_body_source_validation_empty_and_unreadable_do_not_write(tmp_p
         env=env,
     )
     assert neither.exit_code == 2
-    assert "one of --body, --body-file" in neither.stderr
+    assert "Error: Missing one of --body or --body-file." in neither.stderr
 
     both = runner.invoke(
         cli.app,

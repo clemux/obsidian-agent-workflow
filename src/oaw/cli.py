@@ -21,7 +21,7 @@ from typer.main import get_command
 from .captures import create_capture, list_captures, show_capture, triage_capture
 from .errors import OawError
 from .exports import validate_export_bundle, write_export_bundle
-from .feedback import FEEDBACK_TYPES, FeedbackType, create_feedback, read_feedback_body
+from .feedback import FeedbackType, create_feedback, read_feedback_body
 from .ingest import SAFE_EXPORT_DESTINATION, default_ingestion_root, safe_export_ingest
 from .lifecycle import (
     PROJECT_INDEX_TEMPLATE,
@@ -50,7 +50,7 @@ from .links import (
     link_materialize,
 )
 from .notes import read_markdown_source
-from .relations import RELATION_TYPES, list_task_relations, validate_task_relations
+from .relations import list_task_relations, validate_task_relations
 from .resolver import list_project, notes_containing_literal, output_resolve, resolve_id, vault_root
 from .retro import create_retrospective, update_note_observation
 from .sessions import (
@@ -62,168 +62,6 @@ from .sessions import (
     session_lookup_codex_roots,
 )
 from .snapshot import session_snapshot
-
-USAGE_BY_COMMAND = {
-    "oaw": "usage: oaw [-h]\n"
-    "           {resolve,list,project,research,task,run,note,ingest,link,export,session,retro,feedback,capture} ...\n",
-    "oaw resolve": "usage: oaw resolve [-h] [--full] [--path] [--meta] [--outline] [--json] id\n",
-    "oaw list": "usage: oaw list [-h] --project PROJECT [--type TYPE] [--status STATUS]\n"
-    "                [--include-archived] [--sort {priority,effort,title}]\n"
-    "                [--fields FIELDS] [--goal] [--json]\n",
-    "oaw project": "usage: oaw project [-h] {create} ...\n",
-    "oaw project create": "usage: oaw project create [-h] --name NAME --alias ALIAS --goal GOAL\n"
-    "                          [--repo REPO] [--tag TAG] [--template TEMPLATE]\n"
-    "                          [--allow-missing-session-id]\n",
-    "oaw research": "usage: oaw research [-h] {scaffold,start} ...\n",
-    "oaw research scaffold": "usage: oaw research scaffold [-h] --project PROJECT --track TRACK\n"
-    "                             --title TITLE [--date DATE] [--template TEMPLATE]\n"
-    "                             [--force]\n",
-    "oaw research start": "usage: oaw research start [-h] --project PROJECT --track TRACK --source SOURCE\n"
-    "                          --url URL\n",
-    "oaw task": "usage: oaw task [-h] {backlog,promote,start,pause,review,complete,note,priority,preparedness,relation,create} ...\n",
-    "oaw task backlog": "usage: oaw task backlog [-h] [--note NOTE | --note-file NOTE_FILE]\n"
-    "                        [--checks CHECKS] [--allow-missing-session-id]\n"
-    "                        id\n",
-    "oaw task promote": "usage: oaw task promote [-h] [--note NOTE | --note-file NOTE_FILE]\n"
-    "                        [--checks CHECKS] [--allow-missing-session-id]\n"
-    "                        id\n",
-    "oaw task start": "usage: oaw task start [-h] [--note NOTE | --note-file NOTE_FILE]\n"
-    "                      [--checks CHECKS] id\n",
-    "oaw task pause": "usage: oaw task pause [-h] [--note NOTE | --note-file NOTE_FILE] id\n",
-    "oaw task complete": "usage: oaw task complete [-h] [--note NOTE | --note-file NOTE_FILE]\n"
-    "                         --checks CHECKS id\n",
-    "oaw task note": "usage: oaw task note [-h] [--note NOTE | --note-file NOTE_FILE]\n"
-    "                     [--checks CHECKS] [--allow-missing-session-id]\n"
-    "                     id\n",
-    "oaw task priority": "usage: oaw task priority [-h] --priority {1,2,3} --note NOTE\n"
-    "                         [--allow-missing-session-id]\n"
-    "                         id\n",
-    "oaw task preparedness": "usage: oaw task preparedness [-h] --state {needs-triage,needs-design,prepared}\n"
-    "                              --note NOTE [--allow-missing-session-id]\n"
-    "                              id\n",
-    "oaw task relation": "usage: oaw task relation [-h] {add,remove,list,validate} ...\n",
-    "oaw task relation add": "usage: oaw task relation add [-h] --note NOTE\n"
-    "                             [--allow-missing-session-id]\n"
-    "                             source {blocked-by,follows,follow-up-to} target\n",
-    "oaw task relation remove": "usage: oaw task relation remove [-h] --note NOTE\n"
-    "                                [--allow-missing-session-id]\n"
-    "                                source {blocked-by,follows,follow-up-to} target\n",
-    "oaw task relation list": "usage: oaw task relation list [-h] [--incoming] [--json] task\n",
-    "oaw task relation validate": "usage: oaw task relation validate [-h] [--json] [task]\n",
-    "oaw task create": "usage: oaw task create [-h] [--project PROJECT] [--title TITLE]\n"
-    "                       [--from-capture FROM_CAPTURE] [--start] [--id ID]\n"
-    "                       [--status {backlog,todo}] [--priority {1,2,3}]\n"
-    "                       [--effort {S,M,L}]\n"
-    "                       [--preparedness {needs-triage,needs-design,prepared}]\n"
-    "                       [--note NOTE | --note-file NOTE_FILE] [--tag TAG]\n"
-    "                       [--execution {human,agent,hybrid}]\n"
-    "                       [--allow-missing-session-id]\n",
-    "oaw run": "usage: oaw run [-h] {list,close,audit} ...\n",
-    "oaw run list": "usage: oaw run list [-h] [--task TASK] [--state {running,paused,completed,closed}]\n"
-    "                    [--session SESSION | --current-session] [--json]\n",
-    "oaw run close": "usage: oaw run close [-h] --reason REASON id\n",
-    "oaw run audit": "usage: oaw run audit [-h]\n",
-    "oaw note": "usage: oaw note [-h] {session,observe} ...\n",
-    "oaw note session": "usage: oaw note session [-h] [--note NOTE | --note-file NOTE_FILE]\n"
-    "                        [--checks CHECKS] [--allow-missing-session-id]\n"
-    "                        id\n",
-    "oaw task review": "usage: oaw task review [-h] [--note NOTE | --note-file NOTE_FILE]\n"
-    "                      --checks CHECKS id\n",
-    "oaw note observe": "usage: oaw note observe [-h] [--section SECTION] --title TITLE\n"
-    "                        [--body BODY | --body-file BODY_FILE] id\n",
-    "oaw ingest": "usage: oaw ingest [-h] {safe-export} ...\n",
-    "oaw ingest safe-export": "usage: oaw ingest safe-export [-h] [--ingestion-root INGESTION_ROOT]\n"
-    "                              [--destination DESTINATION] [--dry-run |\n"
-    "                              --write]\n",
-    "oaw link": "usage: oaw link [-h] {check,list,ensure,ensure-bidirectional,lint,materialize} ...\n",
-    "oaw link check": "usage: oaw link check [-h] left right\n",
-    "oaw link list": "usage: oaw link list [-h] note\n",
-    "oaw link ensure": "usage: oaw link ensure [-h] [--section SECTION] [--label LABEL] [--dry-run |\n"
-    "                       --write]\n"
-    "                       source target\n",
-    "oaw link ensure-bidirectional": "usage: oaw link ensure-bidirectional [-h] [--section SECTION] [--dry-run |\n"
-    "                                     --write]\n"
-    "                                     left right\n",
-    "oaw link lint": "usage: oaw link lint [-h]\n",
-    "oaw link materialize": "usage: oaw link materialize [-h] [--dry-run | --write] note\n",
-    "oaw export": "usage: oaw export [-h] {note,validate} ...\n",
-    "oaw export note": "usage: oaw export note [-h] [--target TARGET] [--output-root OUTPUT_ROOT]\n"
-    "                       [--force]\n"
-    "                       id\n",
-    "oaw export validate": "usage: oaw export validate [-h] [--target TARGET] bundle\n",
-    "oaw session": "usage: oaw session [-h] {lookup,snapshot} ...\n",
-    "oaw session lookup": "usage: oaw session lookup [-h] [--verbose] [--codex-root CODEX_ROOT]\n"
-    "                          [--claude-root CLAUDE_ROOT]\n"
-    "                          session_id\n",
-    "oaw session snapshot": "usage: oaw session snapshot [-h] [--slug SLUG] [--date DATE] [--partial]\n"
-    "                            [--complete] [--codex-only]\n"
-    "                            [--codex-thread CODEX_THREAD]\n"
-    "                            [--codex-rollout CODEX_ROLLOUT]\n"
-    "                            [--claude-session CLAUDE_SESSION] [--grep GREP]\n"
-    "                            [--output-root OUTPUT_ROOT]\n"
-    "                            [--claude-root CLAUDE_ROOT]\n"
-    "                            [--codex-root CODEX_ROOT]\n"
-    "                            [--plugin-data-root PLUGIN_DATA_ROOT]\n"
-    "                            session_id\n",
-    "oaw retro": "usage: oaw retro [-h] {create} ...\n",
-    "oaw retro create": "usage: oaw retro create [-h] --title TITLE [--summary SUMMARY] [--date DATE]\n"
-    "                        [--id ID] [--force] [--allow-missing-session-id]\n",
-    "oaw feedback": "usage: oaw feedback [-h] {create} ...\n",
-    "oaw feedback create": "usage: oaw feedback create [-h] --title TITLE --type {pain,verified,idea,bug}\n"
-    "                           --scope SCOPE [--body BODY | --body-file BODY_FILE]\n"
-    "                           [--command COMMAND] [--tag TAG] [--id ID] [--date DATE]\n"
-    "                           [--allow-missing-session-id]\n",
-    "oaw capture": "usage: oaw capture [-h] {create,list,show,triage} ...\n",
-    "oaw capture create": "usage: oaw capture create [-h] --title TITLE [--body BODY | --body-file BODY_FILE]\n"
-    "                          [--project PROJECT] [--area AREA] [--context CONTEXT]\n"
-    "                          [--outcome OUTCOME] [--url URL] [--tag TAG] [--json]\n"
-    "                          [--allow-missing-session-id]\n",
-    "oaw capture list": "usage: oaw capture list [-h] [--status STATUS] [--project PROJECT]\n"
-    "                        [--sort {newer,older}] [--json]\n",
-    "oaw capture show": "usage: oaw capture show [-h] [--json] id\n",
-    "oaw capture triage": "usage: oaw capture triage [-h]\n"
-    "                          --status {inbox,incubating,parked,reference,triaged,discarded}\n"
-    "                          (--reason REASON | --no-reason) [--review-after REVIEW_AFTER]\n"
-    "                          [--destination DESTINATION] [--json]\n"
-    "                          [--allow-missing-session-id]\n"
-    "                          id\n",
-}
-
-SUBCOMMAND_DESTINATIONS = {
-    "oaw": "command",
-    "oaw project": "project_command",
-    "oaw research": "research_command",
-    "oaw task": "task_command",
-    "oaw task relation": "relation_command",
-    "oaw run": "run_command",
-    "oaw note": "note_command",
-    "oaw ingest": "ingest_command",
-    "oaw link": "link_command",
-    "oaw export": "export_command",
-    "oaw session": "session_command",
-    "oaw retro": "retro_command",
-    "oaw feedback": "feedback_command",
-    "oaw capture": "capture_command",
-}
-
-ARGUMENT_NAMES = {
-    "note_id": "id",
-}
-
-ARGPARSE_CHOICES = {
-    "status": ("backlog", "todo"),
-    "priority": ("1", "2", "3"),
-    "effort": ("S", "M", "L"),
-    "preparedness": ("needs-triage", "needs-design", "prepared"),
-    "preparedness_state": ("needs-triage", "needs-design", "prepared"),
-    "relation_type": RELATION_TYPES,
-    "execution": ("human", "agent", "hybrid"),
-    "sort": ("priority", "effort", "title"),
-    "state": ("running", "paused", "completed", "closed"),
-    "feedback_type": FEEDBACK_TYPES,
-    "triage_status": ("inbox", "incubating", "parked", "reference", "triaged", "discarded"),
-    "sort_order": ("newer", "older"),
-}
 
 NEGATIVE_NUMBER = re.compile(r"-(?:\d+(?:\.\d*)?|\.\d+)$")
 
@@ -245,7 +83,7 @@ BODY_FILE_HELP = (
 
 
 class StableTyperGroup(TyperGroup):
-    """Run Click parsing while retaining the established usage-error contract."""
+    """Preserve eager-help routing and the integer usage-error contract."""
 
     @staticmethod
     def _option_expectation(command: Any, value: str) -> tuple[int, bool] | None:
@@ -295,49 +133,6 @@ class StableTyperGroup(TyperGroup):
             command = next_command
         return None
 
-    @staticmethod
-    def _error_message(exc: click_exceptions.UsageError) -> str:
-        ctx = exc.ctx
-        command_path = ctx.command_path if ctx is not None else "oaw"
-        message = exc.format_message()
-        if isinstance(exc, click_exceptions.MissingParameter) and ctx is not None:
-            missing: list[str] = []
-            for param in ctx.command.params:
-                if param.name is None:
-                    continue
-                if not param.required or ctx.params.get(param.name) is not None:
-                    continue
-                missing.append(
-                    param.opts[0]
-                    if param.opts[0].startswith("--")
-                    else ARGUMENT_NAMES.get(param.name, param.name)
-                )
-            if missing:
-                return f"the following arguments are required: {', '.join(missing)}"
-        if isinstance(exc, click_exceptions.BadParameter) and exc.param is not None:
-            param = exc.param
-            if param.name in ARGPARSE_CHOICES:
-                choices = ARGPARSE_CHOICES[param.name]
-                if exc.message.startswith("'"):
-                    invalid = exc.message.split("'", maxsplit=2)[1]
-                else:
-                    invalid = exc.message.split(maxsplit=1)[0]
-                return (
-                    f"argument {param.opts[0]}: invalid choice: '{invalid}' "
-                    f"(choose from {', '.join(choices)})"
-                )
-        if message == "Missing command.":
-            return f"the following arguments are required: {SUBCOMMAND_DESTINATIONS[command_path]}"
-        if (
-            message.startswith("No such command ")
-            and ctx is not None
-            and isinstance(ctx.command, TyperGroup)
-        ):
-            invalid = message.removeprefix("No such command ").removesuffix(".")
-            choices = ", ".join(ctx.command.commands)
-            return f"argument {SUBCOMMAND_DESTINATIONS[command_path]}: invalid choice: {invalid} (choose from {choices})"
-        return message
-
     def main(
         self,
         args: Sequence[str] | None = None,
@@ -363,12 +158,10 @@ class StableTyperGroup(TyperGroup):
                 **extra,
             )
         except click_exceptions.UsageError as exc:
-            command_path = exc.ctx.command_path if exc.ctx is not None else (prog_name or "oaw")
-            typer.echo(USAGE_BY_COMMAND[command_path], err=True, nl=False)
-            typer.echo(f"{command_path}: error: {self._error_message(exc)}", err=True)
+            exc.show(file=sys.stderr)
             if standalone_mode:
-                raise SystemExit(2) from exc
-            return 2
+                raise SystemExit(exc.exit_code) from exc
+            return exc.exit_code
         if standalone_mode and isinstance(result, int):
             raise SystemExit(result)
         return result
@@ -501,7 +294,7 @@ def _read_required_markdown(
     if inline is not None and body_file is not None:
         _usage_error(f"argument {file_option}: not allowed with argument {inline_option}")
     if inline is None and body_file is None:
-        _usage_error(f"the following arguments are required: one of {inline_option}, {file_option}")
+        _usage_error(f"Missing one of {inline_option} or {file_option}.")
     return _run(
         lambda: read_markdown_source(
             inline,
@@ -1241,7 +1034,7 @@ def feedback_create(
     if body is not None and body_file is not None:
         _usage_error("argument --body-file: not allowed with argument --body")
     if body is None and body_file is None:
-        _usage_error("the following arguments are required: one of --body, --body-file")
+        _usage_error("Missing one of --body or --body-file.")
     _run(
         lambda: create_feedback(
             vault_root(),
@@ -1377,7 +1170,7 @@ def capture_triage(
     if reason is not None and no_reason:
         _usage_error("argument --no-reason: not allowed with argument --reason")
     if reason is None and not no_reason:
-        _usage_error("the following arguments are required: one of --reason, --no-reason")
+        _usage_error("Missing one of --reason or --no-reason.")
     if reason is not None and not reason.strip():
         _usage_error("capture triage requires a non-empty --reason")
     clean_reason = reason.strip() if reason is not None else None

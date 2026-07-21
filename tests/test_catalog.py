@@ -35,9 +35,7 @@ def test_catalog_is_deterministic_and_matches_committed_artifact() -> None:
     assert CATALOG.read_text(encoding="utf-8") == first
 
 
-def test_catalog_uses_live_typer_metadata_not_migration_usage_goldens(monkeypatch) -> None:
-    monkeypatch.setattr(cli, "USAGE_BY_COMMAND", {})
-
+def test_catalog_uses_live_typer_metadata() -> None:
     catalog = render_cli_catalog()
 
     assert "| `oaw resolve` | resolve obs:&lt;ID&gt; or &lt;ID&gt; |" in catalog
