@@ -1,6 +1,6 @@
 ---
 name: oaw
-description: This skill should be used when an `obs:`-prefixed reference appears (e.g. `obs:OAW-TSK-cli`), when a frontmatter reference ID such as `AGT-*`, `SR-*`, `CDX-*`, `FAB-*`, or `OAW-*` needs resolving to a note in the user's Obsidian vault, when tracing a session/thread id through vault notes and session artifacts, when starting or completing a project task note with an agent-session trace, or when listing a project's tasks/captures. Provides the `oaw` CLI workflow. (`PMX-*` IDs have a dedicated `pmx` skill.)
+description: "Trigger whenever an `obs:`-prefixed ID (e.g. `obs:OAW-TSK-cli`) or a bare frontmatter ID like `AGT-*`, `SR-*`, `CDX-*`, `FAB-*`, or `OAW-*` appears in the message — including short one-line instructions on such IDs, like marking one task blocked-by/follows another, setting a priority, or appending a note. Also use for any read or write on OAW-managed Obsidian vault notes: resolving an ID, listing a project's tasks or captures, moving a task through its lifecycle (create, backlog, promote, start, pause, review, complete), setting priority or preparedness, triaging/promoting a capture, checking or repairing wikilinks, creating a project workspace or research packet, recording a retrospective or feedback note, tracing a session/thread id, snapshotting session artifacts, or exporting/ingesting handoff notes. Provides the `oaw` CLI. (`PMX-*` IDs use the dedicated `pmx` skill.)"
 ---
 
 # oaw — Obsidian ID resolution and task lifecycle
@@ -36,7 +36,7 @@ For checkout development, shared errors, note splitting/reading, and the hand-ro
 
 The session ID is read automatically from the first supported harness environment variable. Commands that create or close agent runs — `task start`, `task pause`, `task review`, `task complete`, and `run close` — require a real identity and never accept `--allow-missing-session-id`. Non-run trace writes (`task create`, `project create`, `task priority`, `task preparedness`, relation mutations, `note session`, `retro create`, `feedback create`) accept that escape hatch only when the user explicitly accepts an untraceable entry.
 
-With a real harness ID, lifecycle and `task note` writes append it as a quoted string to a deduplicated `session-ids` frontmatter block list, preserving existing entries, comments, and any legacy scalar `session-id`. Unsupported inline, mapping, or ambiguous non-string `session-ids` shapes fail before the note is written. The explicit missing-ID path writes only the body trace; it does not add a synthetic list value.
+With a real harness ID, lifecycle and `task note` writes append it to the note's deduplicated `session-ids` frontmatter list. The explicit missing-ID path writes only the body trace; it does not add a synthetic list value.
 
 ### Durable obs references
 
@@ -125,6 +125,10 @@ Capture listing hides `status: archived` notes by default. Use `--include-archiv
 
 ## Captures
 
+The `obsidian-capture` companion skill owns the conversational capture workflow —
+when to capture and what goes in the note. This skill owns the `oaw capture`
+command surface that workflow (and any direct capture request) uses.
+
 Use `oaw capture` for capture notes instead of hand-writing frontmatter or the raw
 `obsidian create` command. `create` generates the `CAP-YYYYMMDD-<slug>` ID, stamps a
 full timezone-aware `created` timestamp, and starts at `status: inbox`:
@@ -178,7 +182,7 @@ oaw task preparedness OAW-TSK-cli --state prepared \
 - `backlog` sets `status: backlog`; `promote` sets `status: todo`; `start` sets `status: active`; `pause` pauses only the caller's run and leaves task status unchanged; `review` closes the caller's run with reason `review` and sets task status to `review`; `complete` completes the caller's run and sets task status to `done`.
 - `complete` requires `--checks` naming the verification actually run; do not fabricate checks.
 - `note` appends a dated entry without changing status. If the caller already has a matching running record it refreshes that record; it never creates a run.
-- `priority` sets an existing task's priority to `1`, `2`, or `3`, appends a dated agent-session trace, and leaves status and run records unchanged. It preserves unrelated frontmatter formatting and inline priority comments, and rejects unsupported task locations or malformed/duplicate priority fields before writing.
+- `priority` sets an existing task's priority to `1`, `2`, or `3`, appends a dated agent-session trace, and leaves status and run records unchanged.
 - `preparedness` sets the independent design-sufficiency property to `needs-triage`, `needs-design`, or `prepared`; appends a dated trace; and leaves lifecycle status and run records unchanged. Missing preparedness on legacy tasks means unassessed, not prepared. A prepared task may still be blocked or unscheduled.
 - `backlog`, `promote`, `start`, `review`, and `complete` append a dated entry under `## Agent sessions`; task-note frontmatter is the single lifecycle source of truth and is surfaced through project and cross-project Bases.
 - For `backlog`, `promote`, `start`, `pause`, `review`, `complete`, and `task note`, provide exactly one Markdown source: `--note` or `--note-file`. `--note-file -` reads standard input. Prefer the file/stdin route when content has backticks, dollar signs, quotes, or multiple lines so the shell never evaluates it. `task create` keeps its initial problem statement optional, but when supplied accepts exactly one of those same sources.
@@ -240,4 +244,3 @@ Read the matching reference before using these command groups; each file carries
 - `references/links-and-relations.md` — before `oaw link` commands or `oaw task relation` mutations and validation.
 - `references/session-artifacts.md` — before `oaw session snapshot`, or for `session lookup --verbose` metric semantics.
 - `references/session-phase-title-evaluation.md` — only when maintaining, evaluating, or explicitly discussing session-title sync.
-- `docs/oaw-cli-feature-catalog.md` — the generated, implementation-oriented command inventory (owner module and mutation scope per command); regenerate with `uv run python scripts/generate_cli_catalog.py` and verify with its `--check` mode after changing the Typer command tree.
