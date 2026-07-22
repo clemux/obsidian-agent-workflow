@@ -92,6 +92,10 @@ To survey a project's tasks, list them instead of resolving one by one:
 ```bash
 oaw list --project "Obsidian Agent Workflow"   # tab-separated: id, status, title, relative path
 oaw list --project "Obsidian Agent Workflow" --status active
+oaw list --project "Obsidian Agent Workflow" --tag structured-note
+oaw list --project "Obsidian Agent Workflow" --tag structured-note --tag roadmap
+oaw list --project "Obsidian Agent Workflow" --tag structured-note --tag roadmap \
+  --tag-mode any
 ```
 
 `--project` accepts a project alias (with or without the `obs:` prefix) or the folder name under `Projects/` in the vault. `task` is the default note type.
@@ -114,6 +118,9 @@ oaw list --project "Obsidian Agent Workflow" --status todo \
 - `--goal` adds a snippet from each note's `## Problem` first content line.
 - `--json` emits the projected, sorted records as an object array so no shell
   frontmatter parsing is needed.
+- Repeatable `--tag` filters match exact, case-sensitive frontmatter tag values.
+  `--tag-mode all` is the default and requires every requested tag;
+  `--tag-mode any` requires at least one. The mode has no effect without `--tag`.
 
 Some projects also use atomic capture notes for evidence/inbox items. List captures by frontmatter instead of opening a long inbox note:
 

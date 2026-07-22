@@ -230,6 +230,9 @@ oaw list --project Fable
 oaw list --project Fable --type capture
 oaw list --project Fable --type capture --include-archived
 oaw list --project Fable --type capture --status archived
+oaw list --project Fable --tag structured-note
+oaw list --project Fable --tag structured-note --tag roadmap
+oaw list --project Fable --tag structured-note --tag roadmap --tag-mode any
 ```
 
 Use `--status <value>` to select one exact frontmatter status. When `--status`
@@ -256,6 +259,9 @@ oaw list --project "Obsidian Agent Workflow" --sort priority \
   `preparedness`, `type`, `project`, `created`, and `execution`.
 - `--goal` adds a snippet column sourced from each note's `## Problem` section
   first content line, without opening the whole body in the caller.
+- Repeatable `--tag` filters match exact, case-sensitive frontmatter tag values.
+  `--tag-mode all` is the default and requires every requested tag;
+  `--tag-mode any` requires at least one. The mode has no effect without `--tag`.
 - `--json` emits the same projected, sorted records as an array of objects.
 
 ## Captures

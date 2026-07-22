@@ -413,6 +413,7 @@ LIST_PROJECTABLE_FIELDS = (
 )
 DEFAULT_LIST_FIELDS = ("id", "status", "title", "path")
 LIST_SORT_KEYS = ("priority", "effort", "title")
+LIST_TAG_MODES = ("all", "any")
 
 # The goal snippet is sourced from the note's first `## Problem` content line.
 GOAL_SECTION = "Problem"
@@ -475,6 +476,8 @@ def read_project_note_record(
     status: str | None,
     include_archived: bool,
     want_goal: bool,
+    tags: Sequence[str],
+    tag_mode: str,
 ) -> ProjectNoteRecord | None:
     with path.open("r", encoding="utf-8") as handle:
         if handle.readline().strip() != "---":
@@ -494,6 +497,8 @@ def read_project_note_record(
             return None
         if not status and current_status == "archived" and not include_archived:
             return None
+        if not _tags_match(data, tags, tag_mode):
+            return None
         title, goal = _scan_title_and_goal(handle, path.stem, want_goal)
     return ProjectNoteRecord(
         note_id=str(data.get("id", "")),
@@ -512,15 +517,34 @@ def project_note_records(
     status: str | None,
     include_archived: bool,
     want_goal: bool,
+    tags: Sequence[str],
+    tag_mode: str,
 ) -> list[ProjectNoteRecord]:
     records: list[ProjectNoteRecord] = []
     for path in sorted(project_root.rglob("*.md"), key=os.fspath):
         record = read_project_note_record(
-            path, root, note_type, status, include_archived, want_goal
+            path, root, note_type, status, include_archived, want_goal, tags, tag_mode
         )
         if record is not None:
             records.append(record)
     return records
+
+
+def _tags_match(data: dict[str, object], requested: Sequence[str], mode: str) -> bool:
+    """Match exact frontmatter tags using all-of or any-of semantics."""
+    if not requested:
+        return True
+    raw_tags = data.get("tags")
+    if isinstance(raw_tags, str):
+        note_tags = {raw_tags}
+    elif isinstance(raw_tags, list):
+        note_tags = {tag for tag in raw_tags if isinstance(tag, str)}
+    else:
+        note_tags = set()
+    requested_tags = set(requested)
+    if mode == "all":
+        return requested_tags <= note_tags
+    return not requested_tags.isdisjoint(note_tags)
 
 
 def _frontmatter_str(record: ProjectNoteRecord, field: str) -> str:
@@ -586,12 +610,16 @@ def list_project(
     status: str | None,
     include_archived: bool,
     *,
+    tags: Sequence[str] = (),
+    tag_mode: str = "all",
     sort: str | None = None,
     fields: str | None = None,
     goal: bool = False,
     json_output: bool = False,
 ) -> None:
     """List project notes for the stable list subcommand."""
+    if tag_mode not in LIST_TAG_MODES:
+        raise OawError(f"unknown tag mode: {tag_mode} (choose from {', '.join(LIST_TAG_MODES)})")
     columns = resolve_list_fields(fields, goal)
     want_goal = "goal" in columns
     project_root, _ = resolve_project_root(project, root)
@@ -599,10 +627,19 @@ def list_project(
         tasks = project_root / "Tasks"
         if not tasks.exists():
             raise OawError(f"project tasks folder not found: {tasks}")
-        records = project_note_records(tasks, root, note_type, status, True, want_goal)
+        records = project_note_records(
+            tasks, root, note_type, status, True, want_goal, tags, tag_mode
+        )
     else:
         records = project_note_records(
-            project_root, root, note_type, status, include_archived, want_goal
+            project_root,
+            root,
+            note_type,
+            status,
+            include_archived,
+            want_goal,
+            tags,
+            tag_mode,
         )
     if sort is not None:
         records.sort(key=_SORT_KEYS[sort])

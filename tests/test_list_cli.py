@@ -100,6 +100,49 @@ Work that has no priority or effort assigned yet.
     )
 
 
+def seed_tagged_tasks(vault: Path) -> None:
+    tasks = vault / "Projects/Tags/Tasks"
+    support.add_task(
+        vault,
+        "Tags",
+        "Both.md",
+        "TAG-TSK-both",
+        project="tags",
+        tags=("structured-note", "roadmap"),
+        body="# Both tags\n",
+    )
+    support.add_task(
+        vault,
+        "Tags",
+        "Roadmap.md",
+        "TAG-TSK-roadmap",
+        project="tags",
+        status="backlog",
+        tags=("roadmap",),
+        body="# Roadmap tag\n",
+    )
+    write(
+        tasks / "Scalar.md",
+        """---
+type: task
+status: todo
+id: TAG-TSK-scalar
+tags: structured-note
+---
+
+# Scalar tag
+""",
+    )
+    support.add_task(
+        vault,
+        "Tags",
+        "Untagged.md",
+        "TAG-TSK-untagged",
+        project="tags",
+        body="# Untagged\n",
+    )
+
+
 def test_list_tasks_preserves_archived_rows(run_oaw, vault):
     proc = run_oaw("list", "--project", "Obsidian Agent Workflow")
     assert proc.returncode == 0, proc.stderr
@@ -215,6 +258,91 @@ def test_list_invalid_sort_choice_is_usage_error(run_oaw, vault):
     assert proc.stdout == ""
     assert proc.stderr.startswith("Usage: oaw list [OPTIONS]")
     assert "Invalid value for '--sort'" in proc.stderr
+    assert "'nope'" in proc.stderr
+
+
+def test_list_repeated_tags_match_all_by_default(run_oaw, vault):
+    seed_tagged_tasks(vault)
+    proc = run_oaw(
+        "list",
+        "--project",
+        "Tags",
+        "--tag",
+        "structured-note",
+        "--tag",
+        "roadmap",
+        "--fields",
+        "id",
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.splitlines() == ["TAG-TSK-both"]
+
+
+def test_list_tag_mode_any_matches_block_and_scalar_tags(run_oaw, vault):
+    seed_tagged_tasks(vault)
+    proc = run_oaw(
+        "list",
+        "--project",
+        "Tags",
+        "--tag",
+        "structured-note",
+        "--tag",
+        "roadmap",
+        "--tag-mode",
+        "any",
+        "--fields",
+        "id",
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.splitlines() == [
+        "TAG-TSK-both",
+        "TAG-TSK-roadmap",
+        "TAG-TSK-scalar",
+    ]
+
+
+def test_list_tag_filter_composes_with_status_sort_and_json(run_oaw, vault):
+    seed_tagged_tasks(vault)
+    proc = run_oaw(
+        "list",
+        "--project",
+        "Tags",
+        "--status",
+        "todo",
+        "--tag",
+        "structured-note",
+        "--tag-mode",
+        "any",
+        "--sort",
+        "title",
+        "--fields",
+        "id,title",
+        "--json",
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout) == [
+        {"id": "TAG-TSK-both", "title": "Both tags"},
+        {"id": "TAG-TSK-scalar", "title": "Scalar tag"},
+    ]
+
+
+def test_list_tag_matching_is_exact_and_mode_without_tags_is_harmless(run_oaw, vault):
+    seed_tagged_tasks(vault)
+    exact = run_oaw("list", "--project", "Tags", "--tag", "Structured-note")
+    unfiltered = run_oaw("list", "--project", "Tags", "--tag-mode", "any")
+    baseline = run_oaw("list", "--project", "Tags")
+
+    assert exact.returncode == 0, exact.stderr
+    assert exact.stdout == ""
+    assert unfiltered.returncode == 0, unfiltered.stderr
+    assert unfiltered.stdout == baseline.stdout
+
+
+def test_list_invalid_tag_mode_is_usage_error(run_oaw, vault):
+    proc = run_oaw("list", "--project", "Obsidian Agent Workflow", "--tag-mode", "nope")
+    assert proc.returncode == 2
+    assert proc.stdout == ""
+    assert "Invalid value for '--tag-mode'" in proc.stderr
     assert "'nope'" in proc.stderr
 
 

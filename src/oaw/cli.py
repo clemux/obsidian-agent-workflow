@@ -238,6 +238,11 @@ class ListSort(StrEnum):
     TITLE = "title"
 
 
+class ListTagMode(StrEnum):
+    ALL = "all"
+    ANY = "any"
+
+
 class CaptureTriageStatus(StrEnum):
     INBOX = "inbox"
     INCUBATING = "incubating"
@@ -362,6 +367,14 @@ def list_notes(
         str, typer.Option("--type", help="frontmatter type to list, default: task")
     ] = "task",
     status: Annotated[str | None, typer.Option("--status", help="optional status filter")] = None,
+    tag: Annotated[
+        list[str] | None,
+        typer.Option("--tag", help="exact frontmatter tag filter; repeatable"),
+    ] = None,
+    tag_mode: Annotated[
+        ListTagMode,
+        typer.Option("--tag-mode", help="combine repeated --tag filters with all or any"),
+    ] = ListTagMode.ALL,
     include_archived: Annotated[
         bool, typer.Option("--include-archived", help="include archived notes without --status")
     ] = False,
@@ -387,6 +400,8 @@ def list_notes(
             note_type,
             status,
             include_archived,
+            tags=tag or (),
+            tag_mode=tag_mode.value,
             sort=sort_value,
             fields=fields,
             goal=goal,
