@@ -983,6 +983,249 @@ def test_task_review_transaction_failure_restores_vault(monkeypatch, run_oaw, va
     assert before == snapshot_tree_without_following_symlinks(vault)
 
 
+def test_reviewed_task_completes_without_reopening_the_run(run_oaw, vault):
+    started = run_oaw("task", "start", "OAW-TSK-cli", "--note", "Implemented change.")
+    assert started.returncode == 0, started.stderr
+    reviewed = run_oaw(
+        "task",
+        "review",
+        "OAW-TSK-cli",
+        "--note",
+        "Review handoff.",
+        "--checks",
+        "pytest",
+    )
+    assert reviewed.returncode == 0, reviewed.stderr
+    run_path = run_record_for(vault, "test-thread")
+    review_event = next(
+        line
+        for line in run_path.read_text(encoding="utf-8").splitlines()
+        if "review handoff" in line
+    )
+
+    completed = run_oaw(
+        "task",
+        "complete",
+        "OAW-TSK-cli",
+        "--note",
+        "Integrated and verified.",
+        "--checks",
+        "mise run check",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    task = (vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md").read_text(
+        encoding="utf-8"
+    )
+    run = run_path.read_text(encoding="utf-8")
+    assert "status: done" in task
+    assert "run_state: completed" in run
+    assert 'ended_reason: "completed"' in run
+    assert review_event in run
+    assert " — completion — Integrated and verified. — verification: mise run check" in run
+    assert " — resume" not in run
+    assert " — refresh" not in run
+    assert task.count("status: active") == 0
+
+
+def test_complete_domain_promotes_reviewed_run_and_replaces_end_timestamp(
+    monkeypatch, run_oaw, vault
+):
+    assert run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.").returncode == 0
+    reviewed = run_oaw(
+        "task",
+        "review",
+        "OAW-TSK-cli",
+        "--note",
+        "Review handoff.",
+        "--checks",
+        "pytest",
+    )
+    assert reviewed.returncode == 0, reviewed.stderr
+    fixed_now = dt.datetime(2030, 1, 2, 3, 4, 5, tzinfo=dt.UTC)
+    monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
+    monkeypatch.setattr(lifecycle, "utc_now", lambda: fixed_now)
+
+    match = resolver.resolve_id("OAW-TSK-cli", vault)
+    lifecycle.update_task(
+        match,
+        vault,
+        "done",
+        "Integrated and verified.",
+        "pytest",
+        allow_missing=False,
+    )
+
+    run = run_record_for(vault, "test-thread").read_text(encoding="utf-8")
+    assert 'last_event_at: "2030-01-02T03:04:05Z"' in run
+    assert 'ended_at: "2030-01-02T03:04:05Z"' in run
+    assert 'ended_reason: "completed"' in run
+    assert " — review handoff — Review handoff. — verification: pytest" in run
+    assert "2030-01-02T03:04:05Z — completion — Integrated and verified." in run
+
+
+def test_reviewed_completion_refuses_competing_running_session_without_writes(run_oaw, vault):
+    assert run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.").returncode == 0
+    reviewed = run_oaw(
+        "task",
+        "review",
+        "OAW-TSK-cli",
+        "--note",
+        "Review handoff.",
+        "--checks",
+        "pytest",
+    )
+    assert reviewed.returncode == 0, reviewed.stderr
+    competitor = run_oaw(
+        "task",
+        "start",
+        "OAW-TSK-cli",
+        "--note",
+        "Competing work.",
+        env={"CODEX_THREAD_ID": "other-thread"},
+    )
+    assert competitor.returncode == 0, competitor.stderr
+    competing_id = run_record_for(vault, "other-thread").stem
+    before = snapshot_tree_without_following_symlinks(vault)
+
+    completed = run_oaw(
+        "task",
+        "complete",
+        "OAW-TSK-cli",
+        "--note",
+        "Must wait.",
+        "--checks",
+        "pytest",
+    )
+
+    assert completed.returncode == 1
+    assert "another session remains running" in completed.stderr
+    assert competing_id in completed.stderr
+    assert before == snapshot_tree_without_following_symlinks(vault)
+
+
+@pytest.mark.parametrize("terminal_state", ["paused", "completed", "closed"])
+def test_complete_rejects_non_review_terminal_runs(terminal_state, run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    assert run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.").returncode == 0
+    if terminal_state == "paused":
+        changed = run_oaw("task", "pause", "OAW-TSK-cli", "--note", "Pause.")
+        source_status = "active"
+    elif terminal_state == "completed":
+        changed = run_oaw(
+            "task", "complete", "OAW-TSK-cli", "--note", "Done.", "--checks", "pytest"
+        )
+        source_status = "done"
+    else:
+        changed = run_oaw(
+            "run",
+            "close",
+            run_record_for(vault, "test-thread").stem,
+            "--reason",
+            "administrative closure",
+        )
+        source_status = "active"
+    assert changed.returncode == 0, changed.stderr
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace(f"status: {source_status}", "status: review"),
+        encoding="utf-8",
+    )
+    before = snapshot_tree_without_following_symlinks(vault)
+
+    result = run_oaw(
+        "task",
+        "complete",
+        "OAW-TSK-cli",
+        "--note",
+        "Invalid terminal run.",
+        "--checks",
+        "pytest",
+    )
+
+    assert result.returncode == 1
+    assert f"is {terminal_state}; expected running" in result.stderr
+    assert before == snapshot_tree_without_following_symlinks(vault)
+
+
+def test_complete_rejects_reviewed_run_when_task_is_no_longer_in_review(run_oaw, vault):
+    task_path = vault / "Projects/Obsidian Agent Workflow/Tasks/Resolver CLI.md"
+    assert run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.").returncode == 0
+    reviewed = run_oaw(
+        "task",
+        "review",
+        "OAW-TSK-cli",
+        "--note",
+        "Review handoff.",
+        "--checks",
+        "pytest",
+    )
+    assert reviewed.returncode == 0, reviewed.stderr
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8").replace("status: review", "status: active"),
+        encoding="utf-8",
+    )
+    before = snapshot_tree_without_following_symlinks(vault)
+
+    result = run_oaw(
+        "task",
+        "complete",
+        "OAW-TSK-cli",
+        "--note",
+        "Stale review cannot complete.",
+        "--checks",
+        "pytest",
+    )
+
+    assert result.returncode == 1
+    assert "is closed; expected running" in result.stderr
+    assert before == snapshot_tree_without_following_symlinks(vault)
+
+
+def test_reviewed_completion_transaction_failure_restores_vault(monkeypatch, run_oaw, vault):
+    assert run_oaw("task", "start", "OAW-TSK-cli", "--note", "Start.").returncode == 0
+    reviewed = run_oaw(
+        "task",
+        "review",
+        "OAW-TSK-cli",
+        "--note",
+        "Review handoff.",
+        "--checks",
+        "pytest",
+    )
+    assert reviewed.returncode == 0, reviewed.stderr
+    before = snapshot_tree_without_following_symlinks(vault)
+    original_commit = lifecycle.VaultTransaction.commit
+
+    def fail_second_replace(transaction):
+        calls = 0
+
+        def replace(source, destination):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("injected reviewed-run replacement failure")
+            Path(source).replace(destination)
+
+        return original_commit(transaction, replace=replace)
+
+    monkeypatch.setenv("OAW_VAULT", str(vault))
+    monkeypatch.setenv("CODEX_THREAD_ID", "test-thread")
+    monkeypatch.setattr(lifecycle.VaultTransaction, "commit", fail_second_replace)
+    match = resolver.resolve_id("OAW-TSK-cli", vault)
+
+    with pytest.raises(OawError, match="transaction failed and was rolled back"):
+        lifecycle.update_task(
+            match,
+            vault,
+            "done",
+            "Integrated and verified.",
+            "pytest",
+            allow_missing=False,
+        )
+
+    assert before == snapshot_tree_without_following_symlinks(vault)
+
+
 def test_complete_requires_checks(run_oaw):
     proc = run_oaw("task", "complete", "OAW-TSK-cli", "--note", "Done.")
     assert proc.returncode == 2

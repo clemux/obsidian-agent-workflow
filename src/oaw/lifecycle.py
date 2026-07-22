@@ -279,14 +279,20 @@ def update_task(
                 )
             else:
                 run_identifier = current.id
-                if current.state != "running":
-                    raise OawError(f"run {run_identifier} is {current.state}; expected running")
+                reviewed_completion = (
+                    status == "done"
+                    and match.frontmatter.get("status") == "review"
+                    and current.state == "closed"
+                    and current.data.get("ended_reason") == "review"
+                )
                 others = running_others(root, task_id, run_identifier, resolve_task)
                 if others:
                     raise OawError(
                         "transition refused while another session remains running: "
                         + ", ".join(run.id for run in others)
                     )
+                if current.state != "running" and not reviewed_completion:
+                    raise OawError(f"run {run_identifier} is {current.state}; expected running")
                 run_text = transition_run_text(
                     current,
                     "closed" if status == "review" else "completed",
