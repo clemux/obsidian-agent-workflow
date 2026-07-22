@@ -8,10 +8,45 @@ import stat
 import tempfile
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TextIO
 
 from .errors import OawError
+
+
+@dataclass(frozen=True)
+class FileSnapshot:
+    """Bytes and filesystem identity captured for an optimistic write."""
+
+    data: bytes
+    device: int
+    inode: int
+    mode: int
+    size: int
+    mtime_ns: int
+
+
+def capture_file_snapshot(path: Path) -> FileSnapshot:
+    """Capture one regular, non-symlink file for a preconditioned transaction."""
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise OawError(f"could not inspect file for transaction: {path}") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise OawError(f"transaction source must be a regular, non-symlink file: {path}")
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise OawError(f"could not read file for transaction: {path}") from exc
+    return FileSnapshot(
+        data=data,
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        mode=stat.S_IMODE(metadata.st_mode),
+        size=metadata.st_size,
+        mtime_ns=metadata.st_mtime_ns,
+    )
 
 
 def split_note(text: str) -> tuple[str, str, str]:
@@ -72,68 +107,259 @@ def read_markdown_source(
 
 
 class VaultTransaction:
-    """Atomically replace a group of files, restoring all originals on failure."""
+    """Apply preconditioned file changes, restoring all originals on failure.
+
+    Each individual publication is filesystem-atomic. The group is protected by
+    optimistic preconditions and best-effort rollback, but is deliberately not a
+    crash-recoverable journal.
+    """
 
     def __init__(self) -> None:
         self.changes: dict[Path, str] = {}
-        self.expected: dict[Path, str | bytes] = {}
+        self.expected: dict[Path, str | bytes | FileSnapshot] = {}
+        self.creates: dict[Path, str] = {}
+        self.deletes: dict[Path, str | bytes | FileSnapshot] = {}
+        self.move: tuple[Path, Path, str, str | bytes | FileSnapshot] | None = None
 
-    def stage(self, path: Path, text: str, expected: str | bytes | None = None) -> None:
+    def stage(
+        self,
+        path: Path,
+        text: str,
+        expected: str | bytes | FileSnapshot | None = None,
+    ) -> None:
         self.changes[path] = text
         if expected is not None:
             self.expected[path] = expected
 
-    def commit(self, replace: Callable[[str, str], None] = os.replace) -> None:
+    def stage_create(self, path: Path, text: str) -> None:
+        """Create ``path`` without replacing a racing destination."""
+        self.creates[path] = text
+
+    def stage_delete(self, path: Path, expected: str | bytes | FileSnapshot) -> None:
+        """Delete ``path`` only while it still matches ``expected``."""
+        self.deletes[path] = expected
+
+    def stage_move(
+        self,
+        source: Path,
+        destination: Path,
+        text: str,
+        expected: str | bytes | FileSnapshot,
+    ) -> None:
+        """Publish changed content at ``destination`` and delete ``source`` last."""
+        if self.move is not None:
+            raise OawError("a vault transaction supports at most one move")
+        self.move = (source, destination, text, expected)
+
+    @staticmethod
+    def _matches(path: Path, expected: str | bytes | FileSnapshot) -> bool:
+        try:
+            if isinstance(expected, FileSnapshot):
+                metadata = path.lstat()
+                return (
+                    stat.S_ISREG(metadata.st_mode)
+                    and not stat.S_ISLNK(metadata.st_mode)
+                    and metadata.st_dev == expected.device
+                    and metadata.st_ino == expected.inode
+                    and stat.S_IMODE(metadata.st_mode) == expected.mode
+                    and metadata.st_size == expected.size
+                    and metadata.st_mtime_ns == expected.mtime_ns
+                    and path.read_bytes() == expected.data
+                )
+            if isinstance(expected, bytes):
+                return path.read_bytes() == expected
+            return path.read_text(encoding="utf-8") == expected
+        except (OSError, UnicodeError):
+            return False
+
+    @classmethod
+    def _verify(cls, path: Path, expected: str | bytes | FileSnapshot) -> None:
+        if not cls._matches(path, expected):
+            raise OawError(f"note changed on disk since it was read: {path}")
+
+    @staticmethod
+    def _same_entry(left: Path, right: Path) -> bool:
+        try:
+            return os.path.samefile(left, right)
+        except OSError:
+            return False
+
+    @staticmethod
+    def _write_temp(path: Path, text: str, mode: int | None) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, delete=False
+        ) as handle:
+            handle.write(text)
+            handle.flush()
+            if mode is not None:
+                os.fchmod(handle.fileno(), mode)
+            os.fsync(handle.fileno())
+            return Path(handle.name)
+
+    @staticmethod
+    def _restore(path: Path, data: bytes, mode: int | None) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        if mode is not None:
+            path.chmod(mode)
+
+    def commit(
+        self,
+        replace: Callable[[str, str], None] = os.replace,
+        *,
+        postcondition: Callable[[], None] | None = None,
+    ) -> None:
+        occupied = set(self.changes) | set(self.creates) | set(self.deletes)
+        if self.move is not None:
+            source, destination, _, _ = self.move
+            if source in occupied or destination in occupied:
+                raise OawError("move paths overlap another staged transaction operation")
+
         for path, expected in self.expected.items():
-            if not path.exists():
-                current: str | bytes | None = None
-            elif isinstance(expected, bytes):
-                current = path.read_bytes()
-            else:
-                current = path.read_text(encoding="utf-8")
-            if current != expected:
-                raise OawError(f"note changed on disk since it was read: {path}")
-        originals = {path: path.read_bytes() if path.exists() else None for path in self.changes}
-        original_modes = {
-            path: stat.S_IMODE(path.stat().st_mode) if path.exists() else None
-            for path in self.changes
-        }
-        written: list[Path] = []
+            self._verify(path, expected)
+        for path in self.creates:
+            if path.exists() or path.is_symlink():
+                raise OawError(f"transaction destination already exists: {path}")
+        for path, expected in self.deletes.items():
+            self._verify(path, expected)
+        if self.move is not None:
+            source, destination, _, expected = self.move
+            self._verify(source, expected)
+            if (destination.exists() or destination.is_symlink()) and not self._same_entry(
+                source, destination
+            ):
+                raise OawError(f"transaction destination already exists: {destination}")
+
+        originals: dict[Path, bytes | None] = {}
+        original_modes: dict[Path, int | None] = {}
+        for path in [*self.changes, *self.creates, *self.deletes]:
+            originals[path] = path.read_bytes() if path.exists() else None
+            original_modes[path] = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
+        if self.move is not None:
+            source, destination, _, expected = self.move
+            source_snapshot = expected if isinstance(expected, FileSnapshot) else None
+            originals[source] = (
+                source_snapshot.data if source_snapshot is not None else source.read_bytes()
+            )
+            original_modes[source] = (
+                source_snapshot.mode
+                if source_snapshot is not None
+                else stat.S_IMODE(source.stat().st_mode)
+            )
+            if not self._same_entry(source, destination):
+                originals[destination] = None
+                original_modes[destination] = None
+
         temps: list[Path] = []
+        replacement_temps: dict[Path, Path] = {}
+        create_temps: dict[Path, Path] = {}
+        move_temp: Path | None = None
+        written: list[Path] = []
+        created: list[Path] = []
+        deleted: list[Path] = []
+        move_backup: Path | None = None
+        move_source_deleted = False
         try:
             for path, text in self.changes.items():
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with tempfile.NamedTemporaryFile(
-                    "w", encoding="utf-8", dir=path.parent, delete=False
-                ) as handle:
-                    handle.write(text)
-                    handle.flush()
-                    original_mode = original_modes[path]
-                    if original_mode is not None:
-                        os.fchmod(handle.fileno(), original_mode)
-                    os.fsync(handle.fileno())
-                    temp = Path(handle.name)
+                temp = self._write_temp(path, text, original_modes[path])
+                replacement_temps[path] = temp
                 temps.append(temp)
+            for path, text in self.creates.items():
+                temp = self._write_temp(path, text, None)
+                create_temps[path] = temp
+                temps.append(temp)
+            if self.move is not None:
+                source, destination, text, _ = self.move
+                move_temp = self._write_temp(destination, text, original_modes[source])
+                temps.append(move_temp)
+
+                case_only = (
+                    source.parent == destination.parent
+                    and source.name != destination.name
+                    and source.name.casefold() == destination.name.casefold()
+                )
+                if case_only:
+                    self._verify(source, self.move[3])
+                    with tempfile.NamedTemporaryFile(dir=source.parent, delete=False) as handle:
+                        move_backup = Path(handle.name)
+                    replace(str(source), str(move_backup))
+                    move_source_deleted = True
+                    os.link(str(move_temp), str(destination))
+                    created.append(destination)
+                    move_temp.unlink()
+                else:
+                    if destination.exists() or destination.is_symlink():
+                        raise OawError(f"transaction destination already exists: {destination}")
+                    os.link(str(move_temp), str(destination))
+                    created.append(destination)
+                    move_temp.unlink()
+
+            for path, temp in replacement_temps.items():
+                expected = self.expected.get(path)
+                if expected is not None:
+                    self._verify(path, expected)
                 replace(str(temp), str(path))
                 written.append(path)
-            touched_dirs = {path.parent for path in self.changes}
+
+            for path, temp in create_temps.items():
+                if path.exists() or path.is_symlink():
+                    raise OawError(f"transaction destination already exists: {path}")
+                os.link(str(temp), str(path))
+                created.append(path)
+                temp.unlink()
+
+            for path, expected in self.deletes.items():
+                self._verify(path, expected)
+                path.unlink()
+                deleted.append(path)
+
+            if self.move is not None and not move_source_deleted:
+                source, _, _, expected = self.move
+                self._verify(source, expected)
+                source.unlink()
+                deleted.append(source)
+                move_source_deleted = True
+
+            if postcondition is not None:
+                postcondition()
+
+            touched_dirs = {path.parent for path in [*self.changes, *self.creates, *self.deletes]}
+            if self.move is not None:
+                touched_dirs.update({self.move[0].parent, self.move[1].parent})
             for directory in touched_dirs:
                 fd = os.open(directory, os.O_RDONLY)
                 try:
                     os.fsync(fd)
                 finally:
                     os.close(fd)
+            if move_backup is not None:
+                move_backup.unlink(missing_ok=True)
+                move_backup = None
         except Exception as exc:
             for path in reversed(written):
                 original = originals[path]
                 if original is None:
                     path.unlink(missing_ok=True)
                 else:
-                    path.write_bytes(original)
+                    self._restore(path, original, original_modes[path])
+            for path in reversed(deleted):
+                original = originals[path]
+                assert original is not None
+                self._restore(path, original, original_modes[path])
+            for path in reversed(created):
+                path.unlink(missing_ok=True)
+            if move_backup is not None and self.move is not None:
+                source = self.move[0]
+                source.unlink(missing_ok=True)
+                replace(str(move_backup), str(source))
+                move_backup = None
             raise OawError(f"transaction failed and was rolled back: {exc}") from exc
         finally:
             for temp in temps:
                 temp.unlink(missing_ok=True)
+            if move_backup is not None:
+                move_backup.unlink(missing_ok=True)
 
 
 def write_new_note_atomic(

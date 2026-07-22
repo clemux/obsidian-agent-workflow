@@ -343,6 +343,7 @@ oaw task pause OAW-TSK-cli --note "Paused this session's run."
 oaw task review OAW-TSK-cli --note "Ready for review." --checks "pytest"
 oaw task complete OAW-TSK-cli --note "Verified end-to-end." --checks "pytest"
 oaw task note OAW-TSK-cli --note "Reviewed a related session." --checks "pytest"
+oaw task rename OAW-TSK-cli --title "Resolver command" --note "Use the shipped name."
 oaw task priority OAW-TSK-cli --priority 1 --note "Raised after cross-project triage."
 oaw task preparedness OAW-TSK-cli --state prepared \
   --note "Execution is designed and known blockers are recorded."
@@ -353,6 +354,32 @@ Lifecycle commands update task frontmatter and append an `## Agent sessions` tra
 Tasks may declare `execution: human`, `agent`, or `hybrid`. An absent value becomes `agent` only when `start` begins a run. Human tasks remain UI-managed and reject agent lifecycle transitions. `start`, `pause`, `review`, and `complete` require a real harness session ID and do not offer `--allow-missing-session-id`; `backlog`, `promote`, `task note`, `task priority`, `task preparedness`, and task-relation mutations retain the explicit missing-ID trace path. With a real ID, session-writing commands append it as a quoted string to a deduplicated `session-ids` block list while preserving existing entries, comments, and any legacy scalar `session-id`.
 
 For `backlog`, `promote`, `start`, `pause`, `review`, `complete`, and `task note`, provide exactly one Markdown source: `--note` or `--note-file`. `--note-file -` reads standard input. This avoids shell interpolation when the note contains backticks, dollar signs, quotes, or multiple lines. `task create` keeps its problem statement optional, but when supplied accepts exactly one of those same sources.
+
+`oaw task rename` safely changes an existing task's filename and single canonical H1
+without changing its stable frontmatter ID, aliases, lifecycle state, preparedness, or
+run identities. The command accepts only the canonical ID, stays within the task's
+current folder, refuses unsafe titles, collisions, malformed task-owned metadata, and
+running agent runs, and migrates active path-based wikilinks in Markdown notes. It
+preserves aliases, embeds, and heading or block suffixes while leaving links in fenced
+or inline code and Obsidian or HTML comments untouched. Non-Markdown files are not
+changed.
+
+Rename is a dry-run by default. Review the deterministic vault-relative plan and its
+token, then repeat the command with that exact token:
+
+```bash
+oaw task rename OAW-TSK-cli --title "Resolver command" --note "Use the shipped name."
+oaw task rename OAW-TSK-cli --title "Resolver command" --note "Use the shipped name." \
+  --write --expect-plan sha256:0123456789abcdef...
+```
+
+The applying process rebuilds the plan from current bytes and refuses a stale token.
+It stages same-directory files, publishes the destination without clobbering, updates
+backlinks with file-identity preconditions, deletes the old task path last, verifies
+task, run, relation, and backlink postconditions, and rolls back caught failures. The
+same filesystem-native path works with Obsidian open or headless; it does not depend on
+Obsidian's rename behavior. A task already at the requested path and H1 is a no-op and
+adds no trace.
 
 ### Session phase titles
 

@@ -24,6 +24,7 @@ EXPECTED_COMMAND_PATHS = {
     ("task", "review"),
     ("task", "complete"),
     ("task", "note"),
+    ("task", "rename"),
     ("task", "priority"),
     ("task", "preparedness"),
     ("task", "relation"),

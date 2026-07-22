@@ -50,6 +50,12 @@ from .runs import (
 )
 from .sessions import detect_session
 from .tags import creation_tag_block, creation_tags
+from .task_rename import (
+    apply_task_rename,
+    prepare_task_rename,
+    print_task_rename_plan,
+    rewrite_active_wikilink_targets,
+)
 
 RESEARCH_PACKET_TEMPLATE = Path("Templates/Research packet.md")
 PROJECT_INDEX_TEMPLATE = Path("Templates/Small project index.md")
@@ -312,6 +318,45 @@ def update_task(
         print(f"Dependency state: {state}")
         for problem in dependency_problems:
             print(f"Blocked by: {problem.message}")
+
+
+def rename_task(
+    root: Path,
+    raw_id: str,
+    title: str,
+    note: str,
+    write: bool,
+    expect_plan: str | None,
+) -> None:
+    """Preview or apply a preconditioned task title/path rename."""
+    if expect_plan is not None and not write:
+        raise OawError("--expect-plan requires --write")
+    plan = prepare_task_rename(root, raw_id, title, note)
+    print_task_rename_plan(plan)
+    if not write:
+        if not plan.no_op:
+            print("Dry-run: no changes written")
+        return
+    if expect_plan is None:
+        raise OawError("task rename --write requires --expect-plan")
+    if expect_plan != plan.digest:
+        raise OawError(f"task rename plan mismatch: expected {expect_plan}, current {plan.digest}")
+    if plan.no_op:
+        return
+
+    provider, session_ref = detect_session(False)
+    rendered_note, _ = materialize_obs_references(note, root)
+    source_change = next(
+        change for change in plan.changes if change.original_path == plan.source.path
+    )
+    traced = append_session_id_frontmatter(source_change.proposed_text, session_ref)
+    traced = append_session_entry(traced, provider, session_ref, rendered_note, None)
+    old_target = Path(plan.old_relpath).with_suffix("").as_posix()
+    new_target = Path(plan.new_relpath).with_suffix("").as_posix()
+    traced, _ = rewrite_active_wikilink_targets(traced, old_target, new_target)
+    apply_task_rename(plan, traced)
+    print(f"Updated: {plan.old_relpath} -> {plan.new_relpath}")
+    print(f"Plan applied: {plan.digest}")
 
 
 def pause_task(match: NoteMatch, root: Path, note: str) -> None:

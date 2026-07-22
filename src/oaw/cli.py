@@ -35,6 +35,7 @@ from .lifecycle import (
     create_task,
     list_runs,
     pause_task,
+    rename_task,
     start_research_run,
     update_task,
     update_task_preparedness,
@@ -579,6 +580,20 @@ def task_note(
             resolve_id(note_id, root_path), root_path, content, checks, allow_missing_session_id
         )
     )
+
+
+@task_app.command("rename", help="preview or apply a safe task title and path rename")
+def task_rename(
+    note_id: Annotated[str, typer.Argument()],
+    title: Annotated[str, typer.Option("--title", help="new task title and filename stem")],
+    note: Annotated[str, typer.Option("--note", help="non-empty rename reason")],
+    write: Annotated[bool, typer.Option("--write", help="apply a reviewed rename plan")] = False,
+    expect_plan: Annotated[
+        str | None,
+        typer.Option("--expect-plan", help="exact sha256 plan token required by --write"),
+    ] = None,
+) -> None:
+    _run(lambda: rename_task(vault_root(), note_id, title, note, write, expect_plan))
 
 
 @task_app.command("priority", help="update task priority without changing lifecycle status")

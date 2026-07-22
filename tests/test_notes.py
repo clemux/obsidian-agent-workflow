@@ -11,6 +11,7 @@ from oaw.links import parse_wikilinks
 from oaw.notes import (
     VaultTransaction,
     append_markdown_block_to_section,
+    capture_file_snapshot,
     locate_section,
     read_note,
     split_note,
@@ -206,3 +207,78 @@ def test_vault_transaction_preserves_existing_mode_and_keeps_new_files_private(t
 
     assert stat.S_IMODE(existing.stat().st_mode) == 0o644
     assert stat.S_IMODE(created.stat().st_mode) == 0o600
+
+
+def test_vault_transaction_supports_preconditioned_create_replace_and_delete(tmp_path: Path):
+    replaced = tmp_path / "replaced.md"
+    deleted = tmp_path / "deleted.md"
+    created = tmp_path / "created.md"
+    replaced.write_text("replace original\n", encoding="utf-8")
+    deleted.write_text("delete original\n", encoding="utf-8")
+
+    transaction = VaultTransaction()
+    transaction.stage(
+        replaced,
+        "replace next\n",
+        expected=capture_file_snapshot(replaced),
+    )
+    transaction.stage_create(created, "created\n")
+    transaction.stage_delete(deleted, capture_file_snapshot(deleted))
+    transaction.commit()
+
+    assert replaced.read_text(encoding="utf-8") == "replace next\n"
+    assert created.read_text(encoding="utf-8") == "created\n"
+    assert not deleted.exists()
+
+
+def test_vault_transaction_rollback_removes_a_new_file_staged_with_replace(tmp_path: Path):
+    existing = tmp_path / "existing.md"
+    created = tmp_path / "created.md"
+    failing = tmp_path / "failing.md"
+    existing.write_text("original\n", encoding="utf-8")
+    failing.write_text("failing original\n", encoding="utf-8")
+    calls = 0
+
+    def fail_third_replace(source: str, destination: str) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise OSError("injected third publication failure")
+        os.replace(source, destination)
+
+    transaction = VaultTransaction()
+    transaction.stage(existing, "updated\n")
+    transaction.stage(created, "created\n")
+    transaction.stage(failing, "never published\n")
+
+    with pytest.raises(OawError, match="rolled back"):
+        transaction.commit(replace=fail_third_replace)
+
+    assert existing.read_text(encoding="utf-8") == "original\n"
+    assert not created.exists()
+    assert failing.read_text(encoding="utf-8") == "failing original\n"
+
+
+def test_vault_transaction_unlink_failure_removes_published_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    destination = tmp_path / "created.md"
+    original_unlink = Path.unlink
+    failed = False
+
+    def fail_first_temp_unlink(path: Path, *args, **kwargs) -> None:
+        nonlocal failed
+        if not failed and path.parent == tmp_path and path != destination:
+            failed = True
+            raise OSError("injected temporary unlink failure")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_first_temp_unlink)
+    transaction = VaultTransaction()
+    transaction.stage_create(destination, "created\n")
+
+    with pytest.raises(OawError, match="rolled back"):
+        transaction.commit()
+
+    assert failed
+    assert not destination.exists()

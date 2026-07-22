@@ -34,7 +34,7 @@ For checkout development, shared errors, note splitting/reading, and the hand-ro
 
 ### Session provenance
 
-The session ID is read automatically from the first supported harness environment variable. Commands that create or close agent runs — `task start`, `task pause`, `task review`, `task complete`, and `run close` — require a real identity and never accept `--allow-missing-session-id`. Non-run trace writes (`task create`, `project create`, `task priority`, `task preparedness`, relation mutations, `note session`, `retro create`, `feedback create`) accept that escape hatch only when the user explicitly accepts an untraceable entry.
+The session ID is read automatically from the first supported harness environment variable. Commands that create or close agent runs — `task start`, `task pause`, `task review`, `task complete`, and `run close` — and the write form of `task rename` require a real identity and never accept `--allow-missing-session-id`. Non-run trace writes (`task create`, `project create`, `task priority`, `task preparedness`, relation mutations, `note session`, `retro create`, `feedback create`) accept that escape hatch only when the user explicitly accepts an untraceable entry.
 
 With a real harness ID, lifecycle and `task note` writes append it to the note's deduplicated `session-ids` frontmatter list. The explicit missing-ID path writes only the body trace; it does not add a synthetic list value.
 
@@ -172,6 +172,7 @@ oaw task pause OAW-TSK-cli --note "Paused this session's run."
 oaw task review OAW-TSK-cli --note "Ready for review." --checks "pytest"
 oaw task complete OAW-TSK-cli --note "Finished and verified." --checks "pytest"
 oaw task note OAW-TSK-cli --note "Recorded an independent review." --checks "pytest"
+oaw task rename OAW-TSK-cli --title "Resolver command" --note "Use the shipped name."
 oaw task priority OAW-TSK-cli --priority 1 --note "Raised after cross-project triage."
 oaw task preparedness OAW-TSK-cli --state prepared \
   --note "Execution is designed and known blockers are recorded."
@@ -182,6 +183,7 @@ oaw task preparedness OAW-TSK-cli --state prepared \
 - `backlog` sets `status: backlog`; `promote` sets `status: todo`; `start` sets `status: active`; `pause` pauses only the caller's run and leaves task status unchanged; `review` closes the caller's run with reason `review` and sets task status to `review`; `complete` completes the caller's run and sets task status to `done`.
 - `complete` requires `--checks` naming the verification actually run; do not fabricate checks.
 - `note` appends a dated entry without changing status. If the caller already has a matching running record it refreshes that record; it never creates a run.
+- `rename <TASK-ID> --title <TITLE> --note <REASON>` accepts only the canonical frontmatter ID and previews a deterministic filename, H1, and whole-vault Markdown backlink migration without writing. Apply the reviewed plan by repeating the exact command with `--write --expect-plan sha256:<digest>`. Write mode requires a real session, refuses running task runs, unsafe or colliding titles, symlink or unreadable Markdown notes, malformed task/run/relation state, and concurrent byte or file-identity changes. It preserves the stable ID, aliases, lifecycle and preparedness fields, run identities, wikilink aliases/embeds/suffixes, and protected code/comments; caught commit or postcondition failures roll back. An already-matching path and H1 is a no-op with no trace.
 - `priority` sets an existing task's priority to `1`, `2`, or `3`, appends a dated agent-session trace, and leaves status and run records unchanged.
 - `preparedness` sets the independent design-sufficiency property to `needs-triage`, `needs-design`, or `prepared`; appends a dated trace; and leaves lifecycle status and run records unchanged. Missing preparedness on legacy tasks means unassessed, not prepared. A prepared task may still be blocked or unscheduled.
 - `backlog`, `promote`, `start`, `review`, and `complete` append a dated entry under `## Agent sessions`; task-note frontmatter is the single lifecycle source of truth and is surfaced through project and cross-project Bases.

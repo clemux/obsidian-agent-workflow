@@ -59,6 +59,11 @@ SEMANTICS: dict[tuple[str, ...], CommandSemantics] = {
         "Appends session provenance to one project task note; also updates the caller's "
         "running run record when one exists.",
     ),
+    ("task", "rename"): CommandSemantics(
+        "oaw.task_rename",
+        "Dry-run by default; --write renames one task note and migrates active Markdown "
+        "wikilinks across the vault under a reviewed plan token.",
+    ),
     ("task", "priority"): CommandSemantics(
         "oaw.lifecycle", "Updates task priority frontmatter and appends session provenance."
     ),
