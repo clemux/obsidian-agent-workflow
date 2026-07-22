@@ -1020,7 +1020,7 @@ def test_reviewed_task_completes_without_reopening_the_run(run_oaw, vault):
     run = run_path.read_text(encoding="utf-8")
     assert "status: done" in task
     assert "run_state: completed" in run
-    assert 'ended_reason: "completed"' in run
+    assert "ended_reason: completed" in run
     assert review_event in run
     assert " — completion — Integrated and verified. — verification: mise run check" in run
     assert " — resume" not in run
@@ -1059,7 +1059,7 @@ def test_complete_domain_promotes_reviewed_run_and_replaces_end_timestamp(
     run = run_record_for(vault, "test-thread").read_text(encoding="utf-8")
     assert 'last_event_at: "2030-01-02T03:04:05Z"' in run
     assert 'ended_at: "2030-01-02T03:04:05Z"' in run
-    assert 'ended_reason: "completed"' in run
+    assert "ended_reason: completed" in run
     assert " — review handoff — Review handoff. — verification: pytest" in run
     assert "2030-01-02T03:04:05Z — completion — Integrated and verified." in run
 
