@@ -39,6 +39,7 @@ semantic annotations checked for complete coverage of every leaf command.
 | --- | --- | --- | --- | --- | --- | --- |
 | <a id="oaw-cli-resolve"></a>`oaw-cli-resolve` | `oaw resolve` | resolve obs:&lt;ID&gt; or &lt;ID&gt; | `<note-id>` (required)<br>`--full`<br>`--path`<br>`--meta`<br>`--outline`<br>`--json` | `oaw.resolver` | Read-only vault resolution. | Active (not deprecated) |
 | <a id="oaw-cli-list"></a>`oaw-cli-list` | `oaw list` | list project notes | `--project PROJECT` (required)<br>`--type NOTE_TYPE` (default: task)<br>`--status STATUS`<br>`--tag TAG` (repeatable)<br>`--tag-mode {all\|any}` (default: all)<br>`--include-archived`<br>`--sort {priority\|effort\|title}`<br>`--fields FIELDS`<br>`--goal`<br>`--json` | `oaw.resolver` | Read-only vault listing. | Active (not deprecated) |
+| <a id="oaw-cli-doctor"></a>`oaw-cli-doctor` | `oaw doctor` | check vault, parser, and Obsidian-version compatibility | `--obsidian-version OBSIDIAN_VERSION`<br>`--json` | `oaw.doctor` | Read-only vault, parser, and Obsidian-version compatibility diagnostics. | Active (not deprecated) |
 
 <a id="oaw-cli-group-project"></a>
 ## `oaw project`

@@ -1,0 +1,13 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian's YAML properties parser keeps only one value for a duplicated top-level key; OAW flags the duplicate instead of silently picking one."
+  },
+  "parser": {
+    "diagnostics": [
+      "frontmatter.duplicate-key"
+    ],
+    "newline": "lf"
+  }
+}

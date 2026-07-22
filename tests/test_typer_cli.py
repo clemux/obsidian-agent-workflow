@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ EXPECTED_COMMAND_PATHS = {
     (),
     ("resolve",),
     ("list",),
+    ("doctor",),
     ("project",),
     ("project", "create"),
     ("research",),
@@ -669,3 +671,72 @@ def test_typer_domain_error_does_not_write_the_vault(tmp_path: Path) -> None:
     assert result.stdout == ""
     assert "no note with frontmatter id or alias" in result.stderr
     assert snapshot_tree_without_following_symlinks(tmp_path) == before
+
+
+def test_typer_doctor_requires_configured_vault() -> None:
+    result = CliRunner().invoke(cli.app, ["doctor"], env={"OAW_VAULT": ""})
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.stderr == ("oaw: OAW_VAULT is required; set it to the Obsidian vault path\n")
+
+
+def test_typer_doctor_fail_is_a_distinct_clean_exit_not_a_usage_error(tmp_path: Path) -> None:
+    result = CliRunner().invoke(cli.app, ["doctor"], env={"OAW_VAULT": str(tmp_path)})
+
+    # A FAIL check (here: strictLineBreaks resolving to its false default because
+    # no app.json exists) exits non-zero without ever raising a Click usage error.
+    assert result.exit_code == 1
+    assert not result.stderr.startswith("Usage: oaw ")
+    assert "FAIL setting:strictLineBreaks" in result.stdout
+
+
+def test_typer_doctor_json_output_routing(tmp_path: Path) -> None:
+    result = CliRunner().invoke(cli.app, ["doctor", "--json"], env={"OAW_VAULT": str(tmp_path)})
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert set(payload) == {"exit_code", "environment", "parser", "vault", "vault_issues"}
+    assert payload["exit_code"] == 1
+    assert result.stderr == ""
+
+
+def test_typer_doctor_never_writes_the_vault_even_on_fail(tmp_path: Path) -> None:
+    write_project_index(tmp_path)
+    before = snapshot_tree_without_following_symlinks(tmp_path)
+
+    result = CliRunner().invoke(cli.app, ["doctor"], env={"OAW_VAULT": str(tmp_path)})
+
+    assert result.exit_code == 1
+    assert snapshot_tree_without_following_symlinks(tmp_path) == before
+
+
+def test_typer_doctor_accepts_obsidian_version_option(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        ["doctor", "--obsidian-version", "1.12.7"],
+        env={"OAW_VAULT": str(tmp_path)},
+    )
+
+    assert "PASS obsidian-version" in result.stdout
+
+
+def test_typer_doctor_falls_back_to_obsidian_version_env_var(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        ["doctor"],
+        env={"OAW_VAULT": str(tmp_path), "OAW_OBSIDIAN_VERSION": "1.12.7"},
+    )
+
+    assert "PASS obsidian-version" in result.stdout
+
+
+def test_typer_doctor_option_takes_precedence_over_env_var(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        cli.app,
+        ["doctor", "--obsidian-version", "1.99.0"],
+        env={"OAW_VAULT": str(tmp_path), "OAW_OBSIDIAN_VERSION": "1.12.7"},
+    )
+
+    assert "WARN obsidian-version" in result.stdout
+    assert "newer" in result.stdout.lower()

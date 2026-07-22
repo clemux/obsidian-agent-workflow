@@ -1,0 +1,17 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "ATX headings are recognized by markdown-it-py's commonmark preset the same way Obsidian renders them."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 2,
+        "text": "Doctor Heading Fixture",
+        "line": 0
+      }
+    ],
+    "newline": "lf"
+  }
+}

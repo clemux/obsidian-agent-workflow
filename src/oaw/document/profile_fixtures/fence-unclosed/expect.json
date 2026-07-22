@@ -1,0 +1,23 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "A fenced code block missing its closing delimiter is treated as open through end of document by both Obsidian and markdown-it-py's commonmark preset."
+  },
+  "parser": {
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          2,
+          4
+        ],
+        "closed": false
+      }
+    ],
+    "diagnostics": [
+      "markdown.unclosed-fence"
+    ],
+    "newline": "lf"
+  }
+}

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import os
 import re
 import sys
 from collections.abc import Callable, Sequence
@@ -19,6 +21,7 @@ from typer.core import TyperGroup
 from typer.main import get_command
 
 from .captures import create_capture, list_captures, show_capture, triage_capture
+from .doctor import DoctorReport, run_doctor
 from .errors import OawError
 from .exports import validate_export_bundle, write_export_bundle
 from .feedback import FeedbackType, create_feedback, read_feedback_body
@@ -408,6 +411,48 @@ def list_notes(
             json_output=json_output,
         )
     )
+
+
+_DOCTOR_GROUPS: tuple[tuple[str, str], ...] = (
+    ("Environment profile", "environment"),
+    ("Parser integrity", "parser"),
+    ("Vault compatibility", "vault"),
+)
+
+
+def _print_doctor_report(report: DoctorReport) -> None:
+    """Render ``report`` as grouped ``STATUS name: detail`` lines."""
+    for index, (heading, attr) in enumerate(_DOCTOR_GROUPS):
+        if index:
+            typer.echo("")
+        typer.echo(f"{heading}:")
+        for check in getattr(report, attr):
+            typer.echo(f"  {check.status.value.upper()} {check.name}: {check.detail}")
+
+
+@app.command("doctor", help="check vault, parser, and Obsidian-version compatibility")
+def doctor(
+    obsidian_version: Annotated[
+        str | None,
+        typer.Option(
+            "--obsidian-version",
+            help="installed Obsidian version (X.Y.Z); falls back to OAW_OBSIDIAN_VERSION",
+        ),
+    ] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="emit the report as JSON")] = False,
+) -> None:
+    """Read-only compatibility diagnostics; never writes to the vault."""
+    resolved_version = obsidian_version
+    if resolved_version is None:
+        env_version = os.environ.get("OAW_OBSIDIAN_VERSION", "").strip()
+        resolved_version = env_version or None
+    report = _run(lambda: run_doctor(vault_root(), obsidian_version=resolved_version))
+    if json_output:
+        print(json.dumps(report.to_payload(), ensure_ascii=False))
+    else:
+        _print_doctor_report(report)
+    if report.exit_code:
+        raise typer.Exit(code=report.exit_code)
 
 
 @project_app.command("create", help="create a project Index.md from the vault template")

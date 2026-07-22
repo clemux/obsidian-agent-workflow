@@ -1,0 +1,20 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "A fenced code block with a matching closing delimiter is protected content in both Obsidian and the OAW parser."
+  },
+  "parser": {
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          2,
+          4
+        ],
+        "closed": true
+      }
+    ],
+    "newline": "lf"
+  }
+}

@@ -130,6 +130,18 @@ oaw list --project Fable --type capture
 
 Capture listing hides `status: archived` notes by default. Use `--include-archived` only for historical/provenance work, or `--status archived` when the archived set is the explicit target. For archived captures, prefer `oaw resolve --meta` or default `oaw resolve` first; use `--full` only after confirming the archived body is needed.
 
+## Compatibility check
+
+Run `oaw doctor` when a vault write behaves unexpectedly, after upgrading Obsidian, or before trusting OAW against a vault you have not used it with before — never against a real vault as a routine reflex:
+
+```bash
+oaw doctor
+oaw doctor --obsidian-version 1.12.7   # or set OAW_OBSIDIAN_VERSION
+oaw doctor --json
+```
+
+It is read-only. Output is grouped `PASS`/`WARN`/`FAIL` lines (environment profile, parser integrity, vault compatibility); `--json` emits the same structured report. The exit code is non-zero only when a check is `FAIL` — a problem confined to one note is always a `WARN` and does not mean OAW is broken vault-wide.
+
 ## Captures
 
 The `obsidian-capture` companion skill owns the conversational capture workflow —

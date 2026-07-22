@@ -32,9 +32,9 @@ If `uv tool upgrade oaw` does not rebuild the local checkout source, use
 
 During development, run the checkout through the project environment with
 `uv run python bin/oaw ...` and set `OAW_VAULT` (preferably to a temporary vault).
-The CLI depends on `typer` at runtime, so bare `python bin/oaw ...` fails with
-`ModuleNotFoundError: No module named 'typer'`. The installed `oaw` command
-carries its own dependencies and needs no prefix.
+The CLI depends on `typer`, `markdown-it-py`, and `pyyaml` at runtime, so bare
+`python bin/oaw ...` fails with `ModuleNotFoundError: No module named 'typer'`.
+The installed `oaw` command carries its own dependencies and needs no prefix.
 
 ### Agent skills
 
@@ -172,6 +172,7 @@ export OAW_VAULT=~/vaults/example
 - [Agent skills](#agent-skills)
 - [Resolving references](#resolving-references)
 - [Listing notes](#listing-notes)
+- [Compatibility diagnostics](#compatibility-diagnostics)
 - [Captures](#captures)
 - [Project workspace creation](#project-workspace-creation)
 - [Task lifecycle](#task-lifecycle)
@@ -197,6 +198,7 @@ export OAW_VAULT=~/vaults/example
 | --- | --- |
 | [`oaw resolve`](#resolving-references) | Resolve a reference ID or `obs:` alias to a vault note |
 | [`oaw list`](#listing-notes) | List a project's tasks or captures by frontmatter type |
+| [`oaw doctor`](#compatibility-diagnostics) | Read-only vault, parser, and Obsidian-version compatibility check |
 | [`oaw capture`](#captures) | Create, list, show, and triage capture notes in the canonical store |
 | [`oaw project`](#project-workspace-creation) | Create a first-class project index from the vault template |
 | [`oaw task`](#task-lifecycle) | Create tasks, update lifecycle status, and manage relations with an agent-session trace |
@@ -238,6 +240,35 @@ oaw list --project Fable --tag structured-note --tag roadmap --tag-mode any
 Use `--status <value>` to select one exact frontmatter status. When `--status`
 is omitted, `--include-archived` adds archived notes to the normal listing;
 otherwise archived notes are hidden.
+
+## Compatibility diagnostics
+
+`oaw doctor` is a read-only check of one vault against the Obsidian version and
+settings this package has actually been built and tested against: **Obsidian
+1.12.7**, with `strictLineBreaks` required to be `true` (its absence, or
+`false`, is a hard requirement failure — OAW's Markdown parsing assumes
+CommonMark-strict line breaks throughout). It reports three groups —
+environment profile, parser integrity (packaged fixtures replayed through the
+same parser and editing engine OAW ships), and vault compatibility (every
+`*.md` note scanned for invalid UTF-8, malformed frontmatter, duplicate keys,
+and other constructs outside the tested profile) — as `PASS`/`WARN`/`FAIL`
+lines:
+
+```bash
+oaw doctor
+oaw doctor --obsidian-version 1.12.7
+oaw doctor --json
+```
+
+The installed Obsidian version cannot be probed portably, so pass
+`--obsidian-version X.Y.Z` or set `OAW_OBSIDIAN_VERSION`; when neither is
+supplied, the version check is a `WARN`, not a `FAIL`. A newer, untested
+Obsidian version is also a `WARN`. A problem confined to one note (an
+unreadable file, a duplicate frontmatter key) is always a `WARN` naming that
+note — it never disables OAW for the rest of the vault. The process exit code
+is non-zero only when at least one check is `FAIL`. When Obsidian ships a new
+version, rerun `oaw doctor` (and the packaged parser-profile probes, if the
+new version changes recognized syntax) before trusting OAW against it.
 
 Rank, project extra columns, and emit a machine-readable view without a shell
 loop over each note:

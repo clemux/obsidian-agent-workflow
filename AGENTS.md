@@ -4,7 +4,7 @@
 
 This repository provides the `oaw` local CLI and its agent skill metadata:
 
-- `src/oaw/` contains the CLI implementation as domain modules (`resolver.py`, `notes.py`, `lifecycle.py`, `frontmatter.py`, `cli.py`, ...) for resolving Obsidian IDs and updating task lifecycle state.
+- `src/oaw/` contains the CLI implementation as domain modules (`resolver.py`, `notes.py`, `lifecycle.py`, `frontmatter.py`, `cli.py`, ...) for resolving Obsidian IDs and updating task lifecycle state. `src/oaw/document/` is a source-preserving Markdown/frontmatter parsing layer (envelope, YAML composition, Obsidian-syntax recognizers, markdown-it structure, protected regions, and a splice-based editing engine); `src/oaw/doctor.py` is the read-only `oaw doctor` engine that checks a vault against the Obsidian compatibility profile in `src/oaw/document/profile.py`.
 - `bin/oaw` is a thin launcher that runs the checkout copy of `src/oaw/` without installing it.
 - `tests/` holds the pytest suite: domain-level suites such as `tests/test_resolver.py`, `tests/test_notes.py`, and `tests/test_links.py`; per-domain CLI suites such as `tests/test_task_lifecycle_cli.py` and `tests/test_links_cli.py`; command-contract coverage in `tests/test_typer_cli.py`; and shared vault factories, runners, and snapshot/assertion helpers in `tests/support.py`, from which each test file composes its own minimal vault fixtures.
 - `docs/architecture.md` records the package-layout rationale; `docs/linting.md` explains the maintained Ruff and Pyrefly policy; `docs/testing-mistakes.md` tracks reusable test-bloat mistakes and prevention ideas; `docs/claude-code.md` documents the Claude Code session-title hook shipped in `scripts/`.
@@ -59,10 +59,10 @@ snapshot against the checkout's help surfaces and source bytes.
 When changing Ruff or Pyrefly configuration, update `docs/linting.md` in the
 same change with the rule's rationale and any narrowly scoped exceptions.
 
-The CLI has one runtime dependency, `typer`, so the checkout must be run inside the
-project environment: use `uv run python bin/oaw ...`, not bare `python bin/oaw ...`
-(which fails with `ModuleNotFoundError: No module named 'typer'`). The installed
-`oaw` command carries its own dependencies and needs no prefix.
+The CLI has three runtime dependencies, `typer`, `markdown-it-py`, and `pyyaml`, so the
+checkout must be run inside the project environment: use `uv run python bin/oaw ...`,
+not bare `python bin/oaw ...` (which fails with `ModuleNotFoundError: No module named
+'typer'`). The installed `oaw` command carries its own dependencies and needs no prefix.
 
 ## CLI Dogfooding
 

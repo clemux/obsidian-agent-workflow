@@ -1,0 +1,17 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian accepts CRLF-terminated notes; the OAW parser detects the dominant newline convention as crlf."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 2,
+        "text": "CRLF Heading",
+        "line": 0
+      }
+    ],
+    "newline": "crlf"
+  }
+}

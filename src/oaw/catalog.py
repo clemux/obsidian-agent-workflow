@@ -19,6 +19,9 @@ class CommandSemantics:
 SEMANTICS: dict[tuple[str, ...], CommandSemantics] = {
     ("resolve",): CommandSemantics("oaw.resolver", "Read-only vault resolution."),
     ("list",): CommandSemantics("oaw.resolver", "Read-only vault listing."),
+    ("doctor",): CommandSemantics(
+        "oaw.doctor", "Read-only vault, parser, and Obsidian-version compatibility diagnostics."
+    ),
     ("project", "create"): CommandSemantics(
         "oaw.lifecycle", "Creates one project Index.md in the vault."
     ),
