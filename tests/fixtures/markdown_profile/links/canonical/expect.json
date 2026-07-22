@@ -1,0 +1,27 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian wikilinks use the form `[[target]]`, `[[target|alias]]` for a custom display alias, and `[[target#Heading]]` to link to a specific heading inside the target note; standard Markdown inline links `[text](url)` are also rendered as links."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "wikilink",
+        "target": "Target Note",
+        "line": 0
+      },
+      {
+        "kind": "wikilink",
+        "target": "Target Note#Some Heading",
+        "line": 2
+      },
+      {
+        "kind": "markdown-link",
+        "target": "https://example.com/path",
+        "line": 4
+      }
+    ],
+    "newline": "lf"
+  }
+}

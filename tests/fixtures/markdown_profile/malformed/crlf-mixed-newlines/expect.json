@@ -1,0 +1,13 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "A note that mixes bare `\\n` and `\\r\\n` line endings still opens and displays normally in Obsidian, which normalizes line endings on save; OAW flags mixed endings as a diagnostic so a rewrite can preserve, rather than silently normalize, the existing mixture."
+  },
+  "parser": {
+    "diagnostics": [
+      "envelope.mixed-newlines"
+    ],
+    "newline": "crlf"
+  }
+}

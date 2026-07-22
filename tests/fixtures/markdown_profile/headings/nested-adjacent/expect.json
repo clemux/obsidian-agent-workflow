@@ -1,0 +1,42 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian does not require a blank line between consecutive ATX headings; each `#`-prefixed line immediately starts its own heading block regardless of the levels of adjacent headings, matching CommonMark's block-level ATX rule."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Top",
+        "line": 0
+      },
+      {
+        "level": 2,
+        "text": "Child A",
+        "line": 1
+      },
+      {
+        "level": 3,
+        "text": "Grandchild",
+        "line": 2
+      },
+      {
+        "level": 2,
+        "text": "Child B",
+        "line": 3
+      },
+      {
+        "level": 4,
+        "text": "Deep Child",
+        "line": 4
+      },
+      {
+        "level": 1,
+        "text": "New Top",
+        "line": 5
+      }
+    ],
+    "newline": "lf"
+  }
+}

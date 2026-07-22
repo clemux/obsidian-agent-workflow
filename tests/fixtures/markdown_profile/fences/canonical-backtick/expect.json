@@ -1,0 +1,20 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian renders fenced code blocks delimited by matching runs of at least three backticks (or tildes); the info string after the opening fence (e.g. `python`) selects syntax highlighting and is not part of the rendered code content, matching CommonMark fenced code blocks."
+  },
+  "parser": {
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          2,
+          5
+        ],
+        "closed": true
+      }
+    ],
+    "newline": "lf"
+  }
+}

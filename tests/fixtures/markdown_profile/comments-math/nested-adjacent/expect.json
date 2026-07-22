@@ -1,0 +1,24 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "An Obsidian comment can contain text that looks like wikilink syntax; because the comment hides everything between its `%%` delimiters, the enclosed text is not rendered as a link, and adjacent `$$` math blocks with no blank line between them each render as independent equations."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "comment",
+        "line": 0
+      },
+      {
+        "kind": "math-block",
+        "line": 2
+      },
+      {
+        "kind": "math-block",
+        "line": 5
+      }
+    ],
+    "newline": "lf"
+  }
+}

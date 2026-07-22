@@ -1,0 +1,13 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "YAML forbids tab characters for indentation; a front matter line indented with a literal tab causes a parse error, and Obsidian's Properties panel falls back to raw/unparsed display exactly as for any other invalid YAML front matter."
+  },
+  "parser": {
+    "diagnostics": [
+      "frontmatter.yaml-error"
+    ],
+    "newline": "lf"
+  }
+}

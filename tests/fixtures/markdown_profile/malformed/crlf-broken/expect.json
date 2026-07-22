@@ -1,0 +1,31 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "An unclosed front-matter block followed by an unclosed code fence behaves the same way under CRLF line endings as under LF."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Body",
+        "line": 4
+      }
+    ],
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          6,
+          7
+        ],
+        "closed": false
+      }
+    ],
+    "diagnostics": [
+      "envelope.unclosed-frontmatter",
+      "markdown.unclosed-fence"
+    ],
+    "newline": "crlf"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian renders GFM-style pipe tables when a header row is followed by a delimiter row of `---`-separated cells; the delimiter row itself does not render as a table row."
+  },
+  "parser": {
+    "newline": "lf"
+  }
+}

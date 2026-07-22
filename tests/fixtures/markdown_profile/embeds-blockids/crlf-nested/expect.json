@@ -1,0 +1,35 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Adjacent embeds and block references parse the same way under CRLF line endings as under LF."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "embed",
+        "target": "Diagram.png",
+        "line": 0
+      },
+      {
+        "kind": "embed",
+        "target": "Notes#^ref1",
+        "line": 1
+      },
+      {
+        "kind": "embed",
+        "target": "Notes#^ref2",
+        "line": 1
+      },
+      {
+        "kind": "block-id",
+        "line": 3
+      },
+      {
+        "kind": "block-id",
+        "line": 4
+      }
+    ],
+    "newline": "crlf"
+  }
+}

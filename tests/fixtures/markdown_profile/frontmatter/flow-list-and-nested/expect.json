@@ -1,0 +1,18 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian's Properties panel supports YAML flow-style lists such as `[alpha, beta]` and renders a nested mapping value (e.g. a `meta:` key with sub-keys) as a raw, unstructured block since the panel has no dedicated widget for arbitrary nested objects."
+  },
+  "parser": {
+    "newline": "lf"
+  },
+  "editing": [
+    {
+      "op": "append_frontmatter_list_item",
+      "key": "aliases",
+      "value": "gamma",
+      "expect": "error"
+    }
+  ]
+}

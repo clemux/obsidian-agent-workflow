@@ -1,0 +1,20 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "When the YAML front matter block is never closed by a second `---` line, Obsidian does not recognize any properties and renders the leading `---` and everything after it as ordinary document content."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Body starts without closing delimiter",
+        "line": 4
+      }
+    ],
+    "diagnostics": [
+      "envelope.unclosed-frontmatter"
+    ],
+    "newline": "lf"
+  }
+}

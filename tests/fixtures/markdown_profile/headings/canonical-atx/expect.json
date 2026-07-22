@@ -1,0 +1,27 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian renders ATX headings for 1-6 leading `#` characters followed by a space, matching CommonMark; an optional trailing run of `#` characters is stripped from the rendered heading text."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Title",
+        "line": 0
+      },
+      {
+        "level": 2,
+        "text": "Section One",
+        "line": 4
+      },
+      {
+        "level": 3,
+        "text": "Sub Section",
+        "line": 8
+      }
+    ],
+    "newline": "lf"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "CommonMark's lazy-continuation rule folds a following line with no `>` marker into the preceding blockquote paragraph as long as there is no blank line between them; Obsidian's renderer follows this rule, so the unmarked line becomes part of the blockquote above it rather than a separate paragraph."
+  },
+  "parser": {
+    "newline": "lf"
+  }
+}

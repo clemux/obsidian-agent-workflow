@@ -1,0 +1,26 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Front matter recognition and Properties rendering do not depend on the note's line-ending convention; a CRLF-terminated note's properties parse the same as its LF equivalent."
+  },
+  "parser": {
+    "newline": "crlf"
+  },
+  "editing": [
+    {
+      "op": "set_frontmatter_scalar",
+      "key": "status",
+      "value": "done",
+      "expect": "ok",
+      "result_contains": "status: done"
+    },
+    {
+      "op": "append_frontmatter_list_item",
+      "key": "tags",
+      "value": "gamma",
+      "expect": "ok",
+      "result_contains": "gamma"
+    }
+  ]
+}

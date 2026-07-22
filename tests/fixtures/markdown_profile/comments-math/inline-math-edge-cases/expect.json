@@ -1,0 +1,16 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian only renders `$...$` as inline math when there is no whitespace immediately after the opening `$` or before the closing `$`; `$5 and $6` and a lone unmatched `$` are left as literal dollar signs rather than math."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "math-inline",
+        "line": 2
+      }
+    ],
+    "newline": "lf"
+  }
+}

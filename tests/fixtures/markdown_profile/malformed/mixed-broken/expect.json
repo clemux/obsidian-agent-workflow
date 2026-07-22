@@ -1,0 +1,31 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "When YAML front matter is never closed by a second `---` line, Obsidian shows no properties at all and renders the whole file as document body, including the leading `---` line; any unclosed code fence later in that body still consumes the remainder of the file as code."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Body",
+        "line": 4
+      }
+    ],
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          6,
+          7
+        ],
+        "closed": false
+      }
+    ],
+    "diagnostics": [
+      "envelope.unclosed-frontmatter",
+      "markdown.unclosed-fence"
+    ],
+    "newline": "lf"
+  }
+}

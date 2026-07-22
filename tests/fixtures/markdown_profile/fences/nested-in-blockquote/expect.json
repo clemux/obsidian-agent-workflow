@@ -1,0 +1,20 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian allows a fenced code block to appear inside a blockquote, with each fence delimiter line still prefixed by `>`; the fence still requires matching delimiters within the quoted lines to close."
+  },
+  "parser": {
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          2,
+          4
+        ],
+        "closed": true
+      }
+    ],
+    "newline": "lf"
+  }
+}

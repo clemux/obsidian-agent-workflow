@@ -1,0 +1,57 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "A composite note combining front matter, headings, links, tags, a table, a fence, and a callout renders the same way under CRLF line endings as under LF."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Mixed Note",
+        "line": 8
+      },
+      {
+        "level": 2,
+        "text": "Data",
+        "line": 12
+      },
+      {
+        "level": 2,
+        "text": "Agent sessions",
+        "line": 25
+      }
+    ],
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          18,
+          20
+        ],
+        "closed": true
+      }
+    ],
+    "obsidian_spans": [
+      {
+        "kind": "wikilink",
+        "target": "Related Note",
+        "line": 10
+      },
+      {
+        "kind": "tag",
+        "line": 10
+      }
+    ],
+    "newline": "crlf"
+  },
+  "editing": [
+    {
+      "op": "append_block_to_section",
+      "heading": "## Agent sessions",
+      "block": "- new entry",
+      "expect": "ok",
+      "result_contains": "- new entry"
+    }
+  ]
+}

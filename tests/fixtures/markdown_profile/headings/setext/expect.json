@@ -1,0 +1,22 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian recognizes Setext-style headings: a line of text underlined with a run of `=` (level 1) or `-` (level 2), per CommonMark; the underline line itself is not separate content."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Main Title",
+        "line": 0
+      },
+      {
+        "level": 2,
+        "text": "Sub Title",
+        "line": 3
+      }
+    ],
+    "newline": "lf"
+  }
+}

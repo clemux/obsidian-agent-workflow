@@ -1,0 +1,13 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian's Properties panel falls back to showing the front matter as unparsed raw text when the enclosed YAML is invalid, such as an unterminated flow sequence like `[alpha, beta`."
+  },
+  "parser": {
+    "diagnostics": [
+      "frontmatter.yaml-error"
+    ],
+    "newline": "lf"
+  }
+}

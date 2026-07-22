@@ -1,0 +1,38 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "An otherwise well-formed note with valid front matter can still end with an unclosed code fence; Obsidian renders everything after the opening fence as code through end of file."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Notes",
+        "line": 5
+      }
+    ],
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          9,
+          10
+        ],
+        "closed": false
+      }
+    ],
+    "diagnostics": [
+      "markdown.unclosed-fence"
+    ],
+    "newline": "lf"
+  },
+  "editing": [
+    {
+      "op": "append_block_to_section",
+      "heading": "## Agent sessions",
+      "block": "- entry",
+      "expect": "error"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian comments (`%% ... %%`) hide their content from rendered views entirely while remaining visible in the editor; inline math `$...$` and block math `$$...$$` are rendered through Obsidian's MathJax integration per the documented syntax."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "comment",
+        "line": 0
+      },
+      {
+        "kind": "math-inline",
+        "line": 2
+      },
+      {
+        "kind": "math-block",
+        "line": 4
+      }
+    ],
+    "newline": "lf"
+  }
+}

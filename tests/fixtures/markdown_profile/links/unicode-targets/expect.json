@@ -1,0 +1,22 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian wikilink targets may contain any Unicode characters (accented Latin, CJK, etc.) since note titles themselves may use any Unicode text; only `[`, `]`, `|`, and newlines are excluded from the raw target."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "wikilink",
+        "target": "Café Menu",
+        "line": 0
+      },
+      {
+        "kind": "wikilink",
+        "target": "日本語ノート",
+        "line": 0
+      }
+    ],
+    "newline": "lf"
+  }
+}

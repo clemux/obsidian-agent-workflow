@@ -1,0 +1,26 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian treats the Properties block as YAML front matter delimited by a `---` line at the very start of the note and a matching `---` line that closes it; scalar and list properties render in the Properties panel using their YAML types."
+  },
+  "parser": {
+    "newline": "lf"
+  },
+  "editing": [
+    {
+      "op": "set_frontmatter_scalar",
+      "key": "status",
+      "value": "done",
+      "expect": "ok",
+      "result_contains": "status: done"
+    },
+    {
+      "op": "append_frontmatter_list_item",
+      "key": "tags",
+      "value": "gamma",
+      "expect": "ok",
+      "result_contains": "gamma"
+    }
+  ]
+}

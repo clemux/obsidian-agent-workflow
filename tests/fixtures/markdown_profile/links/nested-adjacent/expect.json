@@ -1,0 +1,27 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "When wikilink brackets are nested like `[[Outer[[Inner]]`, Obsidian resolves the innermost complete `[[...]]` pair as the link and leaves the unmatched outer `[[` as literal text; consecutive wikilinks with no space between them each resolve independently."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "wikilink",
+        "target": "Inner",
+        "line": 0
+      },
+      {
+        "kind": "wikilink",
+        "target": "First",
+        "line": 2
+      },
+      {
+        "kind": "wikilink",
+        "target": "Second",
+        "line": 2
+      }
+    ],
+    "newline": "lf"
+  }
+}

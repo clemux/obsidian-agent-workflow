@@ -1,0 +1,26 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Embed and block-reference recognition does not depend on the note's line-ending convention."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "embed",
+        "target": "image.png",
+        "line": 0
+      },
+      {
+        "kind": "embed",
+        "target": "Target Note#^abc123",
+        "line": 2
+      },
+      {
+        "kind": "block-id",
+        "line": 4
+      }
+    ],
+    "newline": "crlf"
+  }
+}

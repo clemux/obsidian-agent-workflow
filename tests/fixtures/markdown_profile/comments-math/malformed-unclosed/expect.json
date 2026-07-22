@@ -1,0 +1,16 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "An Obsidian comment opened with `%%` but never closed by a matching `%%` hides all remaining note content from rendered views through the end of the file."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "comment",
+        "line": 2
+      }
+    ],
+    "newline": "lf"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "A caret marker not immediately followed by a valid `[A-Za-z0-9-]+` identifier running to the end of the line is not recognized by Obsidian as a block reference and remains literal text; an unclosed `![[` embed is likewise left as literal text."
+  },
+  "parser": {
+    "newline": "lf"
+  }
+}

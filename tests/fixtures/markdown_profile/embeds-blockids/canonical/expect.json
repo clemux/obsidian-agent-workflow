@@ -1,0 +1,26 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "A wikilink prefixed with `!` (`![[...]]`) embeds the target note, image, or a specific block/heading inline rather than linking to it; a line ending in a space plus `^identifier` marks that line as a referenceable block with that ID, per Obsidian's block reference syntax."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "embed",
+        "target": "image.png",
+        "line": 0
+      },
+      {
+        "kind": "embed",
+        "target": "Target Note#^abc123",
+        "line": 2
+      },
+      {
+        "kind": "block-id",
+        "line": 4
+      }
+    ],
+    "newline": "lf"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "A wikilink written inside a fenced code block is not treated as a link by Obsidian: the fence's content, including anything that looks like `[[...]]`, is rendered as literal code text; nested heading levels and quote/fence nesting resolve independently of each other."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Outer",
+        "line": 0
+      },
+      {
+        "level": 2,
+        "text": "Inner",
+        "line": 1
+      },
+      {
+        "level": 3,
+        "text": "Deepest",
+        "line": 8
+      }
+    ],
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          4,
+          6
+        ],
+        "closed": true
+      }
+    ],
+    "newline": "lf"
+  }
+}

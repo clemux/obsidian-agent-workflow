@@ -1,0 +1,10 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian renders a blockquote whose first line matches `> [!TYPE]` as a callout box with an icon and title derived from the type keyword and any trailing text on that line; subsequent quoted lines form the callout body."
+  },
+  "parser": {
+    "newline": "lf"
+  }
+}

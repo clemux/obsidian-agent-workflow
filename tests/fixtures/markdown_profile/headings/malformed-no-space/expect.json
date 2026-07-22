@@ -1,0 +1,17 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian requires at least one space (or nothing else on the line) between the ATX `#` marker run and the heading text, and a marker of more than six `#` characters is not a heading at all; both `#NoSpaceHeading` and `####### TooManyHashes` render as ordinary paragraph text, matching CommonMark."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Valid Heading",
+        "line": 4
+      }
+    ],
+    "newline": "lf"
+  }
+}

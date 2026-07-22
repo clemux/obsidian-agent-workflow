@@ -1,0 +1,27 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Nested-bracket wikilink resolution behaves the same under CRLF line endings as under LF."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "wikilink",
+        "target": "Inner",
+        "line": 0
+      },
+      {
+        "kind": "wikilink",
+        "target": "First",
+        "line": 2
+      },
+      {
+        "kind": "wikilink",
+        "target": "Second",
+        "line": 2
+      }
+    ],
+    "newline": "crlf"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "An unclosed Obsidian comment still hides the remainder of a CRLF-terminated document through end of file, exactly as for LF."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "comment",
+        "line": 2
+      }
+    ],
+    "newline": "crlf"
+  }
+}

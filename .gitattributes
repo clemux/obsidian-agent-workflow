@@ -1,0 +1,2 @@
+tests/fixtures/markdown_profile/** -text
+src/oaw/document/profile_fixtures/** -text

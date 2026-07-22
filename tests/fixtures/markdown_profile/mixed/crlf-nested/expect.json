@@ -1,0 +1,37 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Nested heading, quote, and fence structure resolves the same way under CRLF line endings as under LF, including the wikilink hidden inside the fence."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Outer",
+        "line": 0
+      },
+      {
+        "level": 2,
+        "text": "Inner",
+        "line": 1
+      },
+      {
+        "level": 3,
+        "text": "Deepest",
+        "line": 8
+      }
+    ],
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          4,
+          6
+        ],
+        "closed": true
+      }
+    ],
+    "newline": "crlf"
+  }
+}

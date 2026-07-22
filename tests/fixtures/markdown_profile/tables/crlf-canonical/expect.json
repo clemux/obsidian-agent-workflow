@@ -1,0 +1,10 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "GFM pipe table recognition does not depend on the note's line-ending convention."
+  },
+  "parser": {
+    "newline": "crlf"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Without a second line consisting of a delimiter row (dashes and optional colons per column), Obsidian does not recognize a pipe table at all; the pipe characters render as literal paragraph text, matching the GFM table extension requirement."
+  },
+  "parser": {
+    "newline": "lf"
+  }
+}

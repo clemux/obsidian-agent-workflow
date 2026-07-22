@@ -1,0 +1,10 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "An unclosed `[[` with no matching `]]` is left as literal bracket text by Obsidian rather than becoming a link, and a wikilink escaped with a leading backslash (`\\[[...]]`) is likewise rendered as literal text, not as a link."
+  },
+  "parser": {
+    "newline": "lf"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian embeds accept a size hint after `|` for images (e.g. `![[Diagram.png|400]]` renders at 400px wide), and consecutive block-reference lines each get their own independent `^id` regardless of adjacency."
+  },
+  "parser": {
+    "obsidian_spans": [
+      {
+        "kind": "embed",
+        "target": "Diagram.png",
+        "line": 0
+      },
+      {
+        "kind": "embed",
+        "target": "Notes#^ref1",
+        "line": 1
+      },
+      {
+        "kind": "embed",
+        "target": "Notes#^ref2",
+        "line": 1
+      },
+      {
+        "kind": "block-id",
+        "line": 3
+      },
+      {
+        "kind": "block-id",
+        "line": 4
+      }
+    ],
+    "newline": "lf"
+  }
+}

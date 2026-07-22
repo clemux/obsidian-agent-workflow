@@ -1,0 +1,27 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian renders ATX headings identically regardless of the note's line-ending convention; a CRLF-terminated note produces the same heading structure as its LF equivalent."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Title",
+        "line": 0
+      },
+      {
+        "level": 2,
+        "text": "Section One",
+        "line": 4
+      },
+      {
+        "level": 3,
+        "text": "Sub Section",
+        "line": 8
+      }
+    ],
+    "newline": "crlf"
+  }
+}

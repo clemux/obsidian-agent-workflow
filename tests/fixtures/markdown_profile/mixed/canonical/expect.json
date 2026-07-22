@@ -1,0 +1,57 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "A realistic Obsidian task note combines YAML front matter properties, headings, body text with wikilinks and tags, a GFM table, a fenced code block, and a callout; Obsidian renders each construct independently per its own documented syntax within the same note."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 1,
+        "text": "Mixed Note",
+        "line": 8
+      },
+      {
+        "level": 2,
+        "text": "Data",
+        "line": 12
+      },
+      {
+        "level": 2,
+        "text": "Agent sessions",
+        "line": 25
+      }
+    ],
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          18,
+          20
+        ],
+        "closed": true
+      }
+    ],
+    "obsidian_spans": [
+      {
+        "kind": "wikilink",
+        "target": "Related Note",
+        "line": 10
+      },
+      {
+        "kind": "tag",
+        "line": 10
+      }
+    ],
+    "newline": "lf"
+  },
+  "editing": [
+    {
+      "op": "append_block_to_section",
+      "heading": "## Agent sessions",
+      "block": "- new entry",
+      "expect": "ok",
+      "result_contains": "- new entry"
+    }
+  ]
+}

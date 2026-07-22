@@ -1,0 +1,23 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "An unclosed fenced code block still consumes the remainder of a CRLF-terminated document as code, exactly as it does for LF."
+  },
+  "parser": {
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          2,
+          5
+        ],
+        "closed": false
+      }
+    ],
+    "diagnostics": [
+      "markdown.unclosed-fence"
+    ],
+    "newline": "crlf"
+  }
+}

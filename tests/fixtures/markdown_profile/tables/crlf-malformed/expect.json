@@ -1,0 +1,10 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "A pipe-delimited block missing its delimiter row is not recognized as a table under CRLF line endings either."
+  },
+  "parser": {
+    "newline": "crlf"
+  }
+}

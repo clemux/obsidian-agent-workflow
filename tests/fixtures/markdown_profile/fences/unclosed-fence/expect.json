@@ -1,0 +1,23 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "When a fenced code block's closing delimiter is missing, Obsidian's CommonMark-based renderer treats the fence as open through the end of the document, rendering all remaining lines as code."
+  },
+  "parser": {
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          2,
+          5
+        ],
+        "closed": false
+      }
+    ],
+    "diagnostics": [
+      "markdown.unclosed-fence"
+    ],
+    "newline": "lf"
+  }
+}

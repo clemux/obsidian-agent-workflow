@@ -1,0 +1,13 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "YAML anchors and aliases are valid YAML syntax but are not a documented Obsidian Properties feature; Obsidian's properties parser does not specially resolve or merge them."
+  },
+  "parser": {
+    "diagnostics": [
+      "frontmatter.unsupported-node"
+    ],
+    "newline": "lf"
+  }
+}

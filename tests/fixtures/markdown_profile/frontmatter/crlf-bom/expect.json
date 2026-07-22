@@ -1,0 +1,13 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian tolerates a UTF-8 byte-order mark at the very start of a note and still recognizes the immediately following `---` as the start of the properties block; the BOM itself is not treated as document content."
+  },
+  "parser": {
+    "diagnostics": [
+      "envelope.bom"
+    ],
+    "newline": "crlf"
+  }
+}

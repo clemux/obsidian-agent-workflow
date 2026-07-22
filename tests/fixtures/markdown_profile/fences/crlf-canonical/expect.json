@@ -1,0 +1,20 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Fenced code block recognition does not depend on the note's line-ending convention; a CRLF-terminated fence closes on the same logical line as its LF equivalent."
+  },
+  "parser": {
+    "protected": [
+      {
+        "kind": "fence",
+        "lines": [
+          2,
+          5
+        ],
+        "closed": true
+      }
+    ],
+    "newline": "crlf"
+  }
+}

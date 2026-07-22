@@ -1,0 +1,24 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian allows a table to begin immediately after a heading line with no blank line between them, and wikilinks inside table cells are still recognized and rendered as internal links."
+  },
+  "parser": {
+    "headings": [
+      {
+        "level": 2,
+        "text": "Data",
+        "line": 0
+      }
+    ],
+    "obsidian_spans": [
+      {
+        "kind": "wikilink",
+        "target": "Alpha Note",
+        "line": 3
+      }
+    ],
+    "newline": "lf"
+  }
+}

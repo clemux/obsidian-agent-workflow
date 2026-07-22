@@ -1,0 +1,10 @@
+{
+  "obsidian": {
+    "version": "1.12.7",
+    "source": "documented",
+    "observation": "Obsidian supports nesting one callout inside another by nesting blockquote markers (`> >`); each nested `[!TYPE]` marker on the first line of its blockquote level starts its own callout."
+  },
+  "parser": {
+    "newline": "lf"
+  }
+}
