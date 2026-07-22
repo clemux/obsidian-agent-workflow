@@ -1,7 +1,7 @@
 import pytest
 
 from tests import support
-from tests.support import write
+from tests.support import snapshot_tree_without_following_symlinks, write
 
 
 @pytest.fixture
@@ -84,6 +84,26 @@ def test_research_scaffold_refuses_existing_prompt_without_force(run_oaw, vault)
     proc = run_oaw(*args)
     assert proc.returncode == 1
     assert "research prompt already exists" in proc.stderr
+
+
+@pytest.mark.parametrize("track", ["architecture/CON", "architecture/trailing.", "a//b"])
+def test_research_scaffold_rejects_nonportable_track_without_writing(run_oaw, vault, track):
+    before = snapshot_tree_without_following_symlinks(vault)
+
+    result = run_oaw(
+        "research",
+        "scaffold",
+        "--project",
+        "obs:OAW",
+        "--track",
+        track,
+        "--title",
+        "Portable track",
+    )
+
+    assert result.returncode == 1
+    assert "research track component" in result.stderr
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
 def test_research_scaffold_rejects_template_that_leaks_local_metadata(run_oaw, vault):
@@ -256,10 +276,10 @@ def test_research_start_rejects_unsafe_duplicate_and_non_http_sources(run_oaw, v
     common = ("research", "start", "--project", "obs:OAW", "--track", "topic")
     unsafe = run_oaw(*common, "--source", "../ChatGPT", "--url", "https://example.com")
     assert unsafe.returncode == 1
-    assert "safe --source label" in unsafe.stderr
+    assert "research start --source" in unsafe.stderr
     reserved = run_oaw(*common, "--source", "ChatGPT: Pro", "--url", "https://example.com")
     assert reserved.returncode == 1
-    assert "safe --source label" in reserved.stderr
+    assert "research start --source" in reserved.stderr
     bad_url = run_oaw(*common, "--source", "ChatGPT", "--url", "file:///tmp/report")
     assert bad_url.returncode == 1
     assert "HTTP(S)" in bad_url.stderr

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import OawError
+from .filenames import portable_filename_component
 from .frontmatter import parse_frontmatter, set_frontmatter_scalar
 from .notes import split_note
 
@@ -177,6 +178,10 @@ def ensure_registry_has_no_symlinks(root: Path) -> Path:
 
 
 def run_path(root: Path, identifier: str) -> Path:
+    try:
+        portable_filename_component(identifier, "run id")
+    except OawError as exc:
+        raise OawError(f"invalid run id: {identifier!r}; {exc}") from exc
     if (
         not identifier.startswith("AGT-RUN-")
         or Path(identifier).name != identifier

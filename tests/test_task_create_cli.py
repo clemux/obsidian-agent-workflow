@@ -114,6 +114,50 @@ def test_task_create_defaults_to_backlog_with_derived_id(run_oaw, vault):
     assert "OAW-TSK-improve-resolver-errors" in listing.stdout
 
 
+@pytest.mark.parametrize("start_args", [(), ("--start",)])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "",
+        " padded",
+        ".",
+        "..",
+        ".hidden",
+        "trailing.",
+        "bad\x00name",
+        "CON.txt",
+        *[f"bad{character}name" for character in '\\/:*?"<>|'],
+    ],
+)
+def test_task_create_rejects_nonportable_titles_without_any_write(
+    run_oaw, vault, title, start_args
+):
+    before = snapshot_tree_without_following_symlinks(vault)
+
+    result = run_oaw(
+        "task",
+        "create",
+        "--project",
+        "obs:OAW",
+        "--title",
+        title,
+        *start_args,
+    )
+
+    assert result.returncode == 1
+    assert "task title" in result.stderr
+    assert before == snapshot_tree_without_following_symlinks(vault)
+
+
+def test_task_create_supports_portable_unicode_and_display_punctuation(run_oaw, vault):
+    title = "Café — owner's (draft) - v2"
+
+    result = run_oaw("task", "create", "--project", "obs:OAW", "--title", title)
+
+    assert result.returncode == 0, result.stderr
+    assert (vault / "Projects/Obsidian Agent Workflow/Tasks" / f"{title}.md").is_file()
+
+
 def test_task_create_accepts_explicit_preparedness(run_oaw, vault):
     proc = run_oaw(
         "task",
@@ -381,6 +425,60 @@ def test_task_create_from_capture_start_creates_active_task(run_oaw, vault):
     )
     assert "status: active" in task
     assert 'session-ids:\n  - "test-thread"' in task
+
+
+def test_task_create_rejects_nonportable_capture_title_before_promotion_or_start(run_oaw, vault):
+    capture = vault / "Captures/Entries/OAW-CAP-unsafe-title.md"
+    write(
+        capture,
+        """---
+id: OAW-CAP-unsafe-title
+aliases:
+  - OAW-CAP-unsafe-title
+type: capture
+created: 2026-07-22T00:00:00+00:00
+status: inbox
+project: obsidian-agent-workflow
+destinations:
+---
+
+# Unsafe: capture title
+""",
+    )
+    before = snapshot_tree_without_following_symlinks(vault)
+
+    result = run_oaw(
+        "task",
+        "create",
+        "--from-capture",
+        "OAW-CAP-unsafe-title",
+        "--start",
+    )
+
+    assert result.returncode == 1
+    assert "reserved filename character ':'" in result.stderr
+    assert before == snapshot_tree_without_following_symlinks(vault)
+
+
+def test_task_create_start_rejects_id_that_would_make_nonportable_run_filename(run_oaw, vault):
+    before = snapshot_tree_without_following_symlinks(vault)
+
+    result = run_oaw(
+        "task",
+        "create",
+        "--project",
+        "obs:OAW",
+        "--title",
+        "Portable title",
+        "--id",
+        "OAW:unsafe-id",
+        "--start",
+    )
+
+    assert result.returncode == 1
+    assert "invalid run id" in result.stderr
+    assert "reserved filename character ':'" in result.stderr
+    assert before == snapshot_tree_without_following_symlinks(vault)
 
 
 def test_task_create_from_capture_start_requires_real_session_provenance(run_oaw, vault):

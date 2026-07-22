@@ -24,7 +24,7 @@ oaw ingest safe-export --ingestion-root /path/to/handoff --destination "Imports/
   - `safe-export-personal: true`
   - `safe-export-personal` tag
 - Dry-run by default: it reports what would be ingested or rejected without writing.
-- `--ingestion-root` overrides the environment/default source and `--destination` sets a vault-relative destination.
+- `--ingestion-root` overrides the environment/default source and `--destination` sets a vault-relative destination whose components must use portable filenames. Incoming notes with nonportable path components are rejected rather than copied into the vault; write mode quarantines them under a deterministic portable name. Accepted destination paths are NFC-normalized.
 - `--write` performs the actual move:
   - accepted notes go to the vault-relative `Imports/Safe export`
   - rejected notes go to `.rejected/` in the handoff path
@@ -54,7 +54,7 @@ Validate a returned or transferred bundle before trusting it on the receiving si
 oaw export validate ~/obsidian-export/OAW-TSK-export-example --target work
 ```
 
-- `note` refuses unmarked notes and notes whose `export-scope` does not match `--target`. Legacy `safe_for_export: true` plus a matching `export_target` remains accepted for existing notes.
+- `note` refuses unmarked notes and notes whose `export-scope` does not match `--target`. Legacy `safe_for_export: true` plus a matching `export_target` remains accepted for existing notes. Its sanitized bundle name and every exported artifact path must satisfy the portable filename-component contract before OAW creates the output root or staging bundle.
 - The bundle contains `note.md`, optional copied artifacts from `export_artifacts`, and `manifest.json`.
 - Existing bundles are refused unless `export note --force` is explicit; `validate --target` defaults to the manifest target when omitted.
 - Manifest paths are vault-relative, not absolute local paths.

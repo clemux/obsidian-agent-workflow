@@ -73,5 +73,6 @@ exactly one body source are mandatory: use `--body` or `--body-file`; pass
 `Agents/Feedback/<date> <title>.md` and its default ID/alias is
 `AGT-FDBK-<title-slug>`. `--date` and `--id` override those derived values.
 Repeat `--tag` for safe, deduplicated extra tags. The command refuses duplicate
-IDs and paths, never overwrites feedback, and requires real session provenance
+IDs and paths, requires the title to satisfy the shared portable filename-component
+contract, never overwrites feedback, and requires real session provenance
 unless `--allow-missing-session-id` is explicitly accepted.

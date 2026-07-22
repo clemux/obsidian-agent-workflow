@@ -450,13 +450,21 @@ oaw task create --from-capture obs:OAW-CAP-urgent --title "Handle urgent request
 
 `--project` accepts a project alias (`obs:OAW`) or a folder name under `Projects/`. The note is created under the project's `Tasks/` folder with standard frontmatter and optional `priority`, `effort`, and `execution`. The task ID defaults to `<ALIAS>-TSK-<slug>`; status defaults to `backlog`, with `--status todo` for selected work. Preparedness defaults to `needs-triage`; `--preparedness` may select any canonical value explicitly. `--start` works with or without a capture and atomically creates the active task and running record; it defaults execution to `agent`, requires a real session, and rejects `--execution human`. Duplicate IDs and existing paths fail without writing anything.
 
+Task titles become Markdown filename stems, so they must be portable components:
+non-empty with no surrounding whitespace, `.`/`..`, leading dot, trailing dot or
+space, control character, Windows device name, or `\ / : * ? " < > |`. Rephrase
+display punctuation that is reserved in filenames—for example, write `Review — API`
+or `Review - API` instead of `Review: API`. The same contract protects every OAW
+command that uses user text directly in a created filename or folder; commands that
+generate an ASCII slug from a display title remain free to accept that punctuation.
+
 The generated `created` value is a timezone-aware UTC datetime. Repeatable `--tag`
 values must be lowercase safe identifiers, are deduplicated in first-seen order, and
 precede `source-capture` on promoted tasks. Non-started creation records a session
 trace and permits `--allow-missing-session-id` only when an untraceable trace is
 explicitly accepted.
 
-When an actionable capture becomes material work, pass its stable ID with `--from-capture`. The title defaults to the capture heading and `--title` may override it. Capture project metadata is authoritative when present: a supplied `--project` must resolve to the same project or the command fails. Without capture metadata, `--project` selects the project; otherwise the legacy `Projects/` path is inferred. The command preserves the capture note and body, records its ID as `source-capture` on the task, adds durable links in both directions, appends the task wikilink to the capture's `destinations` frontmatter, and only then changes the capture to `status: triaged`. Those writes commit together and roll back together on failure. The capture's `Outcome` remains an expected-next-shape statement; promotion does not replace it with completion prose. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent.
+When an actionable capture becomes material work, pass its stable ID with `--from-capture`. The title defaults to the capture heading and `--title` may override it; either source must satisfy the portable-component contract before OAW stages the task, capture, relationship, or run writes. Capture project metadata is authoritative when present: a supplied `--project` must resolve to the same project or the command fails. Without capture metadata, `--project` selects the project; otherwise the legacy `Projects/` path is inferred. The command preserves the capture note and body, records its ID as `source-capture` on the task, adds durable links in both directions, appends the task wikilink to the capture's `destinations` frontmatter, and only then changes the capture to `status: triaged`. Those writes commit together and roll back together on failure. The capture's `Outcome` remains an expected-next-shape statement; promotion does not replace it with completion prose. Choose backlog (default), `--status todo`, or `--start` for immediate `active` intent.
 
 ### Semantic task relationships
 

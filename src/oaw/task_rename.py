@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import OawError
+from .filenames import portable_filename_component
 from .frontmatter import parse_frontmatter, read_frontmatter_text
 from .links import (
     ContainerPart,
@@ -40,16 +41,6 @@ from .resolver import (
     strip_obs_prefix,
 )
 from .runs import runs_for_task
-
-WINDOWS_RESERVED_NAMES = {
-    "con",
-    "prn",
-    "aux",
-    "nul",
-    *(f"com{number}" for number in range(1, 10)),
-    *(f"lpt{number}" for number in range(1, 10)),
-}
-FORBIDDEN_TITLE_CHARACTERS = set('/\\:*?"<>|')
 
 
 @dataclass(frozen=True)
@@ -158,18 +149,7 @@ def _validate_source(match: NoteMatch, root: Path, task_id: str) -> tuple[FileSn
 
 
 def normalize_task_title(raw_title: str) -> str:
-    title = unicodedata.normalize("NFC", raw_title)
-    if not title or title != title.strip() or "\n" in title or "\r" in title:
-        raise OawError("task title must be one non-empty, trimmed line")
-    if title.startswith(".") or title.endswith((".", " ")):
-        raise OawError("task title must not start with a dot or end with a dot or space")
-    if any(character in FORBIDDEN_TITLE_CHARACTERS for character in title):
-        raise OawError("task title contains a character that is unsafe in filenames")
-    if any(unicodedata.category(character) == "Cc" for character in title):
-        raise OawError("task title contains a control character")
-    if title.split(".", 1)[0].casefold() in WINDOWS_RESERVED_NAMES:
-        raise OawError("task title uses a reserved device name")
-    return title
+    return portable_filename_component(raw_title, "task title")
 
 
 def _replace_single_h1(text: str, title: str) -> tuple[str, str, bool]:

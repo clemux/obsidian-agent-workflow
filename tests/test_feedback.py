@@ -80,7 +80,7 @@ def test_feedback_rejects_unsafe_portable_filename_titles() -> None:
         "ends. ",
         "bad\x00name",
     ):
-        with pytest.raises(OawError, match="safe filename title"):
+        with pytest.raises(OawError, match="feedback title"):
             feedback.feedback_title(title)
 
 

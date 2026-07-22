@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from .errors import OawError
+from .filenames import portable_filename_component, portable_relative_path
 from .frontmatter import parse_frontmatter
 from .notes import read_note, split_note
 from .resolver import NoteMatch, resolve_id
@@ -99,7 +100,7 @@ def export_bundle_name(match: NoteMatch) -> str:
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", raw).strip(".-")
     if not name:
         raise OawError("could not derive a safe export bundle name")
-    return name
+    return portable_filename_component(name, "export bundle name")
 
 
 def write_export_bundle(
@@ -111,8 +112,22 @@ def write_export_bundle(
     match = resolve_id(note_id, root)
     require_safe_export(match, target)
     output_root = output_root.expanduser() if output_root else DEFAULT_EXPORT_ROOT.expanduser()
-    output_root.mkdir(parents=True, exist_ok=True)
     bundle_name = export_bundle_name(match)
+    artifacts: list[tuple[Path, str, Path]] = []
+    artifact_keys: set[str] = set()
+    for raw_artifact in frontmatter_strings(match.frontmatter, "export_artifacts"):
+        source = resolve_export_artifact(root, match.path, raw_artifact)
+        source_relpath = source.relative_to(root).as_posix()
+        portable_relpath = portable_relative_path(source_relpath, "export artifact path")
+        key = portable_relpath.as_posix().casefold()
+        if key in artifact_keys:
+            raise OawError(
+                "export artifacts collide after portable filename normalization: "
+                f"{portable_relpath.as_posix()}"
+            )
+        artifact_keys.add(key)
+        artifacts.append((source, source_relpath, portable_relpath))
+    output_root.mkdir(parents=True, exist_ok=True)
     bundle = output_root / bundle_name
     if bundle.exists():
         if not force:
@@ -125,15 +140,13 @@ def write_export_bundle(
         note_path.write_text(export_note_text(match, target), encoding="utf-8")
 
         artifact_entries = []
-        for raw_artifact in frontmatter_strings(match.frontmatter, "export_artifacts"):
-            source = resolve_export_artifact(root, match.path, raw_artifact)
-            rel_source = source.relative_to(root).as_posix()
-            destination = staging / "artifacts" / rel_source
+        for source, source_relpath, portable_relpath in artifacts:
+            destination = staging / "artifacts" / portable_relpath
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
             artifact_entries.append(
                 {
-                    "source_path": rel_source,
+                    "source_path": source_relpath,
                     "path": destination.relative_to(staging).as_posix(),
                     "sha256": sha256_file(destination),
                     "size_bytes": destination.stat().st_size,

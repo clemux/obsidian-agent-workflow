@@ -27,7 +27,7 @@ OAW_VAULT=~/vaults/example oaw project create \
   quoted `repo`, `<ALIAS>-index` as the ID and alias, `projects` plus project tags, and
   real session provenance. `--tag` is repeatable; extra tags must be lowercase safe
   identifiers and are deduplicated in first-seen order.
-- Project names must be safe one-segment folder names and aliases must match
+- Project names must satisfy the shared portable filename-component contract and aliases must match
   `[A-Z][A-Z0-9]{1,7}`. User values, template structure, destination absence, and ID
   uniqueness are all checked before the transactional write. There is no overwrite or
   `--force` path.
@@ -47,7 +47,7 @@ OAW_VAULT=~/vaults/example oaw research scaffold \
   --date 2026-07-12
 ```
 
-The command writes `Prompt.md`, `Synthesis.md`, and the shared folder-scoped `Bases/Research packet.base`. It refuses an existing prompt unless `--force` is explicit; forcing never replaces an existing synthesis. The single exact `## Deep research prompt` heading must be followed only by one non-empty fenced `text` block. Its contents are the complete copy-ready provider request; local metadata, fence markers, and extra commentary are excluded from handoff.
+The command writes `Prompt.md`, `Synthesis.md`, and the shared folder-scoped `Bases/Research packet.base`. Every `--track` segment must satisfy the shared portable filename-component contract. It refuses an existing prompt unless `--force` is explicit; forcing never replaces an existing synthesis. The single exact `## Deep research prompt` heading must be followed only by one non-empty fenced `text` block. Its contents are the complete copy-ready provider request; local metadata, fence markers, and extra commentary are excluded from handoff.
 
 Immediately after launching exactly one provider run, register it:
 
@@ -59,7 +59,7 @@ OAW_VAULT=~/vaults/example oaw research start \
   --url "https://example.com/share/run"
 ```
 
-`start` creates one `Results - <Source>.md` with running status and provenance, appends it to the prompt's initially empty `## Running research sessions`, refuses unsafe or duplicate source labels and non-HTTP(S) URLs, and rolls back partial writes. It creates a missing synthesis/Base but never overwrites synthesis content.
+`start` creates one `Results - <Source>.md` with running status and provenance, appends it to the prompt's initially empty `## Running research sessions`, requires `--source` to satisfy the shared portable filename-component contract, refuses duplicate source labels and non-HTTP(S) URLs, and rolls back partial writes. It creates a missing synthesis/Base but never overwrites synthesis content.
 
 Use the `oaw-research` skill for provider-visible handoff preflight, exact copy
 output, finished-report intake, raw-artifact preservation, and provider-specific

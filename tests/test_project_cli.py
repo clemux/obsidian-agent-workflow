@@ -143,6 +143,11 @@ Retained.
             id="unsafe-name",
         ),
         pytest.param(
+            ("--name", "CON", "--alias", "OK", "--goal", "Goal"),
+            "Windows reserved device name",
+            id="reserved-device-name",
+        ),
+        pytest.param(
             ("--name", "Unsafe", "--alias", "bad", "--goal", "Goal"),
             "--alias",
             id="unsafe-alias",

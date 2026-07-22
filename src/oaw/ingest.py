@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import OawError
+from .filenames import portable_relative_path
 from .frontmatter import read_frontmatter_only
 
 SAFE_EXPORT_DESTINATION = Path("Imports/Safe export")
@@ -25,6 +27,7 @@ class ExportCandidate:
     marker: str
     reason: str
     destination: Path | None = None
+    portable_relative_source: Path | None = None
 
 
 def default_ingestion_root() -> Path:
@@ -32,12 +35,9 @@ def default_ingestion_root() -> Path:
 
 
 def safe_export_destination(destination: str) -> Path:
-    raw = Path(destination)
-    if raw.is_absolute():
+    if Path(destination).is_absolute():
         raise OawError("--destination must be vault-relative")
-    if ".." in raw.parts:
-        raise OawError("--destination must not contain '..'")
-    return raw
+    return portable_relative_path(destination, "--destination")
 
 
 def frontmatter_tags(data: dict[str, object]) -> set[str]:
@@ -102,14 +102,40 @@ def classify_export_candidate(
 ) -> ExportCandidate:
     relative = path.relative_to(ingestion_root)
     try:
-        _, data = read_frontmatter_only(path)
-    except UnicodeDecodeError as exc:
-        return ExportCandidate(path, relative, False, "", f"frontmatter is not UTF-8: {exc}")
+        portable_relative = portable_relative_path(relative.as_posix(), "ingested note path")
     except OawError as exc:
         return ExportCandidate(path, relative, False, "", str(exc))
+    try:
+        _, data = read_frontmatter_only(path)
+    except UnicodeDecodeError as exc:
+        return ExportCandidate(
+            path,
+            relative,
+            False,
+            "",
+            f"frontmatter is not UTF-8: {exc}",
+            portable_relative_source=portable_relative,
+        )
+    except OawError as exc:
+        return ExportCandidate(
+            path,
+            relative,
+            False,
+            "",
+            str(exc),
+            portable_relative_source=portable_relative,
+        )
     safe, marker, reason = safe_export_marker(data)
-    destination = destination_root / relative if safe else None
-    return ExportCandidate(path, relative, safe, marker, reason, destination)
+    destination = destination_root / portable_relative if safe else None
+    return ExportCandidate(
+        path,
+        relative,
+        safe,
+        marker,
+        reason,
+        destination,
+        portable_relative,
+    )
 
 
 def classify_export_candidates(
@@ -123,7 +149,13 @@ def classify_export_candidates(
 
 
 def move_to_quarantine(candidate: ExportCandidate, ingestion_root: Path) -> Path:
-    quarantine = ingestion_root / SAFE_EXPORT_QUARANTINE / candidate.relative_source
+    relative = candidate.portable_relative_source
+    if relative is None:
+        digest = hashlib.sha256(
+            candidate.relative_source.as_posix().encode("utf-8", "surrogatepass")
+        ).hexdigest()[:12]
+        relative = Path(f"rejected-{digest}.md")
+    quarantine = ingestion_root / SAFE_EXPORT_QUARANTINE / relative
     quarantine.parent.mkdir(parents=True, exist_ok=True)
     destination = unique_destination(quarantine)
     shutil.move(str(candidate.source), str(destination))

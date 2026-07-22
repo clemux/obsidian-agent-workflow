@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import datetime as dt
-import re
-import unicodedata
 from pathlib import Path
 
 from .errors import OawError
+from .filenames import slugify_portable_fragment
 from .links import materialize_obs_references
 from .notes import append_markdown_block_to_section, normalize_heading
 from .resolver import iter_markdown, note_match, resolve_id
@@ -40,9 +39,7 @@ def update_note_observation(root: Path, raw_id: str, section: str, title: str, b
 
 
 def slugify(value: str) -> str:
-    folded = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
-    slug = re.sub(r"[^a-z0-9]+", "-", folded.lower()).strip("-")
-    return slug or "session"
+    return slugify_portable_fragment(value, fallback="session")
 
 
 def validate_date(value: str) -> str:

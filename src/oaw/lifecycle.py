@@ -5,11 +5,15 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-import unicodedata
 import urllib.parse
 from pathlib import Path
 
 from .errors import OawError
+from .filenames import (
+    portable_filename_component,
+    portable_relative_path,
+    slugify_portable_fragment,
+)
 from .frontmatter import (
     append_frontmatter_list_value,
     parse_frontmatter,
@@ -718,9 +722,7 @@ def audit_run_registry(root: Path) -> None:
 
 
 def _slugify(value: str) -> str:
-    folded = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
-    slug = re.sub(r"[^a-z0-9]+", "-", folded.lower()).strip("-")
-    return slug or "session"
+    return slugify_portable_fragment(value, fallback="session")
 
 
 def _resolve_capture_project_metadata(value, root, references):
@@ -788,11 +790,8 @@ def create_task(
             raise OawError("from-capture source must have a stable frontmatter id")
         if capture.frontmatter.get("status") == "triaged":
             raise OawError(f"capture is already triaged: {capture.note_id}")
-    clean_title = (title or (capture.title if capture else "")).strip()
-    if not clean_title:
-        raise OawError("task create requires a non-empty --title")
-    if "/" in clean_title or clean_title.startswith("."):
-        raise OawError("task title must not contain '/' or start with '.'")
+    raw_title = title if title is not None else capture.title if capture else ""
+    clean_title = portable_filename_component(raw_title, "task title")
     metadata_project: tuple[Path, str | None] | None = None
     if capture:
         raw_metadata = capture.frontmatter.get("project")
@@ -951,22 +950,7 @@ def single_line_value(raw: str | None, label: str, *, required: bool = True) -> 
 
 
 def safe_project_name(raw: str) -> str:
-    name = single_line_value(raw, "--name")
-    assert name is not None
-    if (
-        name != raw
-        or name in {".", ".."}
-        or name.startswith(".")
-        or name.endswith((".", " "))
-        or any(character in name for character in '/\\:*?"<>|')
-        or any(unicodedata.category(character).startswith("C") for character in name)
-        or Path(name).name != name
-    ):
-        raise OawError(
-            "project create --name must be a safe one-segment folder name without "
-            "surrounding whitespace, separators, traversal, or reserved characters"
-        )
-    return name
+    return portable_filename_component(raw, "project create --name")
 
 
 def replace_h2_body(text: str, heading: str, body: str) -> str:
@@ -1147,7 +1131,7 @@ def create_research_packet(
 ) -> None:
     root = root
     project_root, _ = resolve_project_root(project, root)
-    track = safe_relative_path(track_value, "track")
+    track = portable_relative_path(track_value, "research track")
     title = title_value.strip()
     if not title or "\n" in title or "\r" in title:
         raise OawError("research scaffold requires a non-empty, single-line --title")
@@ -1287,20 +1271,7 @@ def research_packet_base_text() -> str:
 
 
 def safe_research_source(raw: str) -> str:
-    source = raw.strip()
-    if (
-        not source
-        or source in {".", ".."}
-        or source != raw
-        or any(ch in source for ch in '/\\:*?"<>|')
-        or any(unicodedata.category(ch).startswith("C") for ch in source)
-        or Path(source).name != source
-    ):
-        raise OawError(
-            "research start requires a safe --source label without surrounding whitespace, "
-            "path separators, traversal components, or control characters"
-        )
-    return source
+    return portable_filename_component(raw, "research start --source")
 
 
 def http_url(raw: str) -> str:
@@ -1318,7 +1289,7 @@ def start_research_run(
 ) -> None:
     root = root
     project_root, _ = resolve_project_root(project, root)
-    track = safe_relative_path(track_value, "track")
+    track = portable_relative_path(track_value, "research track")
     source = safe_research_source(source_value)
     url = http_url(url_value)
     packet_dir = project_root / "Research" / track

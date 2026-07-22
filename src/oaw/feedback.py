@@ -5,12 +5,12 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
-import unicodedata
 from enum import StrEnum
 from pathlib import Path
 from typing import TextIO
 
 from .errors import OawError
+from .filenames import portable_filename_component, slugify_portable_fragment
 from .links import materialize_obs_references
 from .notes import read_markdown_source, write_new_note_atomic
 from .resolver import matches_from_references, scan_note_references
@@ -28,20 +28,10 @@ class FeedbackType(StrEnum):
 FEEDBACK_TYPES = tuple(member.value for member in FeedbackType)
 FEEDBACK_DIRECTORY = Path("Agents/Feedback")
 EXPLICIT_FEEDBACK_ID = re.compile(r"^AGT-FDBK-[a-z0-9]+(?:-[a-z0-9]+)*$")
-WINDOWS_RESERVED_NAMES = {
-    "con",
-    "prn",
-    "aux",
-    "nul",
-    *(f"com{number}" for number in range(1, 10)),
-    *(f"lpt{number}" for number in range(1, 10)),
-}
 
 
 def slugify(value: str) -> str:
-    folded = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
-    slug = re.sub(r"[^a-z0-9]+", "-", folded.lower()).strip("-")
-    return slug or "feedback"
+    return slugify_portable_fragment(value, fallback="feedback")
 
 
 def validate_date(value: str) -> str:
@@ -55,20 +45,7 @@ def validate_date(value: str) -> str:
 
 
 def feedback_title(value: str) -> str:
-    title = value.strip()
-    title_stem = title.split(".", maxsplit=1)[0].casefold()
-    if (
-        not title
-        or title != value
-        or title in {".", ".."}
-        or title.startswith(".")
-        or title.endswith((".", " "))
-        or title_stem in WINDOWS_RESERVED_NAMES
-        or any(character in title for character in '/\\:*?"<>|')
-        or any(unicodedata.category(character).startswith("C") for character in title)
-    ):
-        raise OawError("feedback title must be a non-empty safe filename title")
-    return title
+    return portable_filename_component(value, "feedback title")
 
 
 def scalar(value: str) -> str:

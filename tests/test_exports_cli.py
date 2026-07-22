@@ -174,13 +174,8 @@ export_artifacts:
     )
 
     assert failed.returncode != 0
-    # The only permitted effect of the failed export is the empty output root;
-    # the staging directory is cleaned up and nothing else under the vault
-    # changes (no partial bundle, no leftover tmp staging entry).
-    assert support.snapshot_tree_without_following_symlinks(vault) == {
-        **before,
-        "exports": ("directory", None),
-    }
+    # Artifact resolution and filename validation precede output-root creation.
+    assert support.snapshot_tree_without_following_symlinks(vault) == before
 
     write(artifact, "ready\n")
     retried = support.run_oaw_in_process(
@@ -225,6 +220,60 @@ export-scope: work
     assert proc.returncode == 0, proc.stderr
     assert (output_root / "escape/manifest.json").exists()
     assert not (vault / "escape").exists()
+
+
+def test_export_note_rejects_reserved_bundle_name_before_creating_output_root(run_oaw, vault):
+    write(
+        vault / "Projects/Example/Tasks/Reserved export.md",
+        """---
+type: task
+id: CON
+export-scope: work
+---
+
+# Reserved export
+""",
+    )
+    output_root = vault / "exports"
+    before = support.snapshot_tree_without_following_symlinks(vault)
+
+    result = run_oaw("export", "note", "CON", "--output-root", str(output_root))
+
+    assert result.returncode == 1
+    assert "Windows reserved device name" in result.stderr
+    assert support.snapshot_tree_without_following_symlinks(vault) == before
+
+
+def test_export_note_rejects_nonportable_artifact_before_creating_output_root(run_oaw, vault):
+    note = vault / "Projects/Example/Tasks/Artifact export.md"
+    write(
+        note,
+        """---
+type: task
+id: EXP-TSK-artifact
+export-scope: work
+export_artifacts:
+  - unsafe:name.txt
+---
+
+# Artifact export
+""",
+    )
+    write(note.parent / "unsafe:name.txt", "artifact\n")
+    output_root = vault / "exports"
+    before = support.snapshot_tree_without_following_symlinks(vault)
+
+    result = run_oaw(
+        "export",
+        "note",
+        "EXP-TSK-artifact",
+        "--output-root",
+        str(output_root),
+    )
+
+    assert result.returncode == 1
+    assert "export artifact path component" in result.stderr
+    assert support.snapshot_tree_without_following_symlinks(vault) == before
 
 
 @pytest.mark.parametrize(
@@ -429,6 +478,93 @@ export-scope: personal
 
     assert proc.returncode != 0
     assert "--destination must be vault-relative" in proc.stderr
+
+
+@pytest.mark.parametrize("destination", ["Imports/CON", "Imports/trailing.", "Imports//Review"])
+def test_safe_export_ingest_refuses_nonportable_destination_without_writing(
+    run_oaw, vault, destination
+):
+    ingestion = vault / "handoff"
+    write(ingestion / "safe.md", "---\nexport-scope: personal\n---\n\n# Safe\n")
+    before = support.snapshot_tree_without_following_symlinks(vault)
+
+    result = run_oaw(
+        "ingest",
+        "safe-export",
+        "--ingestion-root",
+        str(ingestion),
+        "--destination",
+        destination,
+        "--write",
+    )
+
+    assert result.returncode == 1
+    assert "--destination component" in result.stderr
+    assert support.snapshot_tree_without_following_symlinks(vault) == before
+
+
+def test_safe_export_ingest_rejects_nonportable_source_name_instead_of_copying_to_vault(
+    run_oaw, vault
+):
+    ingestion = vault / "handoff"
+    source = ingestion / "unsafe:name.md"
+    write(source, "---\nexport-scope: personal\n---\n\n# Unsafe name\n")
+
+    result = run_oaw(
+        "ingest",
+        "safe-export",
+        "--ingestion-root",
+        str(ingestion),
+        "--destination",
+        "Imports/Handoff",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "REJECT unsafe:name.md [ingested note path component 1 must not contain" in result.stdout
+    assert not (vault / "Imports/Handoff/unsafe:name.md").exists()
+
+
+def test_safe_export_ingest_quarantines_nonportable_source_under_portable_name(run_oaw, vault):
+    ingestion = vault / "handoff"
+    source = ingestion / "unsafe:name.md"
+    write(source, "---\nexport-scope: personal\n---\n\n# Unsafe name\n")
+
+    result = run_oaw(
+        "ingest",
+        "safe-export",
+        "--ingestion-root",
+        str(ingestion),
+        "--destination",
+        "Imports/Handoff",
+        "--write",
+    )
+
+    assert result.returncode == 0, result.stderr
+    quarantined = list((ingestion / ".rejected").glob("rejected-*.md"))
+    assert len(quarantined) == 1
+    assert "unsafe:name" not in quarantined[0].name
+    assert not source.exists()
+
+
+def test_safe_export_ingest_normalizes_destination_filename_to_nfc(run_oaw, vault):
+    ingestion = vault / "handoff"
+    decomposed = "Cafe\N{COMBINING ACUTE ACCENT}.md"
+    source = ingestion / decomposed
+    write(source, "---\nexport-scope: personal\n---\n\n# Café\n")
+
+    result = run_oaw(
+        "ingest",
+        "safe-export",
+        "--ingestion-root",
+        str(ingestion),
+        "--destination",
+        "Imports/Handoff",
+        "--write",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (vault / "Imports/Handoff/Café.md").is_file()
+    assert not source.exists()
 
 
 def test_safe_export_ingest_refuses_root_that_contains_vault(run_oaw, vault):

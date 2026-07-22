@@ -700,7 +700,8 @@ def task_create(
         str | None, typer.Option("--project", help="project alias or folder name")
     ] = None,
     title: Annotated[
-        str | None, typer.Option("--title", help="task title; defaults to capture title")
+        str | None,
+        typer.Option("--title", help="portable task title/filename; defaults to capture title"),
     ] = None,
     from_capture: Annotated[
         str | None, typer.Option("--from-capture", help="capture ID to promote")

@@ -8,21 +8,19 @@ import json
 import os
 import re
 import shutil
-import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import OawError
+from .filenames import slugify_portable_fragment
 from .sessions import SESSION_ENV, codex_rollout_paths
 
 RETRO_ATTACHMENTS = Path("Agents/Retrospectives/attachments")
 
 
 def slugify(value: str) -> str:
-    folded = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
-    slug = re.sub(r"[^a-z0-9]+", "-", folded.lower()).strip("-")
-    return slug or "session"
+    return slugify_portable_fragment(value, fallback="session")
 
 
 @dataclass(frozen=True)

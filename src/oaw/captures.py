@@ -6,11 +6,11 @@ import datetime as dt
 import json
 import re
 import sys
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import OawError
+from .filenames import slugify_portable_fragment
 from .frontmatter import (
     append_frontmatter_list_value,
     parse_frontmatter,
@@ -57,9 +57,7 @@ _TYPE_CAPTURE_RE = re.compile(r"(?m)^type:[ \t]*capture[ \t]*$")
 
 def slugify(value: str) -> str:
     """Slugify identically to ``lifecycle._slugify`` (shared task-ID semantics)."""
-    folded = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
-    slug = re.sub(r"[^a-z0-9]+", "-", folded.lower()).strip("-")
-    return slug or "session"
+    return slugify_portable_fragment(value, fallback="session")
 
 
 def _scalar(value: str) -> str:
