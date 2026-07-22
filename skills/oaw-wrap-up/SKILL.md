@@ -16,7 +16,7 @@ Always out of scope:
 
 - Session reflection — the `retro` skill's job. Wrap-up ends by *offering* retro and is
   complete even when the user declines.
-- Worktree cleanup — `oaw-task-execution` step 6's job; it requires integration proof
+- Worktree cleanup — `oaw-task-execution` step 7's job; it requires integration proof
   there is no time to establish during wrap-up.
 - Any git mutation except the single explicitly accepted WIP commit. Never push, fetch,
   stash, reset, or delete anything.
@@ -75,7 +75,7 @@ cd <repo> && codex "Resume obs:<task-id>. Read the task note resume block."
 ```
 
 Pick the command matching the provider expected to resume; include one, not both. This
-reuses the pause discipline of `oaw-task-execution` step 5 by reference; do not restate or
+reuses the pause discipline of `oaw-task-execution` step 6 by reference; do not restate or
 vary it.
 
 ### 4. WIP-commit offer

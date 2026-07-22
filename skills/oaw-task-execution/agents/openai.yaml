@@ -1,4 +1,4 @@
 interface:
   display_name: "OAW Task Execution"
-  short_description: "Execute OAW tasks with safe isolation"
-  default_prompt: "Use $oaw-task-execution to implement an OAW repository task with verified isolation and proportional delegation."
+  short_description: "Execute OAW tasks through merge-ready handoff"
+  default_prompt: "Use $oaw-task-execution to implement an OAW repository task with verified isolation, proportional delegation, commit-gated review, and an explicit integration-readiness handoff."

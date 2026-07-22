@@ -1,6 +1,6 @@
 ---
 name: oaw-task-execution
-description: Execute implementation and review work for OAW-managed repository tasks with pre-worktree baseline checks, GTR feature isolation, parent-owned integration, and discretionary bounded subagents. Use after the main oaw skill resolves an agent-executed task that is moving from design or lifecycle management into repository edits, verification, or review. Do not use for task triage, status-only updates, or vault-only work.
+description: Execute implementation and review work for OAW-managed repository tasks with pre-worktree baseline checks, GTR feature isolation, commit-gated review, explicit integration-readiness handoffs, parent-owned integration, and discretionary bounded subagents. Use after the main oaw skill resolves an agent-executed task that is moving from design or lifecycle management into repository edits, verification, or review. Do not use for task triage, status-only updates, or vault-only work.
 ---
 
 # OAW Task Execution
@@ -100,7 +100,60 @@ is the clearest path; delegate only a larger, independently bounded fix. A
 never-fix-manually rule does not apply. Verify retained fixes proportionately and discard
 unsupported suggestions.
 
-## 5. Pause before a scope pivot
+## 5. Classify integration readiness and hand off
+
+Keep these repository-task states distinct:
+
+- **Implementation-ready** means the requested scope is implemented and its reported
+  verification passes. Changes may still be uncommitted, but uncommitted work is not
+  ready for OAW task review and the task must remain active. This state does not claim
+  that a feature branch can be merged.
+- **Merge-ready** means implementation-ready work has an authorized, repository-conforming
+  feature commit; the feature worktree is clean; and the branch satisfies the complete
+  evidence and current-local-ref checks below for its named merge method.
+- **Integrated** means the task commits are incorporated into the intended local main
+  branch and the required post-integration verification passes there. A commit, push,
+  pull request, review handoff, or merge-ready branch is not integrated.
+
+Verification alone does not authorize a commit. A user request to commit, prepare for
+merge, or make work merge-ready authorizes the scoped feature commit needed for that
+request. It does not authorize merging, rebasing, pushing, cleaning up, or including
+unrelated changes. Without that authorization, leave verified work uncommitted and
+report it as implementation-ready, never merge-ready or ready for review. Keep the OAW
+task active.
+
+For an authorized merge-ready commit, establish all of this evidence:
+
+1. Revalidate the main and feature checkout repository identities, branches, revisions,
+   and complete statuses. Inspect the task diff before staging.
+2. Stage only exact task-owned paths. Review `git diff --cached --check`,
+   `git diff --cached --stat`, and the complete `git diff --cached`; confirm that the
+   index contains the coherent task change and nothing else.
+3. Confirm there is no unstaged or untracked residue. Derive a Conventional Commit
+   subject from repository instructions and recent history, then let every configured
+   commit hook run and pass. If a hook changes files or fails, reassess the diff and do
+   not claim merge readiness.
+4. After the commit, require a clean feature worktree and record the commit SHA, feature
+   branch, intended main branch, worktree-creation base revision, current main revision,
+   verification results, and intended merge method.
+5. Compare the current local main ref with the recorded base and run
+   `git merge-base --is-ancestor <intended-main> <feature-branch>` against current local
+   refs to record fast-forward feasibility, all without fetching. If main moved or the
+   ancestry check is non-zero, report that reconciliation and renewed verification are
+   required instead of calling the branch merge-ready. State that remote state was not
+   refreshed.
+
+Every user handoff and OAW task note that pauses, reviews, completes, or otherwise hands
+off repository work must name the highest state reached: implementation-ready,
+merge-ready, or integrated. If none was reached, say not yet implementation-ready.
+Include the branch and worktree, ownership and review decisions, checks actually run,
+accepted exceptions, remaining issues, and the merge-ready evidence above when
+applicable. Use the main `oaw` skill for `task review` at implementation-ready or
+merge-ready handoff only after all task-owned work is committed and the feature
+worktree is clean. Use `task complete` only after integration; lifecycle status does
+not substitute for the repository-readiness classification.
+
+## 6. Pause before a scope pivot
 
 When the current task uncovers separate work or a prolonged investigation, pause its OAW
 run before switching scope. Inventory both the main checkout and the actual feature
@@ -113,12 +166,7 @@ worktree and says whether the next session should resume implementation, review 
 changes, or consider cleanup. Do not clean up the worktree unless that is a separate,
 justified decision after confirming that no work would be lost.
 
-When implementation is ready, use the main `oaw` skill for `task review` or
-`task complete`, naming only checks actually run. Report the feature branch/worktree,
-implementation and review ownership decisions, verification, accepted exceptions, and
-remaining issues to the user. Keep external writes in the parent context.
-
-## 6. Clean up after integration
+## 7. Clean up after integration
 
 Run cleanup only after the task commits are integrated into the intended local main
 branch and post-integration verification succeeds. A workflow that stops at review or a

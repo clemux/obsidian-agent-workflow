@@ -42,7 +42,7 @@ The repository also contains seven agent skills:
 
 - `skills/obsidian-capture` preserves side observations in the vault capture workflow.
 - `skills/oaw` documents ID resolution and lifecycle operations.
-- `skills/oaw-task-execution` runs repository implementation and review with preflight checks, GTR isolation, and proportional delegation.
+- `skills/oaw-task-execution` runs repository implementation and commit-gated review with preflight checks, GTR isolation, explicit implementation-ready/merge-ready/integrated handoffs, and proportional delegation.
 - `skills/oaw-task-review` runs a resumable, one-task-at-a-time project status review.
 - `skills/oaw-research` handles provider-visible research handoff and finished-report intake.
 - `skills/oaw-retro-backend` persists the shared `retro` skill's tasks, captures, and draft notes in the vault.
