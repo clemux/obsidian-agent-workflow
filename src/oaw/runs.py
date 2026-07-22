@@ -576,10 +576,10 @@ def transition_run_text(
         raise OawError(f"invalid run state: {state}")
     text = run.path.read_text(encoding="utf-8")
     text = set_frontmatter_scalar(text, "run_state", state)
-    text = set_frontmatter_scalar(text, "last_event_at", yaml_quote(format_utc(now)))
+    text = set_frontmatter_scalar(text, "last_event_at", format_utc(now))
     if state in {"completed", "closed"}:
-        text = set_frontmatter_scalar(text, "ended_at", yaml_quote(format_utc(now)))
-        text = set_frontmatter_scalar(text, "ended_reason", yaml_quote(ended_reason or state))
+        text = set_frontmatter_scalar(text, "ended_at", format_utc(now))
+        text = set_frontmatter_scalar(text, "ended_reason", ended_reason or state)
     if state == "running":
         text = remove_frontmatter_keys(text, {"ended_at", "ended_reason"})
     if closer:

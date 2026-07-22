@@ -39,7 +39,7 @@ def test_set_frontmatter_scalar_replaces_or_inserts_without_changing_body():
     original = "---\nstatus: todo\nid: example\n---\nBody\n"
 
     replaced = set_frontmatter_scalar(original, "status", "active")
-    inserted = set_frontmatter_scalar(replaced, "priority", "2")
+    inserted = set_frontmatter_scalar(replaced, "priority", "2", raw=True)
 
     assert replaced == "---\nstatus: active\nid: example\n---\nBody\n"
     assert inserted == "---\nstatus: active\nid: example\npriority: 2\n---\nBody\n"
@@ -51,7 +51,7 @@ def test_set_frontmatter_scalar_preserves_trailing_inline_comment():
     assert set_frontmatter_scalar(original, "status", "active") == (
         '---\nstatus: active  # managed in UI\nreason: "value # not a comment"\n---\n'
     )
-    assert set_frontmatter_scalar(original, "reason", '"new # value"') == (
+    assert set_frontmatter_scalar(original, "reason", "new # value") == (
         '---\nstatus: todo  # managed in UI\nreason: "new # value"\n---\n'
     )
 
@@ -82,6 +82,23 @@ def test_append_frontmatter_list_value_creates_missing_block_list():
 
     assert append_frontmatter_list_value(original, "aliases", "éxample") == (
         '---\nid: example\naliases:\n  - "éxample"\n---\nBody\n'
+    )
+
+
+def test_append_frontmatter_list_value_rejects_blank_field_with_trailing_comment():
+    original = "---\nid: example\ndestinations: # route later\nstatus: inbox\n---\nBody\n"
+
+    with pytest.raises(OawError, match="must use a YAML block list before OAW can append safely"):
+        append_frontmatter_list_value(original, "destinations", "[[Task]]")
+
+
+def test_append_frontmatter_list_value_appends_in_place_below_bare_blank_field():
+    original = "---\nid: example\ndestinations:\nstatus: inbox\n---\nBody\n"
+
+    updated = append_frontmatter_list_value(original, "destinations", "[[Task]]")
+
+    assert updated == (
+        '---\nid: example\ndestinations:\n  - "[[Task]]"\nstatus: inbox\n---\nBody\n'
     )
 
 
@@ -126,6 +143,20 @@ def test_remove_frontmatter_list_value_removes_exact_items_and_preserves_comment
 def test_remove_frontmatter_list_value_rejects_missing_relationship():
     with pytest.raises(OawError, match="relationship is not present"):
         remove_frontmatter_list_value("---\nid: example\n---\n", "blocked-by", "missing")
+
+
+def test_remove_frontmatter_list_value_rejects_blank_field_with_trailing_comment():
+    original = "---\nid: example\ndestinations: # route later\nstatus: inbox\n---\nBody\n"
+
+    with pytest.raises(OawError, match="must use a YAML block list before OAW can remove safely"):
+        remove_frontmatter_list_value(original, "destinations", "x")
+
+
+def test_remove_frontmatter_list_value_rejects_bare_blank_field_as_missing():
+    original = "---\nid: example\ndestinations:\nstatus: inbox\n---\nBody\n"
+
+    with pytest.raises(OawError, match="destinations relationship is not present"):
+        remove_frontmatter_list_value(original, "destinations", "x")
 
 
 def test_remove_frontmatter_list_value_removes_empty_property_and_its_comments():

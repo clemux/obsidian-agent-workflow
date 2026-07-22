@@ -2,6 +2,7 @@ import datetime as dt
 
 import pytest
 
+from oaw.errors import OawError
 from oaw.lifecycle import append_session_entry
 
 EXISTING_SESSION = (
@@ -123,28 +124,27 @@ def test_append_session_entry_preserves_existing_section_content():
     )
 
 
-@pytest.mark.parametrize(
-    ("original", "expected"),
-    [
-        (
-            "# Note\n\nBody.\n\n```\n## Agent sessions\n",
-            (
-                "# Note\n\nBody.\n\n```\n## Agent sessions\n"
-                f"\n## Agent sessions\n\n{session_entry('New entry.')}\n"
-            ),
-        ),
-        (
-            f"# Note\n\n    ## Something\n\n## Agent sessions\n\n{EXISTING_SESSION}\n",
-            (
-                f"# Note\n\n    ## Something\n\n## Agent sessions\n\n{EXISTING_SESSION}\n"
-                f"{session_entry('New entry.')}\n"
-            ),
-        ),
-    ],
-    ids=["unclosed-fence", "indented-code"],
-)
-def test_append_session_entry_ignores_headings_inside_fences(original, expected):
+def test_append_session_entry_ignores_heading_inside_indented_code():
+    original = f"# Note\n\n    ## Something\n\n## Agent sessions\n\n{EXISTING_SESSION}\n"
+    expected = (
+        f"# Note\n\n    ## Something\n\n## Agent sessions\n\n{EXISTING_SESSION}\n"
+        f"{session_entry('New entry.')}\n"
+    )
+
     assert append(original) == expected
+
+
+def test_append_session_entry_refuses_when_document_ends_inside_unclosed_fence():
+    # The document layer refuses this append (category b): the heading-looking
+    # text is inside a never-closed fence, so the real section is absent and the
+    # fallback EOF insertion point sits inside that unclosed protected region --
+    # legacy silently appended at EOF anyway, ignoring the still-open fence.
+    original = "# Note\n\nBody.\n\n```\n## Agent sessions\n"
+
+    with pytest.raises(OawError, match="unclosed protected region") as excinfo:
+        append(original)
+    # The refusal must name which construct is unclosed, not just that one is.
+    assert "fence" in str(excinfo.value)
 
 
 @pytest.mark.parametrize("blank_lines_after_heading", [0, 1, 2])

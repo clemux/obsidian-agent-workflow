@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, TextIO
 
+from oaw.document import editing as _editing
+from oaw.document import parse_note_source
+
 from .errors import OawError
 
 
@@ -526,21 +529,14 @@ def locate_section(text: str, section: str) -> tuple[list[str], int, int] | None
 
 
 def append_markdown_block_to_section(text: str, section: str, block: str) -> str:
-    heading = normalize_heading(section)
-    block = block.strip()
-    if not block:
-        raise OawError("block content must not be empty")
-    located = locate_section(text, section)
-    if located is None:
-        prefix = "" if text.endswith("\n") else "\n"
-        return f"{text}{prefix}\n{heading}\n\n{block}\n"
-    lines, _target_idx, section_end = located
+    """Append ``block`` to the section under ``section``, creating it if absent.
 
-    before = lines[:section_end]
-    after = lines[section_end:]
-    while before and before[-1] == "":
-        before.pop()
-    new_lines = [*before, "", block, ""]
-    if after:
-        new_lines.extend(after)
-    return "\n".join(new_lines).rstrip() + "\n"
+    Thin wrapper over :func:`oaw.document.editing.append_block_to_section`: parses
+    ``text`` into a :class:`~oaw.document.model.NoteDocument`, delegates the
+    splice, and returns the resulting source. See that function's docstring for
+    the exact semantics (including CRLF preservation and protected-region
+    refusals), which now differ slightly from this helper's historical
+    whole-document ``"\\n".join(...)`` rejoin.
+    """
+    document = parse_note_source(text)
+    return _editing.append_block_to_section(document, section, block).source

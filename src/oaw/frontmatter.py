@@ -1,10 +1,13 @@
-"""Hand-rolled frontmatter parsing and conservative mutation helpers."""
+"""Hand-rolled frontmatter parsing and document-layer-backed mutation helpers."""
 
 from __future__ import annotations
 
 import json
 import re
 from pathlib import Path
+
+from oaw.document import FieldKind, FrontmatterField, NoteDocument, SourceSpan, parse_note_source
+from oaw.document import editing as _editing
 
 from .errors import OawError
 
@@ -114,27 +117,82 @@ def read_frontmatter_only(path: Path) -> tuple[str, dict[str, object]]:
     return frontmatter, parse_frontmatter(frontmatter)
 
 
-def set_frontmatter_scalar(text: str, key: str, value: str) -> str:
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+def _frontmatter_is_unclosed(document: NoteDocument) -> bool:
+    """Whether ``document`` has an opened-but-never-closed frontmatter block.
+
+    The document layer treats a missing closing ``---`` as "no frontmatter at
+    all" (the whole source becomes body), recording an
+    ``envelope.unclosed-frontmatter`` diagnostic instead. The legacy helpers
+    distinguish that case from a genuinely absent frontmatter block in their
+    error wording, so wrappers check this diagnostic to keep the same message.
+    """
+    return any(d.code == "envelope.unclosed-frontmatter" for d in document.envelope.diagnostics)
+
+
+def _is_blank_field(field: FrontmatterField | None) -> bool:
+    """Whether ``field`` is present but written with no value at all (``key:``).
+
+    The document layer classifies a bare ``key:`` as ``FieldKind.SCALAR`` with
+    ``scalar=None`` -- a real, distinct field, just an empty one. The legacy
+    hand-rolled parser instead read a value-less key as the *start of an empty
+    block list*, so callers routinely scaffold list fields this way (e.g. a
+    freshly created capture's blank ``destinations:``). The list mutators
+    below restore that equivalence explicitly since the document layer's list
+    ops require an existing field to already be ``STRING_LIST``.
+    """
+    return field is not None and field.kind is FieldKind.SCALAR and field.scalar is None
+
+
+def _blank_field_has_trailing_content(text: str, field: FrontmatterField) -> bool:
+    """Whether anything -- even just a comment -- follows the colon on ``field``'s key line.
+
+    The document layer's YAML composer strips comments while scanning, so a
+    bare ``key:`` line and ``key: # comment`` both compose to the same empty
+    scalar node (see :func:`_is_blank_field`). Legacy parity requires
+    refusing the comment-carrying case (rather than silently discarding the
+    comment while migrating the field), so this inspects the raw source text
+    following the colon instead of the composed node.
+    """
+    colon = text.index(":", field.key_span.end, field.entry_span.end)
+    remainder = text[colon + 1 : field.entry_span.end]
+    return remainder.strip() != ""
+
+
+def _append_first_list_item_in_place(
+    document: NoteDocument, field: FrontmatterField, key: str, value: str
+) -> str:
+    """Insert the first ``- "item"`` line directly below a bare ``key:`` line.
+
+    Legacy parity: a value-less ``key:`` line scaffolds an empty block list
+    (see :func:`_is_blank_field`), but the field must stay exactly where it
+    was written. The new item line is spliced in immediately after the
+    existing key line rather than deleting the field and recreating it at
+    the end of the frontmatter block, which would silently move it.
+    """
+    item_literal = json.dumps(value, ensure_ascii=False)
+    insertion_point = field.entry_span.end
+    inserted = f"  - {item_literal}{document.newline}"
+    edit = _editing.SourceEdit(span=SourceSpan(insertion_point, insertion_point), text=inserted)
+
+    def verify(new_document: NoteDocument) -> None:
+        new_field = new_document.frontmatter.field(key) if new_document.frontmatter else None
+        if (
+            new_field is None
+            or new_field.kind is not FieldKind.STRING_LIST
+            or value not in (new_field.items or ())
+        ):
+            raise OawError(f"failed to verify frontmatter list field {key!r} after the edit")
+
+    return _editing.apply_edits(document, [edit], verify=verify).source
+
+
+def set_frontmatter_scalar(text: str, key: str, value: str, *, raw: bool = False) -> str:
+    document = parse_note_source(text)
+    if document.frontmatter is None:
+        if _frontmatter_is_unclosed(document):
+            raise OawError("task note frontmatter is not closed")
         raise OawError("task note has no YAML frontmatter")
-    end = None
-    for idx in range(1, len(lines)):
-        if lines[idx].strip() == "---":
-            end = idx
-            break
-    if end is None:
-        raise OawError("task note frontmatter is not closed")
-    pattern = re.compile(rf"^{re.escape(key)}\s*:")
-    for idx in range(1, end):
-        if pattern.match(lines[idx]):
-            raw = lines[idx].rstrip("\r\n")
-            _, comment = split_inline_comment(raw)
-            newline = "\r\n" if lines[idx].endswith("\r\n") else "\n"
-            lines[idx] = f"{key}: {value}{comment}{newline}"
-            return "".join(lines)
-    lines.insert(end, f"{key}: {value}\n")
-    return "".join(lines)
+    return _editing.set_frontmatter_scalar(document, key, value, raw=raw).source
 
 
 def parse_yaml_string_list_item(raw: str, key: str) -> str:
@@ -170,84 +228,30 @@ def parse_yaml_string_list_item(raw: str, key: str) -> str:
 
 
 def append_frontmatter_list_value(text: str, key: str, value: str) -> str:
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    document = parse_note_source(text)
+    if document.frontmatter is None:
+        if _frontmatter_is_unclosed(document):
+            raise OawError("note frontmatter is not closed")
         raise OawError("note has no YAML frontmatter")
-    end = next((idx for idx in range(1, len(lines)) if lines[idx].strip() == "---"), None)
-    if end is None:
-        raise OawError("note frontmatter is not closed")
-
-    pattern = re.compile(rf"^{re.escape(key)}\s*:")
-    key_idx = next((idx for idx in range(1, end) if pattern.match(lines[idx])), None)
-    if key_idx is None:
-        lines[end:end] = [f"{key}:\n", f"  - {json.dumps(value, ensure_ascii=False)}\n"]
-        return "".join(lines)
-
-    _, inline_value = lines[key_idx].split(":", 1)
-    if inline_value.strip():
-        raise OawError(f"{key} must use a YAML block list before OAW can append safely")
-
-    block_end = key_idx + 1
-    while block_end < end and lines[block_end].startswith((" ", "\t")):
-        block_end += 1
-    existing: list[str] = []
-    for line in lines[key_idx + 1 : block_end]:
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        item = re.match(r"^\s+-\s+(.+?)\r?\n?$", line)
-        if not item:
-            raise OawError(f"{key} must be a flat YAML block list before OAW can append safely")
-        existing.append(parse_yaml_string_list_item(item.group(1), key))
-    if value in existing:
-        return text
-    lines.insert(block_end, f"  - {json.dumps(value, ensure_ascii=False)}\n")
-    return "".join(lines)
+    field = document.frontmatter.field(key)
+    if _is_blank_field(field):
+        assert field is not None
+        if _blank_field_has_trailing_content(text, field):
+            raise OawError(f"{key} must use a YAML block list before OAW can append safely")
+        return _append_first_list_item_in_place(document, field, key, value)
+    return _editing.append_frontmatter_list_item(document, key, value).source
 
 
 def remove_frontmatter_list_value(text: str, key: str, value: str) -> str:
     """Remove one exact string from a flat YAML block list without reformatting it."""
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    document = parse_note_source(text)
+    if document.frontmatter is None:
+        if _frontmatter_is_unclosed(document):
+            raise OawError("note frontmatter is not closed")
         raise OawError("note has no YAML frontmatter")
-    end = next((idx for idx in range(1, len(lines)) if lines[idx].strip() == "---"), None)
-    if end is None:
-        raise OawError("note frontmatter is not closed")
-
-    pattern = re.compile(rf"^{re.escape(key)}\s*:")
-    key_indices = [idx for idx in range(1, end) if pattern.match(lines[idx])]
-    if len(key_indices) > 1:
-        raise OawError(f"note frontmatter contains duplicate field: {key}")
-    if not key_indices:
-        raise OawError(f"{key} relationship is not present")
-    key_idx = key_indices[0]
-    _, inline_value = lines[key_idx].split(":", 1)
-    if inline_value.strip():
-        raise OawError(f"{key} must use a YAML block list before OAW can remove safely")
-
-    block_end = key_idx + 1
-    while block_end < end and (
-        lines[block_end].startswith((" ", "\t"))
-        or not lines[block_end].strip()
-        or lines[block_end].lstrip().startswith("#")
-    ):
-        block_end += 1
-    item_indices: list[int] = []
-    matches: list[int] = []
-    for idx in range(key_idx + 1, block_end):
-        line = lines[idx]
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        item = re.match(r"^\s+-\s+(.+?)\r?\n?$", line)
-        if not item:
-            raise OawError(f"{key} must be a flat YAML block list before OAW can remove safely")
-        item_indices.append(idx)
-        if parse_yaml_string_list_item(item.group(1), key) == value:
-            matches.append(idx)
-    if not matches:
-        raise OawError(f"{key} relationship is not present")
-    if len(matches) == len(item_indices):
-        del lines[key_idx:block_end]
-        return "".join(lines)
-    for idx in reversed(matches):
-        del lines[idx]
-    return "".join(lines)
+    field = document.frontmatter.field(key)
+    if _is_blank_field(field):
+        assert field is not None
+        if not _blank_field_has_trailing_content(text, field):
+            raise OawError(f"{key} relationship is not present")
+    return _editing.remove_frontmatter_list_item(document, key, value).source

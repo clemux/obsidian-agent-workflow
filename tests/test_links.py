@@ -474,3 +474,62 @@ def test_table_pipe_detection_inherits_cross_line_code_span_state(vault):
         replacements[0].link
         == "[[Projects/Obsidian Agent Workflow/Tasks/Resolver CLI\\|OAW-TSK-cli]]"
     )
+
+
+def _add_blocked_task(vault):
+    """A task whose only wikilink to the archived task lives in ``blocked-by``."""
+    path = vault / "Projects/Obsidian Agent Workflow/Tasks/Blocked task.md"
+    write(
+        path,
+        """---
+type: task
+project: obsidian-agent-workflow
+status: todo
+id: OAW-TSK-blocked
+aliases:
+  - OAW-TSK-blocked
+blocked-by:
+  - "[[Projects/Obsidian Agent Workflow/Tasks/Archived task|OAW-TSK-archived]]"
+---
+
+# Blocked task
+""",
+    )
+    return path
+
+
+def test_parse_wikilinks_finds_frontmatter_only_wikilinks(vault):
+    path = _add_blocked_task(vault)
+
+    found = links.parse_wikilinks(path.read_text(encoding="utf-8"))
+
+    assert any(
+        link.target == "Projects/Obsidian Agent Workflow/Tasks/Archived task" for link in found
+    )
+
+
+def test_note_has_link_to_is_true_for_frontmatter_only_relationship(vault):
+    _add_blocked_task(vault)
+    source = resolver.resolve_id("OAW-TSK-blocked", vault)
+    target = resolver.resolve_id("OAW-TSK-archived", vault)
+
+    assert links.note_has_link_to(source, target) is True
+
+
+def test_parse_wikilinks_finds_link_beside_crlf_multiline_inline_code():
+    text = "para `code\r\nmore` and [[Target]] here.\r\n"
+
+    found = links.parse_wikilinks(text)
+
+    assert [link.target for link in found] == ["Target"]
+
+
+def test_link_ensure_proposes_no_duplicate_for_frontmatter_only_relationship(vault, capsys):
+    path = _add_blocked_task(vault)
+    before = path.read_text(encoding="utf-8")
+
+    links.link_ensure(vault, "OAW-TSK-blocked", "OAW-TSK-archived", "Related", None, False)
+
+    assert path.read_text(encoding="utf-8") == before
+    out = capsys.readouterr().out
+    assert "Link: present" in out

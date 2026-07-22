@@ -598,7 +598,7 @@ def test_triage_review_after_scoping(tmp_path: Path):
     cleared = run(tmp_path, ["capture", "triage", "CAP-clear", "--status", "parked", "--no-reason"])
     assert cleared.exit_code == 0, cleared.stderr
     fm = parse_frontmatter(split_note((tmp_path / CANONICAL / "CAP-clear.md").read_text())[1])
-    assert fm["review_after"] == []
+    assert fm["review_after"] == ""
 
 
 def test_triage_triaged_requires_destination(tmp_path: Path):

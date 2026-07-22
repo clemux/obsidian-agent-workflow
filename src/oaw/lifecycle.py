@@ -19,6 +19,7 @@ from .frontmatter import (
     parse_frontmatter,
     set_frontmatter_scalar,
     split_inline_comment,
+    unquote_scalar,
 )
 from .links import materialize_obs_references
 from .notes import VaultTransaction, append_markdown_block_to_section, locate_section, split_note
@@ -508,7 +509,7 @@ def _validate_priority_update_frontmatter(lines: list[str], end: int) -> None:
         block_list_key = None
         _validate_frontmatter_value(key, value)
         if key == "priority":
-            priority_value = value
+            priority_value = unquote_scalar(value)
     if priority_value is not None and priority_value not in {"1", "2", "3"}:
         raise OawError(
             "task priority frontmatter must be a scalar 1, 2, or 3 before OAW can update it"
@@ -542,7 +543,7 @@ def update_task_priority(
     _validate_priority_update_frontmatter(lines, end)
 
     provider, session_ref = detect_session(allow_missing)
-    text = set_frontmatter_scalar(text, "priority", str(priority))
+    text = set_frontmatter_scalar(text, "priority", str(priority), raw=True)
     text = append_session_id_frontmatter(text, session_ref)
     text = append_session_entry(text, provider, session_ref, note, None)
     transaction = VaultTransaction()

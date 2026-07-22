@@ -6,13 +6,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from oaw.document import ObsidianSpanKind, find_wikilinks, parse_note_source
+
 from .errors import OawError
 from .frontmatter import parse_frontmatter
 from .notes import (
     VaultTransaction,
     append_markdown_block_to_section,
-    fence_closes,
-    fence_delimiter,
     read_note,
     split_note,
 )
@@ -885,31 +885,52 @@ def split_wikilink_inner(inner: str) -> tuple[str, str | None]:
 
 
 def parse_wikilinks(text: str) -> list[WikiLink]:
-    links: list[WikiLink] = []
-    active_fence: str | None = None
-    offset = 0
-    for line in text.splitlines(keepends=True):
-        delimiter = fence_delimiter(line)
-        if delimiter:
-            if active_fence is None:
-                active_fence = delimiter
-            elif fence_closes(active_fence, line):
-                active_fence = None
-            offset += len(line)
+    """Find wikilinks and embeds, skipping fenced/inline code, comments, and math.
+
+    Delegates span discovery and protected-region precedence to the document
+    layer (:func:`oaw.document.parse_note_source`); target/alias splitting
+    stays on :func:`split_wikilink_inner` so escaped-pipe-in-table semantics
+    (``[[target\\|alias]]``) are unchanged.
+
+    ``document.obsidian_spans`` only covers the body: a wikilink written
+    only inside a frontmatter relationship field (e.g. ``blocked-by:  -
+    "[[Target|TGT]]"``) is invisible there, so the frontmatter YAML text is
+    separately scanned with the pure :func:`oaw.document.find_wikilinks`
+    recognizer and its hits are merged in by source position. Protected-region
+    filtering only makes sense for body spans -- the frontmatter block as a
+    whole is itself a protected region, so applying it to frontmatter spans
+    would discard every one of them.
+    """
+    document = parse_note_source(text)
+    raw_hits = []
+    for span in document.obsidian_spans:
+        if span.kind not in (ObsidianSpanKind.WIKILINK, ObsidianSpanKind.EMBED):
             continue
-        if active_fence is None:
-            for match in re.finditer(r"!?\[\[([^\]]+)\]\]", line):
-                target, alias = split_wikilink_inner(match.group(1))
-                links.append(
-                    WikiLink(
-                        raw=match.group(0),
-                        target=target.strip().replace("\\|", "|"),
-                        alias=alias.strip().replace("\\|", "|") if alias is not None else None,
-                        start=offset + match.start(),
-                        line=line.rstrip("\r\n"),
-                    )
-                )
-        offset += len(line)
+        if document.is_protected(span.span):
+            continue
+        raw_hits.append(span)
+    if document.envelope.frontmatter_inner_span is not None:
+        raw_hits.extend(find_wikilinks(document.source, document.envelope.frontmatter_inner_span))
+    raw_hits.sort(key=lambda span: span.span.start)
+
+    links: list[WikiLink] = []
+    for span in raw_hits:
+        raw = document.slice(span.span)
+        inner = raw[3:-2] if span.kind is ObsidianSpanKind.EMBED else raw[2:-2]
+        target, alias = split_wikilink_inner(inner)
+        line_no = document.index.offset_to_line(span.span.start)
+        line_text = document.source[
+            document.index.line_start(line_no) : document.index.line_end(line_no)
+        ].rstrip("\r\n")
+        links.append(
+            WikiLink(
+                raw=raw,
+                target=target.strip().replace("\\|", "|"),
+                alias=alias.strip().replace("\\|", "|") if alias is not None else None,
+                start=span.span.start,
+                line=line_text,
+            )
+        )
     return links
 
 
